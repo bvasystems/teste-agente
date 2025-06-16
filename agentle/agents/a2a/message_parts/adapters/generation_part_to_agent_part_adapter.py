@@ -35,10 +35,13 @@ class GenerationPartToAgentPartAdapter(
     ) -> FilePart | TextPart:
         match _f:
             case GenerationFilePart():
+                data = _f.data
+                if isinstance(data, str):
+                    data = base64.b64decode(data)
                 return FilePart(
                     type=_f.type,
                     file=File(
-                        bytes=base64.b64encode(_f.data).decode("utf-8"),
+                        bytes=base64.b64encode(data).decode("utf-8"),
                     ),
                 )
             case GenerationTextPart():

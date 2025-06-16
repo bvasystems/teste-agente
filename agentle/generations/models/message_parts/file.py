@@ -23,7 +23,9 @@ class FilePart(BaseModel):
         description="Discriminator field to identify this as a file message part.",
     )
 
-    data: bytes = Field(description="The binary content of the file.")
+    data: bytes | str = Field(
+        description="The binary content of the file. or the Base64 encoded contents"
+    )
 
     mime_type: str = Field(
         description="The MIME type of the file, must be a valid MIME type from Python's mimetypes module."

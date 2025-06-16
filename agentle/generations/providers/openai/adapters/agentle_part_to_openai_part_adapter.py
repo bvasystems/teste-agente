@@ -42,17 +42,23 @@ class AgentlePartToOpenaiPartAdapter(
             case FilePart():
                 mime_type = part.mime_type
                 if mime_type.startswith("image/"):
+                    data = part.data
+                    if isinstance(data, str):
+                        data = base64.b64decode(data)
                     return ChatCompletionContentPartImageParam(
                         image_url={
-                            "url": base64.b64encode(part.data).decode(),
+                            "url": base64.b64encode(data).decode(),
                             "detail": "auto",
                         },
                         type="image_url",
                     )
                 elif mime_type.startswith("audio/"):
+                    data = part.data
+                    if isinstance(data, str):
+                        data = base64.b64decode(data)
                     return ChatCompletionContentPartInputAudioParam(
                         input_audio={
-                            "data": base64.b64encode(part.data).decode(),
+                            "data": base64.b64encode(data).decode(),
                             "format": "mp3",
                         },
                         type="input_audio",

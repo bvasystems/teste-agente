@@ -36,6 +36,7 @@ response = model.generate_content([google_part])
 
 from __future__ import annotations
 
+import base64
 from typing import TYPE_CHECKING
 
 from rsb.adapters.adapter import Adapter
@@ -146,8 +147,12 @@ class PartToGooglePartAdapter(
             case TextPart():
                 return GooglePart(text=str(_f))
             case FilePart():
+                data = _f.data
                 return GooglePart(
-                    inline_data=Blob(data=_f.data, mime_type=_f.mime_type)
+                    inline_data=Blob(
+                        data=base64.b64decode(data) if isinstance(data, str) else data,
+                        mime_type=_f.mime_type,
+                    )
                 )
             case ToolExecutionSuggestion():
                 return GooglePart(
