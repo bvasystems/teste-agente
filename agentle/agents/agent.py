@@ -2151,7 +2151,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     ),
                 ]
             )
-        
+
         # Sequence handling: Check for Message sequences or Part sequences
         # Explicitly check for Sequence for MyPy's benefit
         elif isinstance(input, Sequence) and not isinstance(input, (str, bytes)):  # pyright: ignore[reportUnnecessaryIsInstance]
@@ -2160,12 +2160,14 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 input[0], (AssistantMessage, DeveloperMessage, UserMessage)
             ):
                 # Sequence of Messages
-                # Ensure it's a list of Messages for type consistency
-                return Context(
-                    message_history=list(
-                        cast(Sequence[DeveloperMessage | UserMessage], input)
+                # Ensure it's a list of Messages for type consistency and prepend developer message
+                message_history = [developer_message] + list(
+                    cast(
+                        Sequence[AssistantMessage | DeveloperMessage | UserMessage],
+                        input,
                     )
                 )
+                return Context(message_history=message_history)
             elif input and isinstance(input[0], (TextPart, FilePart, Tool)):
                 # Sequence of Parts
                 # Ensure it's a list of the correct Part types
