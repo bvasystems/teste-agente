@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.4.10
+## v0.4.11
 
-- fix: sequence input conversion in agent.py
+- fix: not propagating developer message when the input is a Sequence of Messages
