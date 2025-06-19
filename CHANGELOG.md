@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.4.15
+## v0.4.16
 
-- fix: awaiting tool calls
+- fix: appending before the last message all the tools called by the agent
