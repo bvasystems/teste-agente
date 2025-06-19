@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.4.14
+## v0.4.15
 
-- feat: new `compile_if` method in the `Prompt` class.
+- fix: awaiting tool calls
