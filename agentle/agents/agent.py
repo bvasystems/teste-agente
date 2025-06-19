@@ -1810,7 +1810,9 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     )
                     generation = await generation_provider.create_generation_async(
                         model=self.resolved_model,
-                        messages=context.message_history,
+                        messages=MessageSequence(context.message_history)
+                        .append_before_last_message(called_tools_prompt)
+                        .elements,
                         response_schema=self.response_schema,
                         generation_config=self.agent_config.generation_config,
                     )
