@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.4.18
+## v0.4.19
 
-- feat: utility methods in Generation and GeneratedAssistantMessage classes.
+- feat: utility method to get tool_execution results
