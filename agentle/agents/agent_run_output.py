@@ -27,6 +27,7 @@ structured_data = result.parsed  # If using a response_schema
 ```
 """
 
+from collections.abc import Sequence
 import logging
 
 from rsb.models.base_model import BaseModel
@@ -34,6 +35,7 @@ from rsb.models.field import Field
 
 from agentle.agents.context import Context
 from agentle.generations.models.generation.generation import Generation
+from agentle.generations.tools.tool_execution_result import ToolExecutionResult
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +144,10 @@ class AgentRunOutput[T_StructuredOutput](BaseModel):
     """
     A token that can be used to resume suspended execution.
     """
+
+    @property
+    def tool_execution_results(self) -> Sequence[ToolExecutionResult]:
+        return self.context.tool_execution_results
 
     @property
     def text(self) -> str:

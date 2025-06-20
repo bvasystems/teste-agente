@@ -32,7 +32,7 @@ context.add_user_message("What's the weather in New York?")
 """
 
 import uuid
-from collections.abc import MutableMapping, MutableSequence
+from collections.abc import MutableMapping, MutableSequence, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -46,6 +46,7 @@ from agentle.generations.models.message_parts.text import TextPart
 from agentle.generations.models.messages.assistant_message import AssistantMessage
 from agentle.generations.models.messages.developer_message import DeveloperMessage
 from agentle.generations.models.messages.user_message import UserMessage
+from agentle.generations.tools.tool_execution_result import ToolExecutionResult
 
 
 class Context(BaseModel):
@@ -146,6 +147,14 @@ class Context(BaseModel):
 
     tags: MutableSequence[str] = Field(default_factory=list)
     """Optional tags for categorizing or filtering contexts."""
+
+    @property
+    def tool_execution_results(self) -> Sequence[ToolExecutionResult]:
+        results: MutableSequence[ToolExecutionResult] = []
+        for step in self.steps:
+            results.extend(step.tool_execution_results)
+
+        return results
 
     def add_user_message(self, text: str) -> None:
         """
