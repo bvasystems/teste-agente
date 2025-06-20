@@ -14,6 +14,7 @@ from agentle.generations.models.message_parts.text import TextPart
 from agentle.generations.models.message_parts.tool_execution_suggestion import (
     ToolExecutionSuggestion,
 )
+from agentle.generations.models.messages.assistant_message import AssistantMessage
 
 
 @valueobject
@@ -38,6 +39,9 @@ class GeneratedAssistantMessage[T](BaseModel):
     parsed: T = Field(
         description="The parsed representation of the message content of type T."
     )
+
+    def to_assistant_message(self) -> AssistantMessage:
+        return AssistantMessage(role="assistant", parts=self.parts)
 
     @property
     def tool_calls(self) -> Sequence[ToolExecutionSuggestion]:

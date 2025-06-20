@@ -157,6 +157,19 @@ class Generation[T](BaseModel):
         return self.choices[choice].message.parts
 
     @property
+    def message(self) -> GeneratedAssistantMessage[T]:
+        if len(self.choices) > 0:
+            raise ValueError(
+                "Cannot determine which choice to get message from."
+                + "please, use the `get_message()` method."
+            )
+
+        return self.get_message(choice=0)
+
+    def get_message(self, choice: int) -> GeneratedAssistantMessage[T]:
+        return self.choices[choice].message
+
+    @property
     def tool_calls(self) -> Sequence[ToolExecutionSuggestion]:
         """
         Get tool execution suggestions from the first choice.
