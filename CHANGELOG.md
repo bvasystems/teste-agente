@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.4.20
+## v0.4.21
 
-- fix: wrong boolean comparison in "message" property
+- feat: ToolExecutionResult in the UserMessage parts
