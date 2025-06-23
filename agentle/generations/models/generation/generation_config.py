@@ -125,6 +125,8 @@ class GenerationConfig(BaseModel):
         new_top_k: float | None = None,
         new_trace_params: TraceParams | None = None,
         new_timeout: float | None = None,
+        new_timeout_s: float | None = None,
+        new_timeout_m: float | None = None,
     ) -> GenerationConfig:
         """
         Creates a new GenerationConfig with optionally updated parameters.
@@ -160,6 +162,8 @@ class GenerationConfig(BaseModel):
             top_k=new_top_k if new_top_k is not None else self.top_k,
             trace_params=self.trace_params,
             timeout=new_timeout if new_timeout is not None else self.timeout,
+            timeout_s=new_timeout_s if new_timeout_s is not None else self.timeout_s,
+            timeout_m=new_timeout_m if new_timeout_m is not None else self.timeout_m,
         )
 
     class Config:
