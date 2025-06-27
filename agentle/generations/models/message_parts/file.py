@@ -4,7 +4,7 @@ Module for file-based message parts.
 
 import mimetypes
 from typing import Literal
-
+import base64 as b64
 from rsb.decorators.value_objects import valueobject
 from rsb.models.base_model import BaseModel
 from rsb.models.field import Field
@@ -40,6 +40,28 @@ class FilePart(BaseModel):
             str: A text representation containing the MIME type.
         """
         return f"<file>\n{self.mime_type}\n </file>"
+
+    @property
+    def base64(self) -> str:
+        """
+        Returns the base64 encoded representation of the file data.
+
+        Returns:
+            str: Base64 encoded string of the file data.
+        """
+        if isinstance(self.data, bytes):
+            # If data is bytes, encode it to base64
+            return b64.b64encode(self.data).decode("utf-8")
+
+        # If data is already a string, assume it's already base64 encoded
+        # Validate it's valid base64 by trying to decode and re-encode
+        try:
+            # Test if it's valid base64
+            b64.b64decode(self.data, validate=True)
+            return self.data
+        except Exception:
+            # If not valid base64, assume it's a regular string and encode it
+            return b64.b64encode(self.data.encode("utf-8")).decode("utf-8")
 
     def __str__(self) -> str:
         return self.text

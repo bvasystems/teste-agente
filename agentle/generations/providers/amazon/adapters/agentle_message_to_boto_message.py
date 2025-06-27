@@ -20,6 +20,11 @@ class AgentleMessageToBotoMessage(
     )
 
     @override
-    def adapt(
-        self, _f: UserMessage | AssistantMessage | DeveloperMessage
-    ) -> Message: ...
+    def adapt(self, _f: UserMessage | AssistantMessage | DeveloperMessage) -> Message:
+        if isinstance(_f, DeveloperMessage):
+            raise ValueError("Developer messages are not supported in this API.")
+
+        return Message(
+            role="user" if isinstance(_f, UserMessage) else "assistant",
+            content=[self.part_adapter.adapt(p) for p in _f.parts],
+        )

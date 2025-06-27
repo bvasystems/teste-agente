@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+import os
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 from typing import Any, Sequence, cast, override
 
 from mypy_boto3_bedrock_runtime.type_defs import ConverseResponseTypeDef
+from rsb.models.base_model import BaseModel
+from rsb.models.field import Field
+from rsb.models.private_attr import PrivateAttr
 
 from agentle.generations.collections.message_sequence import MessageSequence
 from agentle.generations.models.generation.generation import Generation
@@ -21,21 +25,33 @@ from agentle.generations.providers.amazon.adapters.agentle_message_to_boto_messa
 from agentle.generations.providers.amazon.adapters.agentle_tool_to_bedrock_tool_adapter import (
     AgentleToolToBedrockToolAdapter,
 )
+from agentle.generations.providers.amazon.adapters.converse_response_to_agentle_generation_adapter import (
+    ConverseResponseToAgentleGenerationAdapter,
+)
 from agentle.generations.providers.amazon.adapters.generation_config_to_inference_config import (
     GenerationConfigToInferenceConfigAdapter,
 )
+from agentle.generations.providers.amazon.adapters.response_schema_to_bedrock_tool_adapter import (
+    ResponseSchemaToBedrockToolAdapter,
+)
 from agentle.generations.providers.amazon.boto_config import BotoConfig
 from agentle.generations.providers.amazon.models.text_content import TextContent
+from agentle.generations.providers.amazon.models.tool_choice import ToolChoice
 from agentle.generations.providers.amazon.models.tool_config import ToolConfig
 from agentle.generations.providers.base.generation_provider import GenerationProvider
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
+from agentle.generations.tracing.decorators.observe import observe
+
+logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class BedrockGenerationProvider(GenerationProvider):
-    region_name: str = field(default="us-east-1")
-    config: BotoConfig | None = field(default=None)
+class BedrockGenerationProvider(BaseModel, GenerationProvider):
+    client: Any | None = PrivateAttr(default=None)
+    region_name: str = Field(default="us-east-1")
+    access_key_id: str | None = Field(default=None)
+    secret_access_key: str | None = Field(default=None)
+    config: BotoConfig | None = Field(default=None)
 
     @property
     @override
@@ -47,6 +63,7 @@ class BedrockGenerationProvider(GenerationProvider):
     def organization(self) -> str:
         return "aws"
 
+    @observe
     @override
     async def create_generation_async[T](
         self,
@@ -59,7 +76,14 @@ class BedrockGenerationProvider(GenerationProvider):
     ) -> Generation[T]:
         import boto3
 
-        client = boto3.client("bedrock-runtime", region_name=self.region_name)
+        if self.client is None:
+            self.client = boto3.client(
+                "bedrock-runtime",
+                aws_access_key_id=self.access_key_id or os.getenv("AWS_ACCESS_KEY_ID"),
+                aws_secret_access_key=self.secret_access_key
+                or os.getenv("AWS_SECRET_ACCESS_KEY"),
+                region_name=self.region_name,
+            )
 
         message_adapter = AgentleMessageToBotoMessage()
 
@@ -86,29 +110,46 @@ class BedrockGenerationProvider(GenerationProvider):
             else None
         )
 
+        # TODO: rs_tool = response_schema_to_bedrock_tool(response_schema)
+        rs_tool = (
+            ResponseSchemaToBedrockToolAdapter().adapt(response_schema)
+            if response_schema
+            else None
+        )
+
+        extra_tools = [rs_tool] if rs_tool else []
+
         _tool_config = (
             ToolConfig(
-                tools=[tool_adapter.adapt(tool) for tool in tools],
-                toolChoice={"auto": {}},
+                tools=[tool_adapter.adapt(tool) for tool in tools] + extra_tools,
+                toolChoice=ToolChoice(auto={})
+                if response_schema is None
+                else ToolChoice(tool=rs_tool),
             )
             if tools
             else None
         )
 
+        _system = [TextContent(text=system_message.text)] if system_message else None
+
+        _model = model or self.default_model
+
         response: ConverseResponseTypeDef = cast(
             ConverseResponseTypeDef,
-            client.converse(
-                modelId=model or self.default_model,
-                system=[TextContent(text=system_message.text)]
-                if system_message
-                else None,
+            self.client.converse(
+                modelId=_model,
+                system=_system,
                 messages=conversation,
                 inferenceConfig=_inference_config,
                 toolConfig=_tool_config,
             ),
         )
 
-        print(response)
+        logger.debug(f"Received Bedrock Response: {response}")
+
+        return ConverseResponseToAgentleGenerationAdapter(
+            response_schema=response_schema
+        ).adapt(response)
 
     @override
     def price_per_million_tokens_input(
