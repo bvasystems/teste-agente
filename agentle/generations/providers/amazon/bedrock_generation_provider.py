@@ -5,10 +5,7 @@ import os
 from collections.abc import Mapping
 from typing import Any, Sequence, cast, override
 
-from mypy_boto3_bedrock_runtime.type_defs import ConverseResponseTypeDef
-from rsb.models.base_model import BaseModel
-from rsb.models.field import Field
-from rsb.models.private_attr import PrivateAttr
+from rsb.coroutines.run_async import run_async
 
 from agentle.generations.collections.message_sequence import MessageSequence
 from agentle.generations.models.generation.generation import Generation
@@ -35,23 +32,49 @@ from agentle.generations.providers.amazon.adapters.response_schema_to_bedrock_to
     ResponseSchemaToBedrockToolAdapter,
 )
 from agentle.generations.providers.amazon.boto_config import BotoConfig
+from agentle.generations.providers.amazon.models.specific_tool import SpecificTool
 from agentle.generations.providers.amazon.models.text_content import TextContent
 from agentle.generations.providers.amazon.models.tool_choice import ToolChoice
 from agentle.generations.providers.amazon.models.tool_config import ToolConfig
 from agentle.generations.providers.base.generation_provider import GenerationProvider
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
+from agentle.generations.tracing.contracts.stateful_observability_client import (
+    StatefulObservabilityClient,
+)
 from agentle.generations.tracing.decorators.observe import observe
 
 logger = logging.getLogger(__name__)
 
 
-class BedrockGenerationProvider(BaseModel, GenerationProvider):
-    client: Any | None = PrivateAttr(default=None)
-    region_name: str = Field(default="us-east-1")
-    access_key_id: str | None = Field(default=None)
-    secret_access_key: str | None = Field(default=None)
-    config: BotoConfig | None = Field(default=None)
+class BedrockGenerationProvider(GenerationProvider):
+    _client: Any
+    region_name: str
+    access_key_id: str | None
+    secret_access_key: str | None
+    config: BotoConfig | None
+
+    def __init__(
+        self,
+        *,
+        tracing_client: StatefulObservabilityClient | None = None,
+        region_name: str = "us-east-1",
+        access_key_id: str | None = None,
+        secret_access_key: str | None = None,
+        config: BotoConfig | None = None,
+    ):
+        import boto3
+
+        super().__init__(tracing_client=tracing_client)
+
+        self._client = self._client = boto3.client(
+            "bedrock-runtime",
+            aws_access_key_id=access_key_id or os.getenv("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=secret_access_key
+            or os.getenv("AWS_SECRET_ACCESS_KEY"),
+            region_name=region_name,
+            config=config,
+        )
 
     @property
     @override
@@ -74,16 +97,7 @@ class BedrockGenerationProvider(BaseModel, GenerationProvider):
         generation_config: GenerationConfig | GenerationConfigDict | None = None,
         tools: Sequence[Tool[Any]] | None = None,
     ) -> Generation[T]:
-        import boto3
-
-        if self.client is None:
-            self.client = boto3.client(
-                "bedrock-runtime",
-                aws_access_key_id=self.access_key_id or os.getenv("AWS_ACCESS_KEY_ID"),
-                aws_secret_access_key=self.secret_access_key
-                or os.getenv("AWS_SECRET_ACCESS_KEY"),
-                region_name=self.region_name,
-            )
+        from mypy_boto3_bedrock_runtime.type_defs import ConverseResponseTypeDef
 
         message_adapter = AgentleMessageToBotoMessage()
 
@@ -104,10 +118,12 @@ class BedrockGenerationProvider(BaseModel, GenerationProvider):
         inference_config_adapter = GenerationConfigToInferenceConfigAdapter()
         tool_adapter = AgentleToolToBedrockToolAdapter()
 
-        _inference_config = (
-            inference_config_adapter.adapt(generation_config)
+        _inference_config = inference_config_adapter.adapt(
+            generation_config
             if isinstance(generation_config, GenerationConfig)
-            else None
+            else GenerationConfig()
+            if not isinstance(generation_config, dict)
+            else GenerationConfig(**generation_config)
         )
 
         # TODO: rs_tool = response_schema_to_bedrock_tool(response_schema)
@@ -119,31 +135,52 @@ class BedrockGenerationProvider(BaseModel, GenerationProvider):
 
         extra_tools = [rs_tool] if rs_tool else []
 
+        _tools = tools or []
+
         _tool_config = (
             ToolConfig(
-                tools=[tool_adapter.adapt(tool) for tool in tools] + extra_tools,
+                tools=[tool_adapter.adapt(tool) for tool in _tools] + extra_tools,
                 toolChoice=ToolChoice(auto={})
                 if response_schema is None
-                else ToolChoice(tool=rs_tool),
+                else ToolChoice(tool=SpecificTool(name=response_schema.__name__)),
             )
-            if tools
+            if _tools or extra_tools
             else None
         )
 
-        _system = [TextContent(text=system_message.text)] if system_message else None
+        _system = [
+            TextContent(
+                text=system_message.text
+                if system_message
+                else "You are a helpful assistant"
+            )
+        ]
 
         _model = model or self.default_model
 
-        response: ConverseResponseTypeDef = cast(
-            ConverseResponseTypeDef,
-            self.client.converse(
-                modelId=_model,
-                system=_system,
-                messages=conversation,
-                inferenceConfig=_inference_config,
-                toolConfig=_tool_config,
-            ),
-        )
+        if _tool_config:
+            response: ConverseResponseTypeDef = cast(
+                ConverseResponseTypeDef,
+                await run_async(
+                    self._client.converse,
+                    modelId=_model,
+                    system=_system,
+                    messages=conversation,
+                    inferenceConfig=_inference_config,
+                    toolConfig=_tool_config,
+                ),
+            )
+        else:
+            response: ConverseResponseTypeDef = cast(
+                ConverseResponseTypeDef,
+                await run_async(
+                    self._client.converse,
+                    modelId=_model,
+                    system=_system,
+                    messages=conversation,
+                    inferenceConfig=_inference_config,
+                ),
+            )
 
         logger.debug(f"Received Bedrock Response: {response}")
 
