@@ -5,7 +5,6 @@ import json
 from typing import TYPE_CHECKING, cast, override
 from uuid import uuid4
 
-from ollama._types import ChatResponse
 from rsb.adapters.adapter import Adapter
 
 from agentle.generations.models.generation.choice import Choice
