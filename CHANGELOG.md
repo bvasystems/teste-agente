@@ -1,5 +1,6 @@
 # Changelog
 
-## v0.6.3
+## v0.6.4
 
-- refactor: renamed `ParsedDocument` to `ParsedFile`.
+- feat: new called tools tracking mechanism
+- feat: caching agent tools with custom method
