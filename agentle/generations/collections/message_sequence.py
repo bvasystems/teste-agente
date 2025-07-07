@@ -47,6 +47,7 @@ from collections.abc import Callable, Sequence
 from rsb.collections.readonly_collection import ReadonlyCollection
 
 from agentle.generations.models.message_parts.text import TextPart
+from agentle.generations.models.messages.assistant_message import AssistantMessage
 from agentle.generations.models.messages.developer_message import DeveloperMessage
 from agentle.generations.models.messages.message import Message
 from agentle.generations.models.messages.user_message import UserMessage
@@ -111,7 +112,9 @@ class MessageSequence(ReadonlyCollection[Message]):
         """
         return MessageSequence(elements=list(self.elements) + list(messages))
 
-    def append_before_last_message(self, message: Message | str) -> MessageSequence:
+    def append_before_last_message(
+        self, message: Message | str | Sequence[Message]
+    ) -> MessageSequence:
         """
         Appends a message before the last message in the sequence.
 
@@ -142,8 +145,18 @@ class MessageSequence(ReadonlyCollection[Message]):
 
             message = UserMessage(parts=[TextPart(text=message)])
 
+        message = list(
+            (
+                [message]
+                if isinstance(
+                    message, (UserMessage, AssistantMessage, DeveloperMessage)
+                )
+                else message
+            )
+        )
+
         return MessageSequence(
-            elements=list(self.elements[:-1]) + [message] + list(self.elements[-1:])
+            elements=list(self.elements[:-1]) + message + list(self.elements[-1:])
         )
 
     def filter(self, predicate: Callable[[Message], bool]) -> MessageSequence:
