@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.6.10
+## v0.6.11
 
-- feat: allowing sum of list of GenerationProviders as well.
+- fix: invalid checking of GenerationProviders when FailoverGenerationProvider is passed
