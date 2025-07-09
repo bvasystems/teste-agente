@@ -633,55 +633,6 @@ class GoogleSpeechToTextProvider(SpeechToTextProvider):
             location=location,
         )
 
-    async def _get_audio_duration(self, audio_file: str | Path) -> float:
-        """Get the duration of an audio file using ffprobe."""
-        try:
-            # Use ffprobe to get audio duration
-            process = await asyncio.create_subprocess_exec(
-                "ffprobe",
-                "-v",
-                "quiet",
-                "-print_format",
-                "json",
-                "-show_format",
-                str(audio_file),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            stdout, _ = await process.communicate()
-
-            if process.returncode != 0:
-                # Fallback: try to estimate from file size (very rough estimate)
-                file_path = Path(audio_file)
-                if file_path.exists():
-                    # Very rough estimate: assume 128kbps audio
-                    file_size_bytes = file_path.stat().st_size
-                    estimated_duration = file_size_bytes / (
-                        128 * 1024 / 8
-                    )  # 128kbps in bytes per second
-                    return max(1.0, estimated_duration)  # At least 1 second
-                return 1.0  # Default fallback
-
-            # Parse ffprobe output
-            probe_data = json.loads(stdout.decode())
-            duration = float(probe_data["format"]["duration"])
-            return duration
-
-        except Exception:
-            # Fallback: estimate from file size
-            try:
-                file_path = Path(audio_file)
-                if file_path.exists():
-                    file_size_bytes = file_path.stat().st_size
-                    estimated_duration = file_size_bytes / (
-                        128 * 1024 / 8
-                    )  # 128kbps estimate
-                    return max(1.0, estimated_duration)
-            except Exception:
-                pass
-            return 1.0  # Final fallback
-
     async def transcribe_async(
         self, audio_file: str | Path, config: TranscriptionConfig | None = None
     ) -> AudioTranscription:
@@ -737,6 +688,55 @@ class GoogleSpeechToTextProvider(SpeechToTextProvider):
             cost=cost,
             duration=duration,
         )
+
+    async def _get_audio_duration(self, audio_file: str | Path) -> float:
+        """Get the duration of an audio file using ffprobe."""
+        try:
+            # Use ffprobe to get audio duration
+            process = await asyncio.create_subprocess_exec(
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
+                "-show_format",
+                str(audio_file),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            stdout, _ = await process.communicate()
+
+            if process.returncode != 0:
+                # Fallback: try to estimate from file size (very rough estimate)
+                file_path = Path(audio_file)
+                if file_path.exists():
+                    # Very rough estimate: assume 128kbps audio
+                    file_size_bytes = file_path.stat().st_size
+                    estimated_duration = file_size_bytes / (
+                        128 * 1024 / 8
+                    )  # 128kbps in bytes per second
+                    return max(1.0, estimated_duration)  # At least 1 second
+                return 1.0  # Default fallback
+
+            # Parse ffprobe output
+            probe_data = json.loads(stdout.decode())
+            duration = float(probe_data["format"]["duration"])
+            return duration
+
+        except Exception:
+            # Fallback: estimate from file size
+            try:
+                file_path = Path(audio_file)
+                if file_path.exists():
+                    file_size_bytes = file_path.stat().st_size
+                    estimated_duration = file_size_bytes / (
+                        128 * 1024 / 8
+                    )  # 128kbps estimate
+                    return max(1.0, estimated_duration)
+            except Exception:
+                pass
+            return 1.0  # Final fallback
 
     def _parse_timestamp(self, timestamp: str) -> float:
         """Convert SRT timestamp (HH:MM:SS,mmm) to seconds."""
