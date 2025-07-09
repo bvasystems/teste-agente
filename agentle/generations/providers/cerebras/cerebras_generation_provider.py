@@ -239,33 +239,39 @@ class CerebrasGenerationProvider(GenerationProvider):
 
         tool_adapter = AgentleToolToCerebrasToolAdapter()
 
-        async with asyncio.timeout(_generation_config.timeout_in_seconds):
-            cerebras_completion = cast(
-                ChatCompletionResponse,
-                await client.chat.completions.create(
-                    messages=[
-                        self.message_adapter.adapt(message) for message in messages
-                    ],
-                    model=model or self.default_model,
-                    tools=[tool_adapter.adapt(tool) for tool in tools]
-                    if tools
-                    else None,
-                    response_format={
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": "json_schema",
-                            "strict": True,
-                            "schema": JsonSchemaBuilder(
-                                cast(type[Any], response_schema),
-                                use_defs_instead_of_definitions=True,
-                            ).build(dereference=True),
-                        },
-                    }
-                    if bool(response_schema)
-                    else None,
-                    stream=False,
-                ),
+        try:
+            async with asyncio.timeout(_generation_config.timeout_in_seconds):
+                cerebras_completion = cast(
+                    ChatCompletionResponse,
+                    await client.chat.completions.create(
+                        messages=[
+                            self.message_adapter.adapt(message) for message in messages
+                        ],
+                        model=model or self.default_model,
+                        tools=[tool_adapter.adapt(tool) for tool in tools]
+                        if tools
+                        else None,
+                        response_format={
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": "json_schema",
+                                "strict": True,
+                                "schema": JsonSchemaBuilder(
+                                    cast(type[Any], response_schema),
+                                    use_defs_instead_of_definitions=True,
+                                ).build(dereference=True),
+                            },
+                        }
+                        if bool(response_schema)
+                        else None,
+                        stream=False,
+                    ),
+                )
+        except asyncio.TimeoutError as e:
+            e.add_note(
+                f"Content generation timed out after {_generation_config.timeout_in_seconds}s"
             )
+            raise
 
         return CerebrasCompletionToGenerationAdapter[T](
             response_schema=response_schema,

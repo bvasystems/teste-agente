@@ -120,18 +120,24 @@ class OpenaiGenerationProvider(GenerationProvider):
         input_message_adapter = AgentleMessageToOpenaiMessageAdapter()
         openai_tool_adapter = AgentleToolToOpenaiToolAdapter()
 
-        async with asyncio.timeout(_generation_config.timeout_in_seconds):
-            chat_completion: ChatCompletion = (
-                await self._client.chat.completions.create(
-                    model=self._resolve_model(model),
-                    messages=[
-                        input_message_adapter.adapt(message) for message in messages
-                    ],
-                    tools=[openai_tool_adapter.adapt(tool) for tool in tools]
-                    if tools
-                    else OPENAI_NOT_GIVEN,
+        try:
+            async with asyncio.timeout(_generation_config.timeout_in_seconds):
+                chat_completion: ChatCompletion = (
+                    await self._client.chat.completions.create(
+                        model=self._resolve_model(model),
+                        messages=[
+                            input_message_adapter.adapt(message) for message in messages
+                        ],
+                        tools=[openai_tool_adapter.adapt(tool) for tool in tools]
+                        if tools
+                        else OPENAI_NOT_GIVEN,
+                    )
                 )
+        except asyncio.TimeoutError as e:
+            e.add_note(
+                f"Content generation timed out after {_generation_config.timeout_in_seconds}s"
             )
+            raise
 
         output_adapter = ChatCompletionToGenerationAdapter[T](
             response_schema=response_schema

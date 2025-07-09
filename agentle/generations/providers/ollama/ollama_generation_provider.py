@@ -82,15 +82,21 @@ class OllamaGenerationProvider(GenerationProvider):
 
         _tools = [tool_adapter.adapt(tool) for tool in tools] if tools else None
 
-        async with asyncio.timeout(_generation_config.timeout_in_seconds):
-            response = await self._client.chat(
-                model=_model,
-                messages=_messages,
-                tools=_tools,
-                format=bm.model_json_schema() if bm else None,
-                options=self.options,
-                think=self.think,
+        try:
+            async with asyncio.timeout(_generation_config.timeout_in_seconds):
+                response = await self._client.chat(
+                    model=_model,
+                    messages=_messages,
+                    tools=_tools,
+                    format=bm.model_json_schema() if bm else None,
+                    options=self.options,
+                    think=self.think,
+                )
+        except asyncio.TimeoutError as e:
+            e.add_note(
+                f"Content generation timed out after {_generation_config.timeout_in_seconds}s"
             )
+            raise
 
         return ChatResponseToGenerationAdapter(
             model=_model, response_schema=response_schema

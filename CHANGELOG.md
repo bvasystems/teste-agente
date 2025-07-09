@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.6.6
+## v0.6.7
 
-- feat: adding observability to google's speech-to-text provider
+- feat: adding timeout notes to generation providers when `TimeoutError`'s are raised.
