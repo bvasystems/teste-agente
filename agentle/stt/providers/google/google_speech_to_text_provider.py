@@ -10,8 +10,6 @@ from textwrap import dedent
 
 from rsb.functions.ext2mime import ext2mime
 
-from agentle.generations.models.generation.generation_config import GenerationConfig
-from agentle.generations.models.generation.trace_params import TraceParams
 from agentle.generations.models.message_parts.file import FilePart
 from agentle.generations.models.message_parts.text import TextPart
 from agentle.generations.providers.failover.failover_generation_provider import (
@@ -761,64 +759,155 @@ class GoogleSpeechToTextProvider(SpeechToTextProvider):
                 pass
             return 1.0  # Final fallback
 
-    async def transcribe_async(
-        self, audio_file: str | Path, config: TranscriptionConfig | None = None
-    ) -> AudioTranscription:
-        """Gemini has the amazing 'ability' to transcribe audio files."""
-        generation_provider = GoogleGenerationProvider(
-            use_vertex_ai=self.use_vertex_ai,
-            api_key=self.api_key,
-            project=self.project,
-            location=self.location,
+    def _parse_timestamp(self, timestamp: str) -> float:
+        """Convert SRT timestamp (HH:MM:SS,mmm) to seconds."""
+        # Handle both comma and period as decimal separator
+        timestamp = timestamp.replace(",", ".")
+
+        parts = timestamp.strip().split(":")
+        if len(parts) != 3:
+            raise ValueError(f"Invalid timestamp format: {timestamp}")
+
+        try:
+            hours = float(parts[0])
+            minutes = float(parts[1])
+            seconds = float(parts[2])
+
+            return hours * 3600 + minutes * 60 + seconds
+        except ValueError:
+            raise ValueError(f"Invalid timestamp format: {timestamp}")
+
+    def _fix_srt_format(self, srt_text: str) -> str:
+        """Fix common SRT format issues."""
+        lines = srt_text.strip().split("\n")
+        fixed_lines: Sequence[str] = []
+
+        i = 0
+        segment_number = 1
+
+        while i < len(lines):
+            # Skip empty lines
+            if not lines[i].strip():
+                i += 1
+                continue
+
+            # Try to find a segment number (might be missing or incorrect)
+            if lines[i].strip().isdigit():
+                # Replace with correct segment number
+                fixed_lines.append(str(segment_number))
+                i += 1
+            else:
+                # Add missing segment number
+                fixed_lines.append(str(segment_number))
+
+            # Look for timestamp line
+            if i < len(lines) and "-->" in lines[i]:
+                fixed_lines.append(lines[i].strip())
+                i += 1
+            else:
+                # Missing timestamp, skip this segment
+                while i < len(lines) and lines[i].strip() and "-->" not in lines[i]:
+                    i += 1
+                continue
+
+            # Collect text lines until empty line or next segment
+            text_lines: MutableSequence[str] = []
+            while (
+                i < len(lines) and lines[i].strip() and not lines[i].strip().isdigit()
+            ):
+                if "-->" not in lines[i]:  # Make sure it's not a timestamp
+                    text_lines.append(lines[i].strip())
+                i += 1
+
+            if text_lines:
+                fixed_lines.extend(text_lines)
+                fixed_lines.append("")  # Add empty line between segments
+                segment_number += 1
+
+        return "\n".join(fixed_lines)
+
+    def _parse_srt_to_segments(self, raw_srt: str) -> Sequence[SentenceSegment]:
+        """Parse SRT string into SentenceSegment objects."""
+        segments = []
+
+        srt_text = self._fix_srt_format(raw_srt)
+
+        srt_pattern = re.compile(
+            r"(\d+)\s*\n\s*"  # Segment number
+            + r"(\d{1,2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,\.]\d{3})\s*\n"  # Timestamps
+            + r"((?:.*\n)*?)(?=\n\d+\s*\n|\n*$)",  # Text (lazy match until next segment or end)
+            re.MULTILINE,
         )
 
-        _config = config or TranscriptionConfig()
-        language = _config.language or "en"
+        matches = srt_pattern.findall(srt_text)
 
-        path_audio_file = Path(audio_file)
+        for match in matches:
+            segment_id = int(match[0]) - 1  # Convert to 0-based index
+            start_time = self._parse_timestamp(match[1])
+            end_time = self._parse_timestamp(match[2])
+            text = match[3].strip()
 
-        transcription = await generation_provider.generate_by_prompt_async(
-            model=self.model,
-            prompt=[
-                TextPart(
-                    text=f"""
-            You are a helpful assistant that transcribes audio files.
-            The audio file is {audio_file}.
-            The language of the audio file is {language}.
-            """
-                ),
-                FilePart(
-                    data=path_audio_file.read_bytes(),
-                    mime_type=ext2mime(path_audio_file.suffix),
-                ),
-            ],
-            response_schema=_TranscriptionOutput,
-        )
+            # Skip empty segments
+            if not text:
+                continue
 
-        prompt_tokens_used = transcription.usage.prompt_tokens
-        completion_tokens_used = transcription.usage.completion_tokens
+            segment = SentenceSegment(
+                id=segment_id,
+                sentence=text,
+                start=start_time,
+                end=end_time,
+                no_speech_prob=-1.0,
+            )
+            segments.append(segment)
 
-        ppmi = generation_provider.price_per_million_tokens_input(
-            self.model, estimate_tokens=prompt_tokens_used
-        )
+        # If no segments were parsed, try a more lenient approach
+        if not segments:
+            lines = srt_text.strip().split("\n")
+            i = 0
+            segment_id = 0
 
-        ppco = generation_provider.price_per_million_tokens_output(
-            self.model, estimate_tokens=completion_tokens_used
-        )
+            while i < len(lines):
+                # Skip empty lines
+                if not lines[i].strip():
+                    i += 1
+                    continue
 
-        cost: float = (
-            prompt_tokens_used * ppmi + completion_tokens_used * ppco
-        ) / 1_000_000
+                # Skip segment numbers
+                if lines[i].strip().isdigit():
+                    i += 1
 
-        transcription_output = transcription.parsed
+                # Look for timestamp line
+                if i < len(lines) and "-->" in lines[i]:
+                    try:
+                        parts = lines[i].split("-->")
+                        start_time = self._parse_timestamp(parts[0])
+                        end_time = self._parse_timestamp(parts[1])
+                        i += 1
 
-        # Get audio duration
-        duration = await self._get_audio_duration(audio_file)
+                        # Collect text
+                        text_lines: MutableSequence[str] = []
+                        while (
+                            i < len(lines)
+                            and lines[i].strip()
+                            and not lines[i].strip().isdigit()
+                            and "-->" not in lines[i]
+                        ):
+                            text_lines.append(lines[i].strip())
+                            i += 1
 
-        return AudioTranscription(
-            text=transcription_output.text,
-            segments=transcription_output.segments,
-            subtitles=transcription_output.subtitles,
-            cost=cost,
-            duration=duration,
-        )
+                        if text_lines:
+                            segment = SentenceSegment(
+                                id=segment_id,
+                                sentence=" ".join(text_lines),
+                                start=start_time,
+                                end=end_time,
+                                no_speech_prob=-1.0,
+                            )
+                            segments.append(segment)
+                            segment_id += 1
+                    except Exception:
+                        i += 1
+                else:
+                    i += 1
+
+        return segments
