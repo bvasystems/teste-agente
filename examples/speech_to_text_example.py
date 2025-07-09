@@ -15,6 +15,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from agentle.generations.providers.google.google_generation_provider import (
+    GoogleGenerationProvider,
+)
 from agentle.stt.models.transcription_config import TranscriptionConfig
 from agentle.stt.providers.google.google_speech_to_text_provider import (
     GoogleSpeechToTextProvider,
@@ -27,7 +30,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 
 # Initialize the provider
-provider = GoogleSpeechToTextProvider()
+provider = GoogleSpeechToTextProvider(generation_provider=GoogleGenerationProvider())
 
 # Path to the sample audio file
 audio_file = Path(__file__).parent / "harvard.wav"

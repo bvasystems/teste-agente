@@ -145,8 +145,7 @@ class GooglePartToPartAdapter(Adapter["GooglePart", Part]):
                 id=_f.function_call.id or str(uuid.uuid4()),
                 tool_name=_f.function_call.name
                 or self._raise_invalid_function_call(field="name"),
-                args=_f.function_call.args
-                or self._raise_invalid_function_call(field="args"),
+                args=_f.function_call.args or {},
             )
 
         raise ValueError(

@@ -419,13 +419,16 @@ class Tool[T_Output = Any](BaseModel):
     def from_callable(
         cls,
         _callable: Callable[..., T_Output] | Callable[..., Awaitable[T_Output]],
+        /,
+        *,
+        name: str | None = None,
+        description: str | None = None,
         before_call: Callable[..., T_Output]
         | Callable[..., Awaitable[T_Output]]
         | None = None,
         after_call: Callable[..., T_Output]
         | Callable[..., Awaitable[T_Output]]
         | None = None,
-        /,
     ) -> Tool[T_Output]:
         """
         Creates a Tool instance from a callable function.
@@ -458,11 +461,13 @@ class Tool[T_Output = Any](BaseModel):
             # }
             ```
         """
-        name = getattr(_callable, "__name__", "anonymous_function")
+        _name: str = name or getattr(_callable, "__name__", "anonymous_function")
         _logger.debug(f"Creating Tool from callable function: {name}")
 
         try:
-            description = _callable.__doc__ or "No description available"
+            _description = (
+                description or _callable.__doc__ or "No description available"
+            )
 
             # Extrair informações dos parâmetros da função
             parameters: dict[str, object] = {}
@@ -510,8 +515,8 @@ class Tool[T_Output = Any](BaseModel):
                 parameters[param_name] = param_info
 
             instance = cls(
-                name=name,
-                description=description,
+                name=_name,
+                description=_description,
                 parameters=parameters,
             )
 

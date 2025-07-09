@@ -10,6 +10,6 @@ def tool[R](
 ) -> Tool[R]:
     return Tool.from_callable(
         func,
-        before_call,
-        after_call,
+        before_call=before_call,
+        after_call=after_call,
     )

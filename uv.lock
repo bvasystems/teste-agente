@@ -4,7 +4,7 @@ requires-python = ">=3.13"
 
 [[package]]
 name = "agentle"
-version = "0.6.3"
+version = "0.6.5"
 source = { editable = "." }
 dependencies = [
     { name = "async-lru" },
@@ -34,6 +34,7 @@ dev = [
     { name = "couchbase" },
     { name = "duckduckgo-search" },
     { name = "furo" },
+    { name = "gemini-srt-translator" },
     { name = "google-genai" },
     { name = "groq" },
     { name = "influxdb-client" },
@@ -151,6 +152,7 @@ dev = [
     { name = "couchbase", specifier = ">=4.3.5" },
     { name = "duckduckgo-search", specifier = ">=8.0.4" },
     { name = "furo", specifier = ">=2024.8.6" },
+    { name = "gemini-srt-translator", specifier = ">=1.8.5" },
     { name = "google-genai", specifier = ">=1.11.0" },
     { name = "groq", specifier = ">=0.22.0" },
     { name = "influxdb-client", specifier = ">=1.48.0" },
@@ -1216,6 +1218,20 @@ wheels = [
 ]
 
 [[package]]
+name = "gemini-srt-translator"
+version = "1.8.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-genai" },
+    { name = "json-repair" },
+    { name = "srt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a7/22/27d1efdc33ef7413373858753725c4502513c936d9699af0caaf466a1140/gemini_srt_translator-1.8.5.tar.gz", hash = "sha256:f54e2fd0e652c60b060e54759aa2cf3351721653dfc890e0de8b0562aad21c65", size = 17512 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fe/36/9f865c9d061c7edd385f1fea9c7a268d9cb17bfb7c6098b0b3d0af1f1d39/gemini_srt_translator-1.8.5-py3-none-any.whl", hash = "sha256:7d686f0c74455981d6d68b061b117749cd9dcf599098283ca2aea134b43554d3", size = 16436 },
+]
+
+[[package]]
 name = "geomet"
 version = "0.2.1.post1"
 source = { registry = "https://pypi.org/simple" }
@@ -1618,6 +1634,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/00/2a/e867e8531cf3e36b41201936b7fa7ba7b5702dbef42922193f05c8976cd6/jmespath-1.0.1.tar.gz", hash = "sha256:90261b206d6defd58fdd5e85f478bf633a2901798906be2ad389150c5c60edbe", size = 25843 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/31/b4/b9b800c45527aadd64d5b442f9b932b00648617eb5d63d2c7a6587b7cafc/jmespath-1.0.1-py3-none-any.whl", hash = "sha256:02e2e4cc71b5bcab88332eebf907519190dd9e6e82107fa7f83b1003a6252980", size = 20256 },
+]
+
+[[package]]
+name = "json-repair"
+version = "0.44.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a8/6b/ed6e92efc5acfbc9c35ccae1676b70e4adb1552421e64f838c2a3f097d9a/json_repair-0.44.1.tar.gz", hash = "sha256:1130eb9733b868dac1340b43cb2effebb519ae6d52dd2d0728c6cca517f1e0b4", size = 32886 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/82/b4/3cbd27a3240b2962c3b87bbb1c20eb6c56e5b26cde61f141f86ca98e2f68/json_repair-0.44.1-py3-none-any.whl", hash = "sha256:51d82532c3b8263782a301eb7904c75dce5fee8c0d1aba490287fc0ab779ac50", size = 22478 },
 ]
 
 [[package]]
@@ -3372,6 +3397,12 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/1c/cb/f38c61f7f2fd4d10494c1c135ff6a6ddb63508d0b47bccccd93670637309/sqlalchemy-2.0.40-cp313-cp313-win_amd64.whl", hash = "sha256:641ee2e0834812d657862f3a7de95e0048bdcb6c55496f39c6fa3d435f6ac6ad", size = 2104564 },
     { url = "https://files.pythonhosted.org/packages/d1/7c/5fc8e802e7506fe8b55a03a2e1dab156eae205c91bee46305755e086d2e2/sqlalchemy-2.0.40-py3-none-any.whl", hash = "sha256:32587e2e1e359276957e6fe5dad089758bc042a971a8a09ae8ecf7a8fe23d07a", size = 1903894 },
 ]
+
+[[package]]
+name = "srt"
+version = "3.5.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/66/b7/4a1bc231e0681ebf339337b0cd05b91dc6a0d701fa852bb812e244b7a030/srt-3.5.3.tar.gz", hash = "sha256:4884315043a4f0740fd1f878ed6caa376ac06d70e135f306a6dc44632eed0cc0", size = 28296 }
 
 [[package]]
 name = "sse-starlette"

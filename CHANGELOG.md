@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.6.7
+## v0.6.9
 
-- feat: adding timeout notes to generation providers when `TimeoutError`'s are raised.
+- feat: new `GoogleSpeechToTextProvider` class.
