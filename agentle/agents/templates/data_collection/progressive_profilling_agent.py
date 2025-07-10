@@ -11,7 +11,7 @@ from collections.abc import (
 )
 from contextlib import asynccontextmanager, contextmanager
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from rsb.models.base_model import BaseModel
 from rsb.models.config_dict import ConfigDict
@@ -19,9 +19,15 @@ from rsb.models.private_attr import PrivateAttr
 
 from agentle.agents.agent import Agent
 from agentle.agents.agent_run_output import AgentRunOutput
+from agentle.agents.context import Context
 from agentle.agents.templates.data_collection.collected_data import CollectedData
 from agentle.agents.templates.data_collection.field_spec import FieldSpec
+from agentle.generations.models.message_parts.file import FilePart
+from agentle.generations.models.messages.assistant_message import AssistantMessage
+from agentle.generations.models.messages.developer_message import DeveloperMessage
 from agentle.generations.providers.base.generation_provider import GenerationProvider
+from agentle.generations.models.messages.user_message import UserMessage
+from agentle.generations.models.message_parts.text import TextPart
 
 if TYPE_CHECKING:
     from agentle.agents.agent_input import AgentInput
@@ -29,19 +35,15 @@ if TYPE_CHECKING:
 
 
 class ProgressiveProfilingAgent(BaseModel):
-    """An agent specialized in progressive data collection using structured outputs"""
+    """A stateless agent specialized in progressive data collection using structured outputs"""
 
     field_specs: Sequence[FieldSpec]
     generation_provider: GenerationProvider
     model: str | None = None
     max_attempts_per_field: int = 3
-    conversational: bool = True  # Whether to maintain conversational flow
 
     # Private attributes
     _agent: Agent[CollectedData] | None = PrivateAttr(default=None)
-    _collected_data: MutableMapping[str, Any] = PrivateAttr(default_factory=dict)
-    _attempts: MutableMapping[str, int] = PrivateAttr(default_factory=dict)
-    _conversation_history: MutableSequence[str] = PrivateAttr(default_factory=list)
 
     model_config = ConfigDict(frozen=False, arbitrary_types_allowed=True)
 
@@ -80,7 +82,7 @@ class ProgressiveProfilingAgent(BaseModel):
         - completed: Whether all required fields have been collected
 
         ## Current State:
-        The current state of collected data and conversation history will be provided in the input.
+        The current state of collected data will be provided in the conversation.
         You should:
         1. Acknowledge what has already been collected
         2. Extract any new information from the user's message
@@ -113,37 +115,63 @@ class ProgressiveProfilingAgent(BaseModel):
         self,
         input: AgentInput | Any,
         *,
+        current_state: Mapping[str, Any] | None = None,
         timeout: float | None = None,
         trace_params: TraceParams | None = None,
     ) -> AgentRunOutput[CollectedData]:
-        """Run the progressive profiling agent"""
-        # Build the current state context
-        state_context = self._build_state_context(input)
+        """
+        Run the progressive profiling agent
 
-        # Run the internal agent with state context
+        Args:
+            input: The user input (can be string, Context, sequence of messages, etc.)
+            current_state: Current collected data state (if None, starts fresh)
+            timeout: Optional timeout for the operation
+            trace_params: Optional trace parameters
+
+        Returns:
+            AgentRunOutput[CollectedData] with the updated state
+        """
+        # Build the enhanced input with state context
+        enhanced_input = self._enhance_input_with_state(input, current_state or {})
+
+        # Run the internal agent
         result = self.agent.run(
-            state_context, timeout=timeout, trace_params=trace_params
+            enhanced_input, timeout=timeout, trace_params=trace_params
         )
 
-        # Update internal state based on the response
+        # Post-process the result to ensure data validity
         if result.parsed:
-            self._update_state_from_response(result.parsed, input)
+            result.parsed = self._validate_collected_data(result.parsed)
 
         return result
 
     async def run_async(
-        self, input: AgentInput | Any, *, trace_params: TraceParams | None = None
+        self,
+        input: AgentInput | Any,
+        *,
+        current_state: Mapping[str, Any] | None = None,
+        trace_params: TraceParams | None = None,
     ) -> AgentRunOutput[CollectedData]:
-        """Run the progressive profiling agent asynchronously"""
-        # Build the current state context
-        state_context = self._build_state_context(input)
+        """
+        Run the progressive profiling agent asynchronously
 
-        # Run the internal agent with state context
-        result = await self.agent.run_async(state_context, trace_params=trace_params)
+        Args:
+            input: The user input (can be string, Context, sequence of messages, etc.)
+            current_state: Current collected data state (if None, starts fresh)
+            trace_params: Optional trace parameters
 
-        # Update internal state based on the response
+        Returns:
+            AgentRunOutput[CollectedData] with the updated state
+        """
+        # Build the enhanced input with state context
+        enhanced_input = self._enhance_input_with_state(input, current_state or {})
+
+        # Run the internal agent
+        result = await self.agent.run_async(enhanced_input, trace_params=trace_params)
+
+        # Post-process the result to ensure data validity
         if result.parsed:
-            self._update_state_from_response(result.parsed, input)
+            result.parsed = self._validate_collected_data(result.parsed)
 
         return result
 
@@ -159,83 +187,121 @@ class ProgressiveProfilingAgent(BaseModel):
         async with self.agent.start_mcp_servers_async():
             yield
 
-    def reset(self) -> None:
-        """Reset the collected data to start fresh"""
-        self._collected_data.clear()
-        self._attempts.clear()
-        self._conversation_history.clear()
+    def _enhance_input_with_state(
+        self, input: AgentInput | Any, current_state: Mapping[str, Any]
+    ) -> AgentInput | Any:
+        """
+        Enhance the input with current state information
 
-    def get_collected_data(self) -> Mapping[str, Any]:
-        """Get the currently collected data"""
-        return dict(self._collected_data)
-
-    def is_complete(self) -> bool:
-        """Check if all required fields have been collected"""
-        return self._check_completion()
-
-    def _build_state_context(self, user_input: Any) -> str:
-        """Build the context including current state and user input"""
-        # Current collected data
-        collected_info = {
-            field_name: value for field_name, value in self._collected_data.items()
-        }
-
-        # Pending fields
-        pending_fields = self._get_pending_fields()
+        This method prepends state context to the input while preserving
+        the original input type when possible.
+        """
+        # Calculate pending fields
+        pending_fields = self._get_pending_fields(current_state)
 
         # Build state summary
         state_summary = {
-            "collected_data": collected_info,
+            "collected_data": dict(current_state),
             "pending_required_fields": pending_fields,
             "total_fields": len(self.field_specs),
             "required_fields": len([fs for fs in self.field_specs if fs.required]),
             "optional_fields": len([fs for fs in self.field_specs if not fs.required]),
         }
 
-        # Build conversation history context (last 3 exchanges)
-        history_context = ""
-        if self._conversation_history:
-            recent_history = self._conversation_history[-6:]  # Last 3 exchanges
-            history_context = "\n\nRecent conversation:\n" + "\n".join(recent_history)
-
-        # Combine everything
-        context = dedent(f"""\
-        ## Current State:
+        # Create state context message
+        state_context = dedent(f"""\
+        ## Current Collection State:
         {json.dumps(state_summary, indent=2)}
-        {history_context}
         
-        ## User Input:
-        {user_input}
-        
-        Please analyze the user input, extract any relevant field values, and return the complete CollectedData object with all collected fields (both previous and new).
+        Please analyze the user input, extract any relevant field values, 
+        and return the complete CollectedData object with all collected fields 
+        (both previous and new).
         """)
 
-        return context
+        # Check if input is a Context object
+        if hasattr(input, "message_history"):  # Duck typing for Context
+            # Add state message to the context's message history
+            state_message = UserMessage(parts=[TextPart(text=state_context)])
+            try:
+                # Clone context and prepend message
+                new_messages = [state_message] + list(
+                    cast(Context, input).message_history
+                )
+                cast(Context, input).message_history = new_messages
+                return input
+            except Exception:
+                # If we can't modify the context, convert to messages list
+                return [state_message] + list(cast(Context, input).message_history)
 
-    def _update_state_from_response(
-        self, response: CollectedData, user_input: Any
-    ) -> None:
-        """Update internal state based on the agent's response"""
-        # Update collected data with any new fields
-        for field_name, value in response.fields.items():
-            # Validate that the field exists in our spec
+        # Check if input is a sequence (list or tuple)
+        if isinstance(input, (list, tuple)) and input:
+            first_item = input[0]
+
+            # Check if it's a sequence of messages
+            if isinstance(
+                first_item, (UserMessage, AssistantMessage, DeveloperMessage)
+            ):
+                # Return a list of messages with state message prepended
+                state_message = UserMessage(parts=[TextPart(text=state_context)])
+                return [state_message] + list(input)
+
+            # Check if it's a sequence of parts (TextPart, FilePart, etc.)
+            elif isinstance(first_item, (TextPart, FilePart)):
+                # Create a UserMessage with state part and input parts
+                state_part = TextPart(text=state_context)
+                li = list(cast(Sequence[TextPart | FilePart], input))
+                return UserMessage(parts=[state_part] + li)
+
+        # Check if input is a single message
+        if isinstance(input, (UserMessage, AssistantMessage, DeveloperMessage)):
+            # Return a list with state message and the input message
+            state_message = UserMessage(parts=[TextPart(text=state_context)])
+            return [state_message, input]
+
+        # Check if input is a single part (TextPart or FilePart)
+        if isinstance(input, (TextPart, FilePart)):
+            # Create a UserMessage with both parts
+            state_part = TextPart(text=state_context)
+            return UserMessage(parts=[state_part, input])
+
+        # For simple string inputs
+        if isinstance(input, str):
+            return f"{state_context}\n\n## User Input:\n{input}"
+
+        # For all other types (including non-iterable ones), convert to string
+        return f"{state_context}\n\n## User Input:\n{str(input)}"
+
+    def _validate_collected_data(self, data: CollectedData) -> CollectedData:
+        """
+        Validate and clean the collected data
+
+        Ensures all field values are properly typed and validated
+        """
+        validated_fields: MutableMapping[str, Any] = {}
+
+        for field_name, value in data.fields.items():
+            # Find the field spec
             field_spec = next(
                 (fs for fs in self.field_specs if fs.name == field_name), None
             )
+
             if field_spec:
-                # Convert and validate the value
                 try:
+                    # Convert and validate the value
                     converted_value = self._convert_value(value, field_spec.type)
-                    self._collected_data[field_name] = converted_value
+                    validated_fields[field_name] = converted_value
                 except ValueError:
                     # Skip invalid values
                     pass
 
-        # Update conversation history
-        if isinstance(user_input, str):
-            self._conversation_history.append(f"User: {user_input}")
+        # Update the data with validated fields
+        data.fields = validated_fields
 
-        # We don't store the agent's response text here since it's in the AgentRunOutput
+        # Recalculate pending fields and completion status
+        data.pending_fields = self._get_pending_fields(validated_fields)
+        data.completed = self._check_completion(validated_fields)
+
+        return data
 
     def _build_field_descriptions(self) -> str:
         """Build a formatted description of all fields to collect"""
@@ -281,29 +347,39 @@ class ProgressiveProfilingAgent(BaseModel):
         else:
             return value
 
-    def _check_completion(self) -> bool:
+    def _check_completion(self, collected_data: Mapping[str, Any]) -> bool:
         """Check if all required fields have been collected"""
         for spec in self.field_specs:
-            if spec.required and spec.name not in self._collected_data:
+            if spec.required and spec.name not in collected_data:
                 return False
         return True
 
-    def _get_pending_fields(self) -> MutableSequence[str]:
+    def _get_pending_fields(
+        self, collected_data: Mapping[str, Any]
+    ) -> MutableSequence[str]:
         """Get list of pending required fields"""
         pending: MutableSequence[str] = []
         for spec in self.field_specs:
-            if spec.required and spec.name not in self._collected_data:
+            if spec.required and spec.name not in collected_data:
                 pending.append(spec.name)
         return pending
 
-    def get_collection_status(self) -> str:
-        """Get a human-readable status of the collection progress"""
+    def get_field_status(self, collected_data: Mapping[str, Any]) -> str:
+        """
+        Get a human-readable status of the collection progress
+
+        Args:
+            collected_data: The current state of collected data
+
+        Returns:
+            A formatted string showing collection status
+        """
         collected: MutableSequence[str] = []
         pending: MutableSequence[str] = []
 
         for spec in self.field_specs:
-            if spec.name in self._collected_data:
-                collected.append(f"✓ {spec.name}: {self._collected_data[spec.name]}")
+            if spec.name in collected_data:
+                collected.append(f"✓ {spec.name}: {collected_data[spec.name]}")
             elif spec.required:
                 pending.append(f"○ {spec.name} ({spec.type}) - {spec.description}")
             else:
@@ -363,29 +439,41 @@ if __name__ == "__main__":
         field_specs=user_profile_fields,
         generation_provider=GoogleGenerationProvider(),
         model="gemini-2.5-flash",
-        conversational=True,
     )
 
+    # State is managed externally
+    current_state: Mapping[str, Any] = {}
+
     # Start collecting data
-    response = profiler.run("Hi! I'd like to sign up for your service.")
-    print(response.text)
+    response = profiler.run(
+        "Hi! I'd like to sign up for your service.", current_state=current_state
+    )
+    print(response)
 
-    # Continue the conversation
-    response = profiler.run("My name is John Doe")
-    print(response.text)
+    # # Update state from response
+    # if response.parsed:
+    #     current_state = response.parsed.fields
+    #     print(f"Current state: {current_state}")
 
-    # Check progress
-    if response.parsed:
-        print(f"Collected: {response.parsed.fields}")
-        print(f"Still needed: {response.parsed.pending_fields}")
-        print(f"Complete: {response.parsed.completed}")
+    # # Continue the conversation with updated state
+    # response = profiler.run("My name is John Doe", current_state=current_state)
+    # print(response.text)
 
-    # Continue until all fields are collected
-    while not profiler.is_complete():
-        user_input = input("You: ")
-        response = profiler.run(user_input)
-        print(f"Agent: {response.text}")
+    # # Check progress
+    # if response.parsed:
+    #     current_state = response.parsed.fields
+    #     print(f"Collected: {response.parsed.fields}")
+    #     print(f"Still needed: {response.parsed.pending_fields}")
+    #     print(f"Complete: {response.parsed.completed}")
 
-    # Get final collected data
-    final_data = profiler.get_collected_data()
-    print(f"Profile complete! Collected data: {final_data}")
+    # # Continue until all fields are collected
+    # while response.parsed and not response.parsed.completed:
+    #     user_input = input("You: ")
+    #     response = profiler.run(user_input, current_state=current_state)
+    #     print(f"Agent: {response.text}")
+
+    #     if response.parsed:
+    #         current_state = response.parsed.fields
+
+    # # Final collected data
+    # print(f"Profile complete! Collected data: {current_state}")

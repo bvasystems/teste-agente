@@ -4,7 +4,12 @@ version = "v0.6.11"
 description = "..."
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = ["async-lru>=2.0.5", "mcp[cli]>=1.6.0", "rock-solid-base>=0.1.2"]
+dependencies = [
+    "async-lru>=2.0.5",
+    "google-genai>=1.14.0",
+    "mcp[cli]>=1.6.0",
+    "rock-solid-base>=0.1.2",
+]
 
 [[project.authors]]
 name = "Arthur Brenno"
