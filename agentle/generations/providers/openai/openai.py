@@ -50,7 +50,7 @@ class OpenaiGenerationProvider(GenerationProvider):
 
     def __init__(
         self,
-        api_key: str,
+        api_key: str | None = None,
         *,
         tracing_client: StatefulObservabilityClient | None = None,
         organization_name: str | None = None,
