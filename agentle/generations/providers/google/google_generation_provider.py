@@ -244,7 +244,9 @@ class GoogleGenerationProvider(GenerationProvider):
         )
 
         contents: MutableSequence[Content] = [
-            self.message_adapter.adapt(message) for message in messages
+            self.message_adapter.adapt(message)
+            for message in messages
+            if not isinstance(message, DeveloperMessage)
         ]
 
         try:
