@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from typing import Any, Literal, Sequence, override
+from typing import TYPE_CHECKING, Any, Literal, Sequence, override
 
 import httpx
 
@@ -32,6 +32,9 @@ from agentle.generations.tracing.contracts.stateful_observability_client import 
 )
 from agentle.generations.tracing.decorators.observe import observe
 
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
+
 type WithoutStructuredOutput = None
 
 
@@ -47,6 +50,8 @@ class OpenaiGenerationProvider(GenerationProvider):
     """
     OpenAI generation provider.
     """
+
+    client: AsyncOpenAI
 
     def __init__(
         self,

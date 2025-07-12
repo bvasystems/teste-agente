@@ -2,8 +2,10 @@
 Module defining the AssistantMessage class representing messages from assistants.
 """
 
+from __future__ import annotations
+
 from collections.abc import Sequence
-from typing import Literal
+from typing import Literal, cast
 
 from rsb.models.base_model import BaseModel
 from rsb.models.field import Field
@@ -34,3 +36,28 @@ class AssistantMessage(BaseModel):
     ] = Field(
         description="The sequence of message parts that make up this assistant message.",
     )
+
+    @property
+    def tool_calls(self) -> Sequence[ToolExecutionSuggestion]:
+        tool_calls = cast(
+            Sequence[ToolExecutionSuggestion],
+            list(
+                filter(
+                    lambda part: isinstance(part, ToolExecutionSuggestion), self.parts
+                )
+            ),
+        )
+
+        return tool_calls
+
+    def without_tool_calls(self) -> AssistantMessage:
+        return AssistantMessage(
+            parts=list(
+                filter(
+                    lambda part: not isinstance(
+                        part, (ToolExecutionSuggestion, ToolExecutionResult)
+                    ),
+                    self.parts,
+                )
+            )
+        )
