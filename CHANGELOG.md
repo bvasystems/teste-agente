@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.6.18
+## v0.6.19
 
-- refactor: passing only one user message per message sequence when calling agent
+-fix: applying messagesequence changes to the run_async method as well
