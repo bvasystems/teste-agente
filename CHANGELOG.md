@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.6.20
+## v0.6.21
 
-- fix: wrong order in text part merging.
+- fix(critical): not sending the all tool contents to the AI by truncating tool response.

@@ -1829,8 +1829,6 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
                     # Truncate very long results but keep them meaningful
                     result_str = str(result)
-                    if len(result_str) > 500:
-                        result_str = result_str[:500] + "... [truncated]"
 
                     called_tools_prompt_parts.append(
                         TextPart(
