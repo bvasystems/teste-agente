@@ -1825,21 +1825,22 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                                 TextPart(text="[End of file]\n"),
                             ]
                         )
-                    else:
-                        # Truncate very long results but keep them meaningful
-                        result_str = str(result)
-                        if len(result_str) > 500:
-                            result_str = result_str[:500] + "... [truncated]"
+                        continue
 
-                        called_tools_prompt_parts.append(
-                            TextPart(
-                                text=f"\n[Execution #{idx}]\n"
-                                + f"Tool: {suggestion.tool_name}\n"
-                                + f"Args: {json.dumps(suggestion.args, indent=2)}\n"
-                                + f"Result: {result_str}\n"
-                                + "Status: (success) COMPLETED - DO NOT CALL AGAIN WITH SAME ARGS\n"
-                            )
+                    # Truncate very long results but keep them meaningful
+                    result_str = str(result)
+                    if len(result_str) > 500:
+                        result_str = result_str[:500] + "... [truncated]"
+
+                    called_tools_prompt_parts.append(
+                        TextPart(
+                            text=f"\n[Execution #{idx}]\n"
+                            + f"Tool: {suggestion.tool_name}\n"
+                            + f"Args: {json.dumps(suggestion.args, indent=2)}\n"
+                            + f"Result: {result_str}\n"
+                            + "Status: (success) COMPLETED - DO NOT CALL AGAIN WITH SAME ARGS\n"
                         )
+                    )
 
                 called_tools_prompt_parts.append(
                     TextPart(text="</completed_tool_executions>")
