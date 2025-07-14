@@ -1756,7 +1756,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 )
             )
 
-            called_tools_prompt: UserMessage | str = ""
+            called_tools_prompt: UserMessage = UserMessage(parts=[TextPart(text="")])
             if called_tools:
                 # Build a comprehensive prompt with anti-repetition instructions
                 called_tools_prompt_parts: MutableSequence[TextPart | FilePart] = []
@@ -1853,11 +1853,14 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             _logger.bind_optional(
                 lambda log: log.debug("Generating tool call response")
             )
+
+            _new_messages = MessageSequence(
+                context.message_history
+            ).merge_with_last_user_message(called_tools_prompt)
+
             tool_call_generation = await generation_provider.generate_async(
                 model=self.resolved_model,
-                messages=MessageSequence(context.message_history)
-                .append_before_last_message(called_tools_prompt)
-                .elements,
+                messages=_new_messages.elements,
                 generation_config=self.agent_config.generation_config,
                 tools=all_tools,
             )
