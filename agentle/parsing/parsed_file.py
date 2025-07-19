@@ -5,7 +5,7 @@ import uuid
 from collections.abc import Mapping, MutableSequence, Sequence
 from functools import cached_property
 from itertools import chain
-from typing import Any, Literal
+from typing import Any
 
 from rsb.coroutines.run_sync import run_sync
 from rsb.models.base_model import BaseModel
@@ -14,6 +14,7 @@ from rsb.models.field import Field
 from agentle.generations.providers.base.generation_provider import GenerationProvider
 from agentle.parsing.chunk import Chunk
 from agentle.parsing.chunking.chunking_config import ChunkingConfig
+from agentle.parsing.chunking.chunking_strategy import ChunkingStrategy
 from agentle.parsing.section_content import SectionContent
 
 
@@ -163,10 +164,7 @@ class ParsedFile(BaseModel):
 
     def chunkify(
         self,
-        strategy: Literal[
-            "auto",
-            "recursive_character",
-        ],
+        strategy: ChunkingStrategy,
         generation_provider: GenerationProvider | None = None,
     ) -> Sequence[Chunk]:
         return run_sync(
@@ -177,23 +175,20 @@ class ParsedFile(BaseModel):
 
     async def chunkify_async(
         self,
-        strategy: Literal[
-            "auto",
-            "recursive_character",
-        ] = "recursive_character",
+        strategy: ChunkingStrategy = ChunkingStrategy.RECURSIVE_CHARACTER,
         generation_provider: GenerationProvider | None = None,
         config: ChunkingConfig | None = None,
     ) -> Sequence[Chunk]:
         match strategy:
-            case "auto":
+            case ChunkingStrategy.AUTO:
                 if generation_provider is None:
                     raise ValueError(
                         'Instance of GenerationProvider needs to be passed if strategy is "auto"'
                     )
                 return await self.chunkify_async(
-                    strategy="recursive_character"
+                    strategy=ChunkingStrategy.RECURSIVE_CHARACTER
                 )  # TODO(arthur)
-            case "recursive_character":
+            case ChunkingStrategy.RECURSIVE_CHARACTER:
                 markdown = self.md
                 return self._recursive_character_split(markdown, config)
 
