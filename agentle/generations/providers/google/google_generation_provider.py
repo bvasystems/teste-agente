@@ -151,7 +151,7 @@ class GoogleGenerationProvider(GenerationProvider):
         """
         The default model to use for generation.
         """
-        return "gemini-2.0-flash"
+        return "gemini-2.5-flash"
 
     @property
     @override

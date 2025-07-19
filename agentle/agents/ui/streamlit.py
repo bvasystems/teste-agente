@@ -19,7 +19,7 @@ SessionKnowledgeItem = Dict[
 ]  # Keys: "type", "name", "content", "data_bytes", "mime_type"
 
 
-class AgentToStreamlit(Adapter[Agent, "Callable[[], None]"]):
+class AgentToStreamlit[T = None](Adapter[Agent[T], "Callable[[], None]"]):
     title: str | None
     description: str | None
     initial_mode: Literal["dev", "presentation"]
@@ -34,7 +34,7 @@ class AgentToStreamlit(Adapter[Agent, "Callable[[], None]"]):
         self.description = description
         self.initial_mode = initial_mode
 
-    def adapt(self, _f: Agent) -> Callable[[], None]:
+    def adapt(self, _f: Agent[T]) -> Callable[[], None]:
         """
         Creates a Streamlit app that provides a chat interface to interact with the agent.
 
