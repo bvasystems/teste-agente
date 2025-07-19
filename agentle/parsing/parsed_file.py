@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Literal
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, MutableSequence, Sequence
 from functools import cached_property
 from itertools import chain
+from typing import Any, Literal
 
+from rsb.coroutines.run_sync import run_sync
 from rsb.models.base_model import BaseModel
 from rsb.models.field import Field
 
 from agentle.generations.providers.base.generation_provider import GenerationProvider
 from agentle.parsing.chunk import Chunk
+from agentle.parsing.chunking.chunking_config import ChunkingConfig
 from agentle.parsing.section_content import SectionContent
 
 
@@ -102,6 +104,8 @@ class ParsedFile(BaseModel):
         default_factory=dict, description="Additional metadata of the document."
     )
 
+    def split(self) -> Sequence[Chunk]: ...
+
     @cached_property
     def id(self) -> str:
         # Sanitize name
@@ -161,23 +165,204 @@ class ParsedFile(BaseModel):
         self,
         strategy: Literal[
             "auto",
-            "semantic_chunking",
             "recursive_character",
         ],
         generation_provider: GenerationProvider | None = None,
+    ) -> Sequence[Chunk]:
+        return run_sync(
+            self.chunkify_async,
+            strategy=strategy,
+            generation_provider=generation_provider,
+        )
+
+    async def chunkify_async(
+        self,
+        strategy: Literal[
+            "auto",
+            "recursive_character",
+        ] = "recursive_character",
+        generation_provider: GenerationProvider | None = None,
+        config: ChunkingConfig | None = None,
     ) -> Sequence[Chunk]:
         match strategy:
             case "auto":
                 if generation_provider is None:
                     raise ValueError(
-                        'Instance of GenerationProvider needs to be passed if strategy == "auto"'
+                        'Instance of GenerationProvider needs to be passed if strategy is "auto"'
                     )
-            case "semantic_chunking":
-                ...
-            case _:
-                ...
+                return await self.chunkify_async(
+                    strategy="recursive_character"
+                )  # TODO(arthur)
+            case "recursive_character":
+                markdown = self.md
+                return self._recursive_character_split(markdown, config)
 
         return []
+
+    def _recursive_character_split(
+        self,
+        text: str,
+        config: ChunkingConfig | None = None,
+    ) -> Sequence[Chunk]:
+        """
+        Split text using recursive character splitting strategy.
+
+        This method tries to split text at natural boundaries in order of preference:
+        1. Double newlines (paragraphs)
+        2. Single newlines (lines)
+        3. Sentences (periods, exclamation marks, question marks)
+        4. Spaces (words)
+        5. Characters (last resort)
+
+        Args:
+            text: The text to split
+            config: Configuration for chunking (chunk_size, chunk_overlap)
+
+        Returns:
+            Sequence of Chunk objects
+        """
+        # Default configuration
+        chunk_size = config.get("chunk_size", 1000) if config else 1000
+        chunk_overlap = config.get("chunk_overlap", 200) if config else 200
+
+        # Validate configuration
+        if chunk_overlap >= chunk_size:
+            raise ValueError("chunk_overlap must be less than chunk_size")
+
+        # Define separators in order of preference (most natural to least natural)
+        separators = [
+            "\n\n",  # Paragraphs
+            "\n",  # Lines
+            ". ",  # Sentences ending with period
+            "! ",  # Sentences ending with exclamation
+            "? ",  # Sentences ending with question
+            " ",  # Words
+            "",  # Characters (fallback)
+        ]
+
+        chunks = []
+        current_chunks = [text]
+
+        for separator in separators:
+            next_chunks: MutableSequence[str] = []
+
+            for chunk in current_chunks:
+                if len(chunk) <= chunk_size:
+                    # Chunk is already small enough
+                    next_chunks.append(chunk)
+                else:
+                    # Split this chunk further
+                    if separator == "":
+                        # Last resort: split by characters
+                        split_chunks = self._split_by_characters(
+                            chunk, chunk_size, chunk_overlap
+                        )
+                    else:
+                        split_chunks = self._split_by_separator(
+                            chunk, separator, chunk_size, chunk_overlap
+                        )
+                    next_chunks.extend(split_chunks)
+
+            current_chunks = next_chunks
+
+            # Check if all chunks are now small enough
+            if all(len(chunk) <= chunk_size for chunk in current_chunks):
+                break
+
+        # Create Chunk objects with metadata
+        for i, chunk_text in enumerate(current_chunks):
+            if chunk_text.strip():  # Only create chunks with non-empty content
+                chunk_metadata = dict(self.metadata)  # Copy original metadata
+                chunk_metadata.update(
+                    {
+                        "source_document": self.name,
+                        "chunk_index": i,
+                        "chunk_size": len(chunk_text),
+                        "chunking_strategy": "recursive_character",
+                        "total_chunks": len([c for c in current_chunks if c.strip()]),
+                    }
+                )
+
+                chunks.append(Chunk(text=chunk_text.strip(), metadata=chunk_metadata))
+
+        return chunks
+
+    def _split_by_separator(
+        self,
+        text: str,
+        separator: str,
+        chunk_size: int,
+        chunk_overlap: int,
+    ) -> list[str]:
+        """Split text by a specific separator while respecting chunk size and overlap."""
+        parts = text.split(separator)
+        chunks = []
+        current_chunk = ""
+
+        for i, part in enumerate(parts):
+            # Add separator back (except for the last part)
+            if i < len(parts) - 1:
+                part_with_sep = part + separator
+            else:
+                part_with_sep = part
+
+            # Check if adding this part would exceed chunk_size
+            if current_chunk and len(current_chunk) + len(part_with_sep) > chunk_size:
+                # Save current chunk and start a new one
+                if current_chunk.strip():
+                    chunks.append(current_chunk.strip())
+
+                # Start new chunk with overlap if possible
+                if chunk_overlap > 0 and chunks:
+                    overlap_text = self._get_overlap_text(current_chunk, chunk_overlap)
+                    current_chunk = overlap_text + part_with_sep
+                else:
+                    current_chunk = part_with_sep
+            else:
+                current_chunk += part_with_sep
+
+        # Add the last chunk if it has content
+        if current_chunk.strip():
+            chunks.append(current_chunk.strip())
+
+        return chunks
+
+    def _split_by_characters(
+        self,
+        text: str,
+        chunk_size: int,
+        chunk_overlap: int,
+    ) -> list[str]:
+        """Split text by characters as a last resort."""
+        chunks = []
+        start = 0
+
+        while start < len(text):
+            end = start + chunk_size
+            chunk = text[start:end]
+
+            if chunk.strip():
+                chunks.append(chunk)
+
+            # Move start position considering overlap
+            start = max(start + chunk_size - chunk_overlap, start + 1)
+
+        return chunks
+
+    def _get_overlap_text(self, text: str, overlap_size: int) -> str:
+        """Get the last overlap_size characters from text for overlap."""
+        if len(text) <= overlap_size:
+            return text
+
+        # Try to find a good breaking point for overlap (prefer word boundaries)
+        overlap_text = text[-overlap_size:]
+
+        # Try to start at a word boundary
+        space_index = overlap_text.find(" ")
+        if space_index > 0:
+            overlap_text = overlap_text[space_index + 1 :]
+
+        return overlap_text
 
     def merge_all(self, others: Sequence[ParsedFile]) -> ParsedFile:
         """
