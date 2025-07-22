@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from agentle.agents.agent import Agent
 
 
-# Define a type for session-added knowledge items for clarity
+# Define a type for session-added knowledge items for clarity 
 SessionKnowledgeItem = Dict[
     str, Any
 ]  # Keys: "type", "name", "content", "data_bytes", "mime_type"
