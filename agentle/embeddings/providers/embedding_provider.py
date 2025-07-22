@@ -1,4 +1,6 @@
 import abc
+from collections.abc import Mapping
+from typing import Any
 
 from rsb.coroutines.run_sync import run_sync
 
@@ -6,8 +8,14 @@ from agentle.embeddings.models.embed_content import EmbedContent
 
 
 class EmbeddingProvider(abc.ABC):
-    def generate_embeddings(self, contents: str) -> EmbedContent:
-        return run_sync(self.generate_embeddings_async, contents=contents)
+    def generate_embeddings(
+        self, contents: str, metadata: Mapping[str, Any] | None = None
+    ) -> EmbedContent:
+        return run_sync(
+            self.generate_embeddings_async, contents=contents, metadata=metadata
+        )
 
     @abc.abstractmethod
-    async def generate_embeddings_async(self, contents: str) -> EmbedContent: ...
+    async def generate_embeddings_async(
+        self, contents: str, metadata: Mapping[str, Any] | None = None
+    ) -> EmbedContent: ...

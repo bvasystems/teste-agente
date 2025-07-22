@@ -225,7 +225,7 @@ class ParsedFile(BaseModel):
             raise ValueError("chunk_overlap must be less than chunk_size")
 
         # Define separators in order of preference (most natural to least natural)
-        separators = [
+        separators: Sequence[str] = [
             "\n\n",  # Paragraphs
             "\n",  # Lines
             ". ",  # Sentences ending with period
@@ -267,16 +267,14 @@ class ParsedFile(BaseModel):
         # Create Chunk objects with metadata
         for i, chunk_text in enumerate(current_chunks):
             if chunk_text.strip():  # Only create chunks with non-empty content
-                chunk_metadata = dict(self.metadata)  # Copy original metadata
-                chunk_metadata.update(
-                    {
-                        "source_document": self.name,
-                        "chunk_index": i,
-                        "chunk_size": len(chunk_text),
-                        "chunking_strategy": "recursive_character",
-                        "total_chunks": len([c for c in current_chunks if c.strip()]),
-                    }
-                )
+                chunk_metadata = {
+                    "source_document": self.name,
+                    "chunk_index": i,
+                    "chunk_size": len(chunk_text),
+                    "chunking_strategy": "recursive_character",
+                    "original_document_metadata": self.metadata,
+                    "total_chunks": len([c for c in current_chunks if c.strip()]),
+                }
 
                 chunks.append(Chunk(text=chunk_text.strip(), metadata=chunk_metadata))
 
@@ -291,7 +289,7 @@ class ParsedFile(BaseModel):
     ) -> list[str]:
         """Split text by a specific separator while respecting chunk size and overlap."""
         parts = text.split(separator)
-        chunks = []
+        chunks: MutableSequence[str] = []
         current_chunk = ""
 
         for i, part in enumerate(parts):

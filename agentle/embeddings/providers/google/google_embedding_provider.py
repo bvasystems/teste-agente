@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import MutableSequence
-from typing import TYPE_CHECKING, Literal, override
+from collections.abc import Mapping, MutableSequence
+from typing import TYPE_CHECKING, Any, Literal, override
 import uuid
 
 from agentle.embeddings.models.embed_content import EmbedContent
@@ -60,7 +60,9 @@ class GoogleEmbeddingProvider(EmbeddingProvider):
         self.config = config
 
     @override
-    async def generate_embeddings_async(self, contents: str) -> EmbedContent:
+    async def generate_embeddings_async(
+        self, contents: str, metadata: Mapping[str, Any] | None = None
+    ) -> EmbedContent:
         embeddings = await self._client.aio.models.embed_content(
             model=self.model, contents=contents, config=self.config
         )
@@ -80,7 +82,14 @@ class GoogleEmbeddingProvider(EmbeddingProvider):
 
             vectors = content_embedding.values
 
-        return EmbedContent(embeddings=Embedding(id=str(uuid.uuid4()), value=vectors))
+        return EmbedContent(
+            embeddings=Embedding(
+                id=str(uuid.uuid4()),
+                value=vectors,
+                original_text=contents,
+                metadata=metadata or {},
+            )
+        )
 
 
 if __name__ == "__main__":

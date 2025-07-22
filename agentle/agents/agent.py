@@ -91,6 +91,9 @@ from agentle.generations.models.messages.user_message import UserMessage
 from agentle.generations.providers.base.generation_provider import (
     GenerationProvider,
 )
+from agentle.generations.providers.google.google_generation_provider import (
+    GoogleGenerationProvider,
+)
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
 
@@ -259,7 +262,9 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
     ```
     """
 
-    generation_provider: GenerationProvider
+    generation_provider: GenerationProvider = Field(
+        default_factory=GoogleGenerationProvider
+    )
     """
     The service provider of the agent
     """
