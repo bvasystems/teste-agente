@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.6.21
+## v0.6.22
 
-- fix(critical): not sending the all tool contents to the AI by truncating tool response.
+- feat: better context when structured outputs and tools are passed to the Agent.
