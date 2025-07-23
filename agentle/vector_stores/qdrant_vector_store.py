@@ -6,7 +6,6 @@ from agentle.embeddings.providers.embedding_provider import EmbeddingProvider
 from agentle.generations.providers.base.generation_provider import GenerationProvider
 from agentle.parsing.chunk import Chunk
 from agentle.vector_stores.create_collection_config import CreateCollectionConfig
-from agentle.vector_stores.upserted_file import UpsertedFile
 from agentle.vector_stores.vector_store import VectorStore
 
 if TYPE_CHECKING:
