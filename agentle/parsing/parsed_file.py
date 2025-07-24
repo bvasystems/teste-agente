@@ -277,7 +277,13 @@ class ParsedFile(BaseModel):
                     "total_chunks": len([c for c in current_chunks if c.strip()]),
                 }
 
-                chunks.append(Chunk(text=chunk_text.strip(), metadata=chunk_metadata))
+                chunks.append(
+                    Chunk(
+                        id=str(uuid.uuid4()),
+                        text=chunk_text.strip(),
+                        metadata=chunk_metadata,
+                    )
+                )
 
         return chunks
 

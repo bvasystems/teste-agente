@@ -14,6 +14,7 @@ from agentle.parsing.chunking.chunking_strategy import ChunkingStrategy
 from agentle.parsing.parsed_file import ParsedFile
 from agentle.vector_stores.collection import Collection
 from agentle.vector_stores.create_collection_config import CreateCollectionConfig
+from agentle.vector_stores.filters.filter import Filter
 
 type ChunkID = str
 
@@ -36,51 +37,76 @@ class VectorStore(abc.ABC):
 
     def find_related_content(
         self,
-        query: str | Embedding | Sequence[float],
+        query: str | Embedding | Sequence[float] | None = None,
         *,
+        filter: Filter | None = None,
         k: int = 10,
         collection_name: str | None = None,
     ) -> Sequence[Chunk]:
         return run_sync(
             self.find_related_content_async,
             query=query,
+            filter=filter,
             k=k,
             collection_name=collection_name,
         )
 
     async def find_related_content_async(
         self,
-        query: str | Embedding | Sequence[float],
+        query: str | Embedding | Sequence[float] | None = None,
         *,
+        filter: Filter | None = None,
         k: int = 10,
         collection_name: str | None = None,
     ) -> Sequence[Chunk]:
-        match query:
-            case str():
-                embedding = await self.embedding_provider.generate_embeddings_async(
-                    contents=query
-                )
+        if query and filter is None:
+            raise ValueError("Either query or filter must be provided.")
 
-                return await self._find_related_content_async(
-                    query=embedding.embeddings.value,
-                    k=k,
-                    collection_name=collection_name,
-                )
-            case Embedding():
-                return await self._find_related_content_async(
-                    query=query.value, k=k, collection_name=collection_name
-                )
-            case Sequence():
-                return await self._find_related_content_async(
-                    query=query,
-                    k=k,
-                    collection_name=collection_name,
-                )
+        if query:
+            match query:
+                case str():
+                    embedding = await self.embedding_provider.generate_embeddings_async(
+                        contents=query
+                    )
+
+                    return await self._find_related_content_async(
+                        query=embedding.embeddings.value,
+                        k=k,
+                        filter=filter,
+                        collection_name=collection_name,
+                    )
+                case Embedding():
+                    return await self._find_related_content_async(
+                        query=query.value,
+                        k=k,
+                        filter=filter,
+                        collection_name=collection_name,
+                    )
+                case Sequence():
+                    return await self._find_related_content_async(
+                        query=query,
+                        filter=filter,
+                        k=k,
+                        collection_name=collection_name,
+                    )
+        return await self._find_related_content_async(
+            query=None, filter=filter, k=k, collection_name=collection_name
+        )
 
     @abc.abstractmethod
     async def _find_related_content_async(
-        self, query: Sequence[float], *, k: int = 10, collection_name: str | None = None
+        self,
+        query: Sequence[float] | None = None,
+        *,
+        filter: Filter | None = None,
+        k: int = 10,
+        collection_name: str | None = None,
     ) -> Sequence[Chunk]: ...
+
+    @abc.abstractmethod
+    async def delete_vectors_async(
+        self, collection_name: str, ids: Sequence[str]
+    ) -> None: ...
 
     def upsert(
         self,
@@ -132,6 +158,7 @@ class VectorStore(abc.ABC):
         chunking_strategy: ChunkingStrategy = ChunkingStrategy.RECURSIVE_CHARACTER,
         chunking_config: ChunkingConfig | None = None,
         collection_name: str | None = None,
+        override_if_exists: bool = False,
     ) -> Sequence[ChunkID]:
         return run_sync(
             self.upsert_file_async,
@@ -140,6 +167,7 @@ class VectorStore(abc.ABC):
             chunking_strategy=chunking_strategy,
             chunking_config=chunking_config,
             collection_name=collection_name,
+            override_if_exists=override_if_exists,
         )
 
     async def upsert_file_async(
@@ -149,7 +177,23 @@ class VectorStore(abc.ABC):
         chunking_strategy: ChunkingStrategy = ChunkingStrategy.RECURSIVE_CHARACTER,
         chunking_config: ChunkingConfig | None = None,
         collection_name: str | None = None,
+        override_if_exists: bool = False,
     ) -> Sequence[ChunkID]:
+        file_chunks = self.find_related_content(
+            collection_name=collection_name or self.default_collection_name
+        )
+
+        file_exists = len(file_chunks) > 0
+
+        if file_exists:
+            if not override_if_exists:
+                raise ValueError("The provided file already exists in the database")
+            else:
+                await self.delete_vectors_async(
+                    collection_name=collection_name or self.default_collection_name,
+                    ids=[p.id for p in file_chunks],
+                )
+
         chunks: Sequence[Chunk] = await file.chunkify_async(
             strategy=chunking_strategy, config=chunking_config
         )

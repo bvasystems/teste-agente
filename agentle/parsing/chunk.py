@@ -4,5 +4,6 @@ from rsb.models.field import Field
 
 
 class Chunk(BaseModel):
+    id: str
     text: str = Field(description="The text of the chunk.")
     metadata: Mapping[str, Any] = Field(default_factory=dict)

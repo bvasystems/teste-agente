@@ -7,6 +7,7 @@ from agentle.generations.providers.base.generation_provider import GenerationPro
 from agentle.parsing.chunk import Chunk
 from agentle.vector_stores.collection import Collection
 from agentle.vector_stores.create_collection_config import CreateCollectionConfig
+from agentle.vector_stores.filters.filter import Filter
 from agentle.vector_stores.vector_store import VectorStore
 
 if TYPE_CHECKING:
@@ -74,15 +75,89 @@ class QdrantVectorStore(VectorStore):
 
     @override
     async def _find_related_content_async(
-        self, query: Sequence[float], *, k: int = 10, collection_name: str | None = None
+        self,
+        query: Sequence[float] | None = None,
+        *,
+        filter: Filter | None = None,
+        k: int = 10,
+        collection_name: str | None = None,
     ) -> Sequence[Chunk]:
+        from qdrant_client.http.models.models import Filter as QdrantFilter
+
+        chunks: MutableSequence[Chunk] = []
+
+        if query is None:
+            if filter is None:
+                raise ValueError("ERROR: query or field must be provided.")
+
+            should = filter.should
+            if should is not None:
+                if isinstance(should, Sequence):
+                    should = [s.to_qdrant_condition() for s in should]
+                else:
+                    should = should.to_qdrant_condition()
+
+            min_should = filter.min_should
+            if min_should is not None:
+                min_should = min_should.to_qdrant_min_should()
+
+            must = filter.must
+            if must is not None:
+                if isinstance(must, Sequence):
+                    must = [s.to_qdrant_condition() for s in must]
+                else:
+                    must = must.to_qdrant_condition()
+
+            must_not = filter.must_not
+            if must_not is not None:
+                if isinstance(must_not, Sequence):
+                    must_not = [s.to_qdrant_condition() for s in must_not]
+                else:
+                    must_not = must_not.to_qdrant_condition()
+
+            filter_response = await self._client.query_points(
+                collection_name=collection_name or self.default_collection_name,
+                query_filter=QdrantFilter(
+                    should=should,
+                    min_should=min_should,
+                    must=must,
+                    must_not=must_not,
+                ),
+            )
+
+            for scored_point in filter_response.points:
+                payload = scored_point.payload
+                if payload is None:
+                    raise RuntimeError(
+                        "Could not load Payload. Payload is needed "
+                        + "to decode the vector into text."
+                    )
+                text = payload.get("text")
+                if text is None:
+                    raise RuntimeError(
+                        "Error: could not load payload text. "
+                        + "Text is needed to get original "
+                        + "payload contents"
+                    )
+
+                metadata: Mapping[str, Any] | None = payload.get("metadata")
+                if metadata is not None and not isinstance(metadata, dict):
+                    raise ValueError(
+                        "Metadata is not an instance of Mapping and "
+                        + "it's not None. It must be a Mapping."
+                    )
+
+                chunks.append(
+                    Chunk(id=str(scored_point.id), text=text, metadata=metadata or {})
+                )
+
+            return chunks
+
         query_response = await self._client.query_points(
             collection_name=collection_name or self.default_collection_name,
             query=list(query),
-            # TODO(arthur): add more parameters.
+            limit=k,
         )
-
-        chunks: MutableSequence[Chunk] = []
 
         for scored_point in query_response.points:
             payload = scored_point.payload
@@ -106,7 +181,9 @@ class QdrantVectorStore(VectorStore):
                     + "it's not None. It must be a Mapping."
                 )
 
-            chunks.append(Chunk(text=text, metadata=metadata or {}))
+            chunks.append(
+                Chunk(id=str(scored_point.id), text=text, metadata=metadata or {})
+            )
 
         return chunks
 
@@ -193,6 +270,14 @@ class QdrantVectorStore(VectorStore):
             ],
         )
 
+    @override
+    async def delete_vectors_async(
+        self, collection_name: str, ids: Sequence[str]
+    ) -> None:
+        await self._client.delete(
+            collection_name=collection_name, points_selector=list(ids)
+        )
+
 
 if __name__ == "__main__":
     from agentle.embeddings.providers.google.google_embedding_provider import (
@@ -216,4 +301,4 @@ if __name__ == "__main__":
         "/Users/arthurbrenno/Documents/Dev/Paragon/agentle/examples/curriculo.pdf"
     )
 
-    qdrant.upsert_file(parsed_file, )
+    qdrant.upsert_file(parsed_file, collection_name="test_collection")
