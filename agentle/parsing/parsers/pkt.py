@@ -6,6 +6,7 @@ structured representations. It can decompress and extract the XML content from P
 files, making the network topology and configuration data accessible.
 """
 
+import os
 import tempfile
 from pathlib import Path
 from typing import Literal, override
@@ -103,7 +104,7 @@ class PKTFileParser(DocumentParser):
             cleaned up after the parsing is complete.
         """
         with tempfile.TemporaryDirectory() as temp_dir:
-            file_path = f"{temp_dir}/{document_path}"
+            file_path = os.path.join(temp_dir, document_path)
             # file.save_to_file(file_path)
             # TODO: save the file to the temp directory
             with open(file_path, "wb") as f:

@@ -105,3 +105,6 @@ emerge/html
 emerge-**
 emerge_
 service_account.json
+qdrant_data
+docker/storage
+docker/snapshots

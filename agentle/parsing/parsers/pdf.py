@@ -5,6 +5,7 @@ This module provides functionality for parsing PDF documents into structured rep
 It can extract text content, process embedded images, and organize the document by pages.
 """
 
+import os
 import tempfile
 from collections.abc import MutableSequence
 from pathlib import Path
@@ -162,10 +163,11 @@ class PDFFileParser(DocumentParser):
 
         from pypdf import PdfReader
 
+        _bytes = Path(document_path).read_bytes()
         with tempfile.TemporaryDirectory() as temp_dir:
-            file_path = f"{temp_dir}/{document_path}"
+            file_path = os.path.join(temp_dir, document_path)
             with open(file_path, "wb") as f:
-                f.write(Path(document_path).read_bytes())
+                f.write(_bytes)
 
             reader = PdfReader(file_path)
             section_contents: MutableSequence[SectionContent] = []

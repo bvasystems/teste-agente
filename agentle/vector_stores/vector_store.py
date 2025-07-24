@@ -14,7 +14,9 @@ from agentle.parsing.chunking.chunking_strategy import ChunkingStrategy
 from agentle.parsing.parsed_file import ParsedFile
 from agentle.vector_stores.collection import Collection
 from agentle.vector_stores.create_collection_config import CreateCollectionConfig
+from agentle.vector_stores.filters.field_condition import FieldCondition
 from agentle.vector_stores.filters.filter import Filter
+from agentle.vector_stores.filters.match_value import MatchValue
 
 type ChunkID = str
 
@@ -103,9 +105,38 @@ class VectorStore(abc.ABC):
         collection_name: str | None = None,
     ) -> Sequence[Chunk]: ...
 
-    @abc.abstractmethod
+    def delete_vectors(
+        self,
+        collection_name: str,
+        ids: Sequence[str] | None = None,
+        filter: Filter | None = None,
+    ) -> None:
+        return run_sync(
+            self.delete_vectors_async,
+            collection_name=collection_name,
+            ids=ids,
+            filter=filter,
+        )
+
     async def delete_vectors_async(
-        self, collection_name: str, ids: Sequence[str]
+        self,
+        collection_name: str,
+        ids: Sequence[str] | None = None,
+        filter: Filter | None = None,
+    ) -> None:
+        if filter:
+            extra_ids = await self.find_related_content_async(filter=filter)
+            _ids = list(list(ids or []) + list([c.id for c in extra_ids]))
+
+            await self._delete_vectors_async(
+                collection_name=collection_name, ids=list(set(_ids))
+            )
+
+    @abc.abstractmethod
+    async def _delete_vectors_async(
+        self,
+        collection_name: str,
+        ids: Sequence[str],
     ) -> None: ...
 
     def upsert(
@@ -179,11 +210,17 @@ class VectorStore(abc.ABC):
         collection_name: str | None = None,
         override_if_exists: bool = False,
     ) -> Sequence[ChunkID]:
-        file_chunks = self.find_related_content(
-            collection_name=collection_name or self.default_collection_name
+        # Check if file was already ingested in the database.
+        possible_file_chunks = self.find_related_content(
+            collection_name=collection_name or self.default_collection_name,
+            filter=Filter(
+                must=FieldCondition(
+                    key="source_document_id", match=MatchValue(value=file.unique_id)
+                )
+            ),
         )
 
-        file_exists = len(file_chunks) > 0
+        file_exists = len(possible_file_chunks) > 0
 
         if file_exists:
             if not override_if_exists:
@@ -191,7 +228,7 @@ class VectorStore(abc.ABC):
             else:
                 await self.delete_vectors_async(
                     collection_name=collection_name or self.default_collection_name,
-                    ids=[p.id for p in file_chunks],
+                    ids=[p.id for p in possible_file_chunks],
                 )
 
         chunks: Sequence[Chunk] = await file.chunkify_async(
@@ -200,7 +237,7 @@ class VectorStore(abc.ABC):
 
         embed_contents: Sequence[EmbedContent] = [
             await self.embedding_provider.generate_embeddings_async(
-                c.text, metadata=c.metadata
+                c.text, metadata=c.metadata, id=c.id
             )
             for c in chunks
         ]
@@ -214,6 +251,8 @@ class VectorStore(abc.ABC):
             )
 
             ids.append(e.embeddings.id)
+
+        print(f"Chunk ids: {[c.id for c in chunks]}")
 
         return ids
 

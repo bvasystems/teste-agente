@@ -66,6 +66,7 @@ from agentle.agents.agent_config_dict import AgentConfigDict
 from agentle.agents.agent_input import AgentInput
 from agentle.agents.agent_run_output import AgentRunOutput
 from agentle.agents.context import Context
+from agentle.agents.conversations.conversation_store import ConversationStore
 from agentle.agents.errors.max_tool_calls_exceeded_error import (
     MaxToolCallsExceededError,
 )
@@ -387,6 +388,8 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
     """
     The transcription provider to use for speech-to-text.
     """
+
+    conversation_store: ConversationStore | None = Field(default=None)
 
     # Internal fields
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -739,6 +742,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         *,
         timeout: float | None = None,
         trace_params: TraceParams | None = None,
+        chat_id: str | None = None,
     ) -> AgentRunOutput[T_Schema]:
         """
         Runs the agent synchronously with the provided input.
@@ -768,7 +772,11 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             ```
         """
         return run_sync(
-            self.run_async, timeout=timeout, input=input, trace_params=trace_params
+            self.run_async,
+            timeout=timeout,
+            input=input,
+            trace_params=trace_params,
+            chat_id=chat_id,
         )
 
     async def resume_async(
@@ -822,7 +830,11 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         )
 
     async def run_async(
-        self, input: AgentInput | Any, *, trace_params: TraceParams | None = None
+        self,
+        input: AgentInput | Any,
+        *,
+        trace_params: TraceParams | None = None,
+        chat_id: str | None = None,
     ) -> AgentRunOutput[T_Schema]:
         """
         Runs the agent asynchronously with the provided input.
@@ -860,6 +872,12 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             ```
         """
         _logger = Maybe(logger if self.debug else None)
+
+        if chat_id is not None and self.conversation_store is None:
+            raise ValueError(
+                "Chat ID was provided but no conversation store was "
+                + "provided in the Agent's constructor."
+            )
 
         # Logging with proper type ignore
         _logger.bind_optional(
@@ -987,6 +1005,17 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         context: Context = self._convert_input_to_context(
             input, instructions=instructions
         )
+
+        if chat_id:
+            assert self.conversation_store is not None
+
+            await self.conversation_store.add_message_async(
+                chat_id, context.last_message
+            )
+
+            context.add_messages(
+                await self.conversation_store.get_conversation_history_async(chat_id)
+            )
 
         # Start execution tracking
         context.start_execution()

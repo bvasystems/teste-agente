@@ -149,12 +149,22 @@ class Context(BaseModel):
     """Optional tags for categorizing or filtering contexts."""
 
     @property
+    def last_message(self) -> DeveloperMessage | AssistantMessage | UserMessage:
+        return self.message_history[-1]
+
+    @property
     def tool_execution_results(self) -> Sequence[ToolExecutionResult]:
         results: MutableSequence[ToolExecutionResult] = []
         for step in self.steps:
             results.extend(step.tool_execution_results)
 
         return results
+
+    def add_messages(
+        self, messages: Sequence[DeveloperMessage | UserMessage | AssistantMessage]
+    ) -> None:
+        self.message_history.extend(messages)
+        self.execution_state.last_updated_at = datetime.now()
 
     def add_user_message(self, text: str) -> None:
         """

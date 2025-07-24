@@ -61,7 +61,10 @@ class GoogleEmbeddingProvider(EmbeddingProvider):
 
     @override
     async def generate_embeddings_async(
-        self, contents: str, metadata: Mapping[str, Any] | None = None
+        self,
+        contents: str,
+        metadata: Mapping[str, Any] | None = None,
+        id: str | None = None,
     ) -> EmbedContent:
         embeddings = await self._client.aio.models.embed_content(
             model=self.model, contents=contents, config=self.config
@@ -84,7 +87,7 @@ class GoogleEmbeddingProvider(EmbeddingProvider):
 
         return EmbedContent(
             embeddings=Embedding(
-                id=str(uuid.uuid4()),
+                id=id or str(uuid.uuid4()),
                 value=vectors,
                 original_text=contents,
                 metadata=metadata or {},

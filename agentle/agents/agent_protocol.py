@@ -21,7 +21,11 @@ class AgentProtocol[T = None](Protocol):
     ) -> AgentRunOutput[T]: ...
 
     async def run_async(
-        self, input: AgentInput | Any, *, trace_params: TraceParams | None = None
+        self,
+        input: AgentInput | Any,
+        *,
+        trace_params: TraceParams | None = None,
+        chat_id: str | None = None,
     ) -> AgentRunOutput[T]: ...
 
     @contextmanager

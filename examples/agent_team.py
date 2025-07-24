@@ -9,13 +9,14 @@ selects the most appropriate agent for each task.
 from agentle.agents.agent import Agent
 from agentle.agents.agent_team import AgentTeam
 from agentle.agents.agent_config import AgentConfig
-from agentle.generations.providers.google.google_genai_generation_provider import (
-    GoogleGenaiGenerationProvider,
-)
+
 from agentle.agents.a2a.models.agent_skill import AgentSkill
+from agentle.generations.providers.google.google_generation_provider import (
+    GoogleGenerationProvider,
+)
 
 # Create a common provider for all agents
-provider = GoogleGenaiGenerationProvider()
+provider = GoogleGenerationProvider()
 
 # Step 1: Create specialized agents with different skills
 

@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import logging
 from collections.abc import Awaitable, Callable, Mapping, MutableSequence
 from typing import TYPE_CHECKING, Any, Sequence, override
 
@@ -12,6 +15,8 @@ from agentle.vector_stores.vector_store import VectorStore
 
 if TYPE_CHECKING:
     from qdrant_client.async_qdrant_client import AsyncQdrantClient
+
+logger = logging.getLogger(__name__)
 
 
 class QdrantVectorStore(VectorStore):
@@ -198,6 +203,7 @@ class QdrantVectorStore(VectorStore):
         )
 
         if collection_exists:
+            logger.debug("collection exists. skipping creation.")
             return None
 
         result = await self._client.create_collection(
@@ -259,20 +265,30 @@ class QdrantVectorStore(VectorStore):
             PointStruct,
         )
 
+        extra_metadata = {}
+        if points.metadata.get("source_document_id"):
+            extra_metadata["source_document_id"] = points.metadata["source_document_id"]
+
         await self._client.upsert(
             collection_name=collection_name or self.default_collection_name,
             points=[
                 PointStruct(
                     id=points.id,
                     vector=list(points.value),
-                    payload={"text": points.original_text, "metadata": points.metadata},
+                    payload={
+                        "text": points.original_text,
+                        "metadata": points.metadata,
+                        **extra_metadata,
+                    },
                 )
             ],
         )
 
     @override
-    async def delete_vectors_async(
-        self, collection_name: str, ids: Sequence[str]
+    async def _delete_vectors_async(
+        self,
+        collection_name: str,
+        ids: Sequence[str],
     ) -> None:
         await self._client.delete(
             collection_name=collection_name, points_selector=list(ids)
@@ -280,25 +296,43 @@ class QdrantVectorStore(VectorStore):
 
 
 if __name__ == "__main__":
+    from pprint import pprint
+
     from agentle.embeddings.providers.google.google_embedding_provider import (
         GoogleEmbeddingProvider,
     )
     from agentle.parsing.parsers.pdf import PDFFileParser
+    from pathlib import Path
+
+    logging.basicConfig(level=logging.DEBUG)
 
     qdrant = QdrantVectorStore(
-        embedding_provider=GoogleEmbeddingProvider(vertexai=True)
+        embedding_provider=GoogleEmbeddingProvider(
+            vertexai=True, project="unicortex", location="global"
+        )
     )
+
+    # qdrant.delete_collection("test_collection")
 
     qdrant.create_collection(
         "test_collection", config={"size": 3072, "distance": "COSINE"}
     )
 
-    print(qdrant.list_collections())
+    pprint(qdrant.list_collections())
 
     pdf_parser = PDFFileParser()
 
-    parsed_file = pdf_parser.parse(
-        "/Users/arthurbrenno/Documents/Dev/Paragon/agentle/examples/curriculo.pdf"
+    file = Path(
+        "/Users/arthurbrenno/Documents/Dev/Paragon/agentle/examples/curriculum.pdf"
     )
 
-    qdrant.upsert_file(parsed_file, collection_name="test_collection")
+    if not file.exists():
+        raise ValueError("File does not exist.")
+
+    parsed_file = pdf_parser.parse(str(file))
+
+    chunk_ids = qdrant.upsert_file(parsed_file, collection_name="test_collection")
+
+    print(chunk_ids)
+
+    # qdrant.delete_vectors(collection_name="test_collection", ids=chunk_ids)

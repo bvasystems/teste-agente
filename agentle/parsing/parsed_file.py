@@ -109,13 +109,30 @@ class ParsedFile(BaseModel):
 
     @cached_property
     def unique_id(self) -> str:
-        # Sanitize name
+        """
+        Generates a deterministic, unique ID for the file based on its name and content.
+
+        This ID is stable across multiple runs, ensuring that the same file content
+        always results in the same unique_id.
+
+        Returns:
+            str: A unique and deterministic identifier.
+        """
+        # Sanitize name for a clean base identifier
         base_name = self._sanitize_name()
 
-        # Generate UUID5 based on name and content for some determinism
+        # Create a single, deterministic string from all section texts.
+        # This avoids the non-deterministic behavior of Python's built-in hash().
+        content_text = "".join(s.text for s in self.sections)
+
+        # Combine the filename and the full content text to create a unique fingerprint.
+        # This ensures that files with the same content but different names have different IDs.
+        identifier_string = f"{self.name}:{content_text}"
+
+        # Generate a deterministic UUIDv5. UUIDv5 uses SHA-1 hashing, which is
+        # deterministic and will always produce the same result for the same input string.
         namespace = uuid.NAMESPACE_OID
-        content_str = f"{self.name}:{len(self.sections)}:{hash(tuple(s.text for s in self.sections))}"
-        content_uuid = uuid.uuid5(namespace, content_str)
+        content_uuid = uuid.uuid5(namespace, identifier_string)
 
         return f"{base_name}_{str(content_uuid)[:8]}"
 
