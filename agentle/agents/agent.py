@@ -47,7 +47,7 @@ from contextlib import asynccontextmanager, contextmanager
 from io import BytesIO, StringIO
 from pathlib import Path
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast, override
 
 from async_lru import alru_cache
 from rsb.containers.maybe import Maybe
@@ -111,6 +111,7 @@ from agentle.parsing.factories.file_parser_default_factory import (
 from agentle.parsing.parsed_file import ParsedFile
 from agentle.prompts.models.prompt import Prompt
 from agentle.stt.providers.base.speech_to_text_provider import SpeechToTextProvider
+from agentle.vector_stores.vector_store import VectorStore
 
 if TYPE_CHECKING:
     from blacksheep import Application
@@ -391,8 +392,17 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
     conversation_store: ConversationStore | None = Field(default=None)
 
+    vector_stores: MutableSequence[VectorStore] | None = Field(default=None)
+
     # Internal fields
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @override
+    def model_post_init(self, context: Any) -> None:
+        super().model_post_init(context)
+        _vs = self.vector_stores or []
+        for vector_store in _vs:
+            self.tools.append(vector_store.as_search_tool())
 
     def add_tool(self, tool: Callable[..., Any] | Callable[..., Awaitable[Any] | Tool]):
         self.tools += [tool]

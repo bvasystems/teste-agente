@@ -1,5 +1,6 @@
 import abc
 from collections.abc import MutableSequence, Sequence
+from textwrap import dedent
 
 from rsb.coroutines.run_sync import run_sync
 
@@ -25,17 +26,21 @@ class VectorStore(abc.ABC):
     default_collection_name: str
     embedding_provider: EmbeddingProvider
     generation_provider: GenerationProvider | None
+    detailed_agent_description: str | None
+    """Use this to describe your vector store and tell the Agent when to use, what is this vector database etc why it is used etc."""
 
     def __init__(
         self,
         *,
         default_collection_name: str = "agentle",
         embedding_provider: EmbeddingProvider,
-        generation_provider: GenerationProvider | None,
+        generation_provider: GenerationProvider | None = None,
+        detailed_agent_description: str | None = None,
     ) -> None:
         self.default_collection_name = default_collection_name
         self.embedding_provider = embedding_provider
         self.generation_provider = generation_provider
+        self.detailed_agent_description = detailed_agent_description
 
     def find_related_content(
         self,
@@ -61,7 +66,7 @@ class VectorStore(abc.ABC):
         k: int = 10,
         collection_name: str | None = None,
     ) -> Sequence[Chunk]:
-        if query and filter is None:
+        if query is None and filter is None:
             raise ValueError("Either query or filter must be provided.")
 
         if query:
@@ -124,13 +129,15 @@ class VectorStore(abc.ABC):
         ids: Sequence[str] | None = None,
         filter: Filter | None = None,
     ) -> None:
-        if filter:
-            extra_ids = await self.find_related_content_async(filter=filter)
-            _ids = list(list(ids or []) + list([c.id for c in extra_ids]))
+        extra_ids: Sequence[Chunk] = (
+            await self.find_related_content_async(filter=filter) if filter else []
+        )
 
-            await self._delete_vectors_async(
-                collection_name=collection_name, ids=list(set(_ids))
-            )
+        _ids = list(list(ids or []) + list([c.id for c in extra_ids]))
+
+        await self._delete_vectors_async(
+            collection_name=collection_name, ids=list(set(_ids))
+        )
 
     @abc.abstractmethod
     async def _delete_vectors_async(
@@ -224,11 +231,14 @@ class VectorStore(abc.ABC):
 
         if file_exists:
             if not override_if_exists:
-                raise ValueError("The provided file already exists in the database")
+                raise FileExistsError(
+                    "The provided file already exists in the database"
+                )
             else:
+                delete_ids = [p.id for p in possible_file_chunks]
                 await self.delete_vectors_async(
                     collection_name=collection_name or self.default_collection_name,
-                    ids=[p.id for p in possible_file_chunks],
+                    ids=delete_ids,
                 )
 
         chunks: Sequence[Chunk] = await file.chunkify_async(
@@ -251,8 +261,6 @@ class VectorStore(abc.ABC):
             )
 
             ids.append(e.embeddings.id)
-
-        print(f"Chunk ids: {[c.id for c in chunks]}")
 
         return ids
 
@@ -281,7 +289,67 @@ class VectorStore(abc.ABC):
     async def list_collections_async(self) -> Sequence[Collection]: ...
 
     def as_search_tool(self) -> Tool[Sequence[Chunk]]:
-        async def search_async(query: str, *, top_k: int = 3) -> Sequence[Chunk]:
-            return await self.find_related_content_async(query=query, k=top_k)
+        async def retrieval_augmented_generation_search(
+            query: str, *, top_k: int = 5
+        ) -> str:
+            """Searches a vector database for text chunks relevant to a query.
 
-        return Tool.from_callable(search_async)
+            This tool is essential for answering questions or finding information
+            contained within a specific, indexed knowledge base. Use it when a user's
+            query pertains to specific documents, files, or internal data that is
+            not part of your general knowledge. It helps ground your answers in
+            factual, source-based information.
+
+            Args:
+                query (str): The search query used to find relevant information. To
+                             ensure the best results, formulate this query carefully:
+                             - Be Specific and Detailed: Include proper nouns, technical
+                               terms, dates, project codes, or any unique identifiers
+                               from the user's request. This significantly helps
+                               narrow the search.
+                             - Use Full Questions or Phrases: Instead of just keywords
+                               (e.g., "marketing budget"), formulate a complete
+                               question or a descriptive phrase (e.g., "What was the
+                               approved marketing budget for Q4 2025?"). This provides
+                               richer semantic context for the vector search.
+                             - Extract the Core Intent: Distill the user's request to
+                               its essential informational need. Remove conversational
+                               filler. For example, if the user asks, "Hey, can you
+                               look up our new remote work policy for me?", the ideal
+                               query is "new remote work policy".
+                top_k (int, optional): The maximum number of relevant text chunks
+                                       to return. Defaults to 5.
+
+            Returns:
+                str: A string containing the search results formatted within
+                     <RelatedChunks> tags. Each chunk includes the text content
+                     and metadata (like the source document), providing context
+                     for the information found.
+
+            Handling Search Results:
+                - The search may sometimes return no results or content that is not
+                  relevant to the user's query. Your primary responsibility is to
+                  adhere to the user's instructions on how to proceed in this scenario.
+                - If the user has not provided specific instructions, you should adopt
+                  the following default behavior:
+                  1.  Do NOT invent an answer.
+                  2.  Clearly and politely state that you could not find a specific
+                      answer in the available documents.
+                  3.  You may suggest that the user try rephrasing the question.
+                  Example Response: "I searched the documents but couldn't find a
+                  specific answer regarding the 'Q3 innovation fund.' You might
+                  try rephrasing the query, perhaps with a project name included."
+            """
+            related_chunks = await self.find_related_content_async(query=query, k=top_k)
+            chunk_descriptions = [chunk.describe() for chunk in related_chunks]
+            return dedent(f"""\
+            <RelatedChunks>
+            {"\n\n".join(chunk_descriptions)}
+            </RelatedChunks>
+            """)
+
+        tool = Tool.from_callable(
+            retrieval_augmented_generation_search,
+            description=self.detailed_agent_description,
+        )
+        return tool

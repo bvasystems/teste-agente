@@ -312,6 +312,12 @@ if __name__ == "__main__":
         )
     )
 
+    chunks = qdrant.find_related_content(
+        "money savings", collection_name="test_collection"
+    )
+
+    print(chunks)
+
     # qdrant.delete_collection("test_collection")
 
     qdrant.create_collection(
@@ -331,7 +337,9 @@ if __name__ == "__main__":
 
     parsed_file = pdf_parser.parse(str(file))
 
-    chunk_ids = qdrant.upsert_file(parsed_file, collection_name="test_collection")
+    chunk_ids = qdrant.upsert_file(
+        parsed_file, collection_name="test_collection", override_if_exists=True
+    )
 
     print(chunk_ids)
 
