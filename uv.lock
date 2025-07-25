@@ -7,6 +7,7 @@ name = "agentle"
 version = "0.6.24"
 source = { editable = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "async-lru" },
     { name = "google-genai" },
     { name = "mcp", extra = ["cli"] },
@@ -133,6 +134,7 @@ streamlit = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.11.18" },
     { name = "async-lru", specifier = ">=2.0.5" },
     { name = "google-genai", specifier = ">=1.14.0" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.6.0" },
