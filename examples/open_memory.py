@@ -22,10 +22,12 @@ open_memory_server = StdioMCPServer(
         "CLIENT_NAME": os.getenv("CLIENT_NAME") or "",
     },
 )
-
 conversation_store = LocalConversationStore()
 
-agent = Agent(mcp_servers=[open_memory_server], conversation_store=conversation_store)
+agent = Agent(
+    # mcp_servers=[open_memory_server],
+    conversation_store=conversation_store
+)
 
 print("🤖 OpenMemory Agent started! Type 'quit' to exit.")
 print("-" * 50)

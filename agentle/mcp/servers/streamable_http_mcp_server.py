@@ -1,12 +1,13 @@
 """
-Production-ready fixes for StreamableHTTPMCPServer
+Production-ready fixes for StreamableHTTPMCPServer using aiohttp
 
-Key issues fixed:
-1. Same connection restoration bug as SSE
-2. Inefficient client creation for each request
-3. No connection pooling
-4. Better error handling and retry logic
-5. Resource management improvements
+This version is a refactor of the original httpx-based implementation.
+
+Key changes:
+1. Replaced httpx.AsyncClient with aiohttp.ClientSession for connection pooling.
+2. Adapted exception handling to aiohttp-specific errors (e.g., aiohttp.ClientError).
+3. Updated response handling to use await on methods like .json() and .text().
+4. Maintained all original functionality, retry logic, and session management.
 """
 
 from __future__ import annotations
@@ -18,7 +19,8 @@ import re
 from collections.abc import AsyncIterator, Callable, MutableMapping, Sequence
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-import httpx
+import aiohttp
+from aiohttp import ClientTimeout, TCPConnector
 from rsb.models.field import Field
 from rsb.models.private_attr import PrivateAttr
 
@@ -37,14 +39,10 @@ if TYPE_CHECKING:
 
 class StreamableHTTPMCPServer(MCPServerProtocol):
     """
-    Production-ready Streamable HTTP implementation of MCP server client.
+    Production-ready Streamable HTTP implementation of MCP server client using aiohttp.
 
-    FIXED ISSUES:
-    - Connection restoration bug
-    - Inefficient client creation
-    - Better error handling
-    - Connection pooling
-    - Retry logic
+    This version uses aiohttp.ClientSession for improved performance and follows
+    the library's best practices.
     """
 
     # Configuration fields
@@ -76,7 +74,7 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
     _logger: logging.Logger = PrivateAttr(
         default_factory=lambda: logging.getLogger(__name__)
     )
-    _client: Optional[httpx.AsyncClient] = PrivateAttr(default=None)
+    _client: Optional[aiohttp.ClientSession] = PrivateAttr(default=None)
     _session_id: Optional[str] = PrivateAttr(default=None)
     _last_event_id: Optional[str] = PrivateAttr(default=None)
     _jsonrpc_id_counter: int = PrivateAttr(default=1)
@@ -94,30 +92,34 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
     def _is_connected(self) -> bool:
         """Check if client is connected and valid."""
         return (
-            self._client is not None
-            and not self._client.is_closed
-            and self._initialized
+            self._client is not None and not self._client.closed and self._initialized
         )
 
-    async def _create_client(self) -> httpx.AsyncClient:
-        """Create a new HTTP client with connection pooling."""
+    def _create_client(self) -> aiohttp.ClientSession:
+        """Create a new aiohttp client session with connection pooling."""
         base_headers = {
             "Accept": "application/json, text/event-stream",
             "Cache-Control": "no-cache",
-            "User-Agent": "agentle-mcp-client/0.1.0",
+            "User-Agent": "agentle-mcp-client/0.1.0-aiohttp",
         }
 
         all_headers = {**base_headers, **self.headers}
 
-        # FIXED: Use connection pooling for production
-        limits = httpx.Limits(**self.connection_pool_limits)
+        # Use aiohttp's TCPConnector for connection pooling
+        connector = TCPConnector(
+            limit=self.connection_pool_limits.get("max_connections", 100),
+            limit_per_host=self.connection_pool_limits.get(
+                "max_keepalive_connections", 20
+            ),
+        )
 
-        return httpx.AsyncClient(
+        timeout = ClientTimeout(total=self.timeout_s)
+
+        return aiohttp.ClientSession(
             base_url=str(self.server_url),
-            timeout=httpx.Timeout(self.timeout_s),
             headers=all_headers,
-            limits=limits,
-            follow_redirects=True,  # Handle redirects
+            timeout=timeout,
+            connector=connector,
         )
 
     async def connect_async(self) -> None:
@@ -128,34 +130,27 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
 
             self._logger.info(f"Connecting to HTTP server: {self.server_url}")
 
-            # FIXED: Load session but don't skip connection establishment
             server_key = self._server_key
             session_data = await self.session_manager.get_session(server_key)
 
-            # Restore session data
             if session_data is not None:
                 self._logger.debug(f"Found existing session for {server_key}")
                 self._session_id = session_data.get("session_id")
                 self._last_event_id = session_data.get("last_event_id")
                 self._jsonrpc_id_counter = session_data.get("jsonrpc_counter", 1)
 
-            # ALWAYS create new client connection
             await self._establish_connection()
 
     async def _establish_connection(self) -> None:
         """Establish HTTP client and initialize protocol."""
         try:
-            # Clean up existing client
-            if self._client and not self._client.is_closed:
-                await self._client.aclose()
+            if self._client and not self._client.closed:
+                await self._client.close()
 
-            # Create new client
-            self._client = await self._create_client()
+            self._client = self._create_client()
 
-            # Validate connection with health check
             await self._health_check()
 
-            # Initialize protocol if not already done
             if not self._initialized:
                 await self._initialize_protocol()
 
@@ -175,14 +170,15 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
             raise ConnectionError("Client not initialized")
 
         try:
-            # Try a simple request to validate connectivity
-            response = await self._client.get("/health", timeout=5.0)
-            # Don't fail on 404 - server might not have health endpoint
-            if response.status_code >= 500:
-                raise ConnectionError(f"Server error: {response.status_code}")
-        except httpx.ConnectError as e:
+            timeout = ClientTimeout(total=5.0)
+            async with self._client.get(
+                "/health", timeout=timeout, allow_redirects=True
+            ) as response:
+                if response.status >= 500:
+                    raise ConnectionError(f"Server error: {response.status}")
+        except aiohttp.ClientConnectorError as e:
             raise ConnectionError(f"Cannot connect to server: {e}")
-        except httpx.TimeoutException as e:
+        except asyncio.TimeoutError as e:
             raise ConnectionError(f"Connection timeout: {e}")
 
     async def _initialize_protocol(self) -> None:
@@ -201,7 +197,6 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
         }
         self._jsonrpc_id_counter += 1
 
-        # FIXED: Retry initialization with exponential backoff
         for attempt in range(self.max_retries):
             try:
                 response = await self._send_request_internal(initialize_request)
@@ -209,7 +204,6 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
                 if "error" in response:
                     raise ConnectionError(f"Failed to initialize: {response['error']}")
 
-                # Send initialized notification
                 notification: Dict[str, Any] = {
                     "jsonrpc": "2.0",
                     "method": "initialized",
@@ -237,8 +231,7 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
         async with self._connection_lock:
             self._logger.info(f"Cleaning up connection to: {self.server_url}")
 
-            # Terminate session if active
-            if self._session_id and self._client and not self._client.is_closed:
+            if self._session_id and self._client and not self._client.closed:
                 await self._terminate_session()
 
             await self._cleanup_client()
@@ -250,8 +243,8 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
 
     async def _cleanup_client(self) -> None:
         """Clean up HTTP client resources."""
-        if self._client and not self._client.is_closed:
-            await self._client.aclose()
+        if self._client and not self._client.closed:
+            await self._client.close()
         self._client = None
 
     async def _terminate_session(self) -> None:
@@ -266,15 +259,22 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
                 if callable(self.mcp_endpoint)
                 else self.mcp_endpoint
             )
+            timeout = ClientTimeout(total=5.0)
 
-            await self._client.delete(endpoint, headers=headers, timeout=5.0)
-            self._logger.debug(f"Session terminated: {self._session_id}")
+            async with self._client.delete(
+                endpoint, headers=headers, timeout=timeout, allow_redirects=True
+            ) as response:
+                response.raise_for_status()
+                self._logger.debug(f"Session terminated: {self._session_id}")
 
-            # Remove from session manager
             await self.session_manager.delete_session(self._server_key)
 
-        except Exception as e:
+        except aiohttp.ClientError as e:
             self._logger.warning(f"Failed to terminate session: {e}")
+        except Exception as e:
+            self._logger.warning(
+                f"An unexpected error occurred during session termination: {e}"
+            )
 
     async def _store_session_data(self) -> None:
         """Store session data with error handling."""
@@ -290,7 +290,7 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
 
     async def _send_request_internal(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Internal request sending with proper error handling."""
-        if not self._client or self._client.is_closed:
+        if not self._client or self._client.closed:
             raise ConnectionError("Client not connected")
 
         headers: Dict[str, str] = {"Content-Type": "application/json"}
@@ -301,52 +301,52 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
             self.mcp_endpoint() if callable(self.mcp_endpoint) else self.mcp_endpoint
         )
 
-        response = await self._client.post(endpoint, json=request, headers=headers)
+        try:
+            async with self._client.post(
+                endpoint, json=request, headers=headers, allow_redirects=True
+            ) as response:
+                session_id = response.headers.get("Mcp-Session-Id")
+                if session_id and session_id != self._session_id:
+                    self._session_id = session_id
+                    await self._store_session_data()
 
-        # Handle session ID from response
-        session_id = response.headers.get("Mcp-Session-Id")
-        if session_id and session_id != self._session_id:
-            self._session_id = session_id
-            await self._store_session_data()
+                if response.status == 404 and self._session_id:
+                    self._logger.warning("Session expired, reconnecting...")
+                    self._session_id = None
+                    self._initialized = False
+                    await self.session_manager.delete_session(self._server_key)
+                    raise ConnectionError("Session expired")
 
-        # Handle different response types
-        if response.status_code == 404 and self._session_id:
-            # Session expired, reconnect
-            self._logger.warning("Session expired, reconnecting...")
-            self._session_id = None
-            self._initialized = False
-            await self.session_manager.delete_session(self._server_key)
-            raise ConnectionError("Session expired")
+                elif response.status != 200:
+                    error_text = await response.text()
+                    raise ConnectionError(f"HTTP {response.status}: {error_text}")
 
-        elif response.status_code != 200:
-            raise ConnectionError(f"HTTP {response.status_code}: {response.text}")
+                content_type = response.headers.get("Content-Type", "")
 
-        content_type = response.headers.get("Content-Type", "")
+                if "text/event-stream" in content_type:
+                    request_id = request.get("id")
+                    async for event in self._parse_sse_stream(response):
+                        data = event["data"]
+                        if isinstance(data, dict) and data.get("id") == request_id:
+                            if "error" in data:
+                                raise ValueError(f"JSON-RPC error: {data['error']}")
+                            return data
+                    raise ValueError("No matching response in SSE stream")
 
-        if "text/event-stream" in content_type:
-            # Handle SSE response
-            request_id = request.get("id")
-            async for event in self._parse_sse_stream(response):
-                data = event["data"]
-                if isinstance(data, dict) and data.get("id") == request_id:
+                elif "application/json" in content_type:
+                    data = await response.json()
                     if "error" in data:
                         raise ValueError(f"JSON-RPC error: {data['error']}")
                     return data
-            raise ValueError("No matching response in SSE stream")
 
-        elif "application/json" in content_type:
-            # Handle JSON response
-            data = response.json()
-            if "error" in data:
-                raise ValueError(f"JSON-RPC error: {data['error']}")
-            return data
-
-        else:
-            raise ValueError(f"Unexpected content type: {content_type}")
+                else:
+                    raise ValueError(f"Unexpected content type: {content_type}")
+        except aiohttp.ClientError as e:
+            raise ConnectionError(f"AIOHTTP Client Error: {e}")
 
     async def _send_notification_internal(self, notification: Dict[str, Any]) -> None:
         """Internal notification sending."""
-        if not self._client or self._client.is_closed:
+        if not self._client or self._client.closed:
             raise ConnectionError("Client not connected")
 
         headers: Dict[str, str] = {"Content-Type": "application/json"}
@@ -356,13 +356,18 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
         endpoint = (
             self.mcp_endpoint() if callable(self.mcp_endpoint) else self.mcp_endpoint
         )
-        await self._client.post(endpoint, json=notification, headers=headers)
+        try:
+            async with self._client.post(
+                endpoint, json=notification, headers=headers, allow_redirects=True
+            ) as response:
+                response.raise_for_status()
+        except aiohttp.ClientError as e:
+            raise ConnectionError(f"Failed to send notification: {e}")
 
     async def _send_request(
         self, method: str, params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Send request with retry logic and connection management."""
-        # Ensure connection
         if not self._is_connected():
             await self.connect_async()
 
@@ -379,7 +384,6 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
             "params": params or {},
         }
 
-        # Retry logic with exponential backoff
         last_exception = None
         for attempt in range(self.max_retries):
             try:
@@ -389,7 +393,6 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
             except ConnectionError as e:
                 last_exception = e
                 if "Session expired" in str(e):
-                    # Reconnect and retry
                     await self.connect_async()
                     continue
                 elif attempt == self.max_retries - 1:
@@ -402,68 +405,66 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
                 await asyncio.sleep(delay)
 
             except Exception as e:
-                # Non-recoverable errors
                 self._logger.error(f"Request failed with non-recoverable error: {e}")
                 raise
 
         raise last_exception or ConnectionError("Request failed after all retries")
 
     async def _parse_sse_stream(
-        self, response: httpx.Response
+        self, response: aiohttp.ClientResponse
     ) -> AsyncIterator[Dict[str, Any]]:
-        """Parse SSE stream with proper event handling."""
+        """Parse SSE stream from an aiohttp response."""
         event_data = ""
         event_id = None
         event_type = None
+        buffer = ""
 
-        async for line in response.aiter_lines():
-            line = line.rstrip("\n\r")
+        # aiohttp streams bytes, so we decode them and handle line breaks
+        async for chunk in response.content.iter_any():
+            buffer += chunk.decode("utf-8", "replace")
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                line = line.rstrip("\r")
 
-            if not line:
-                if event_data:
-                    event_data = event_data.rstrip("\n")
-                    try:
-                        data = json.loads(event_data)
-                        yield {
-                            "id": event_id,
-                            "type": event_type or "message",
-                            "data": data,
-                        }
-
-                        # Update last event ID
-                        if event_id:
-                            self._last_event_id = event_id
-                            await self._store_session_data()
-
-                    except json.JSONDecodeError:
-                        yield {
-                            "id": event_id,
-                            "type": event_type or "message",
-                            "data": event_data,
-                        }
-
-                    event_data = ""
-                    event_id = None
-                    event_type = None
-                continue
-
-            if line.startswith(":"):
-                continue
-
-            match = re.match(r"([^:]+)(?::(.*))?", line)
-            if match:
-                field, value = match.groups()
-                value = value.lstrip() if value else ""
-
-                if field == "data":
+                if not line:
                     if event_data:
-                        event_data += "\n" + value
-                    else:
-                        event_data = value
-                elif field == "id":
-                    event_id = value
-                elif field == "event":
-                    event_type = value
+                        event_data = event_data.rstrip("\n")
+                        try:
+                            data = json.loads(event_data)
+                            yield {
+                                "id": event_id,
+                                "type": event_type or "message",
+                                "data": data,
+                            }
+                            if event_id:
+                                self._last_event_id = event_id
+                                await self._store_session_data()
+                        except json.JSONDecodeError:
+                            yield {
+                                "id": event_id,
+                                "type": event_type or "message",
+                                "data": event_data,
+                            }
+
+                        event_data = ""
+                        event_id = None
+                        event_type = None
+                    continue
+
+                if line.startswith(":"):
+                    continue
+
+                match = re.match(r"([^:]+)(?::(.*))?", line)
+                if match:
+                    field, value = match.groups()
+                    value = value.lstrip() if value else ""
+
+                    if field == "data":
+                        event_data += value + "\n"
+                    elif field == "id":
+                        event_id = value
+                    elif field == "event":
+                        event_type = value
 
     # MCP Protocol methods with proper error handling
     async def list_tools_async(self) -> Sequence[Tool]:

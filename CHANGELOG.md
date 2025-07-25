@@ -71,3 +71,7 @@ pprint(chunk_ids)
 - refactor: changed all references of `gemini-2.0-flash` to `gemini-2.5-flash`
 
 - fix: Connecting to `SSEMCPServers` now does not give disconnection errors anymore.
+
+- fix: Connecting to `StdioMCPServers` now 
+
+- refactor: changed `httpx` to `aiohttp` usage in `StreamableHTTPMCPServer`.

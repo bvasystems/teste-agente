@@ -9,12 +9,13 @@ substitute the server URLs and commands with your actual server information.
 """
 
 import logging
-import os
 import sys
 
 from agentle.agents.agent import Agent
-
-from agentle.mcp.servers.stdio_mcp_server import StdioMCPServer
+from agentle.generations.providers.google.google_generation_provider import (
+    GoogleGenerationProvider,
+)
+from agentle.mcp.servers.streamable_http_mcp_server import StreamableHTTPMCPServer
 
 # Configure logging to show debug messages
 logging.basicConfig(
@@ -23,18 +24,16 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 
-http_server = StdioMCPServer(
-    server_name="Open Memory",
-    command="npx -y openmemory",
-    server_env={
-        "OPENMEMORY_API_KEY": os.getenv("OPENMEMORY_API_KEY") or "",
-        "CLIENT_NAME": os.getenv("CLIENT_NAME") or "",
-        "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY") or "",
-    },
+http_server = StreamableHTTPMCPServer(
+    server_name="Everything MCP",
+    server_url="http://localhost:3001",
 )
 
 # Create agent with MCP servers
 agent = Agent(
+    name="MCP-Augmented Assistant",
+    generation_provider=GoogleGenerationProvider(),
+    model="gemini-2.5-flash",
     instructions="You are a helpful assistant with access to external tools",
     mcp_servers=[http_server],
 )
