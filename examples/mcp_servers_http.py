@@ -9,10 +9,12 @@ substitute the server URLs and commands with your actual server information.
 """
 
 import logging
+import os
 import sys
 
 from agentle.agents.agent import Agent
-from agentle.mcp.servers.sse_mcp_server import SSEMCPServer
+
+from agentle.mcp.servers.stdio_mcp_server import StdioMCPServer
 
 # Configure logging to show debug messages
 logging.basicConfig(
@@ -21,10 +23,14 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 
-http_server = SSEMCPServer(
-    server_name="Everything MCP server",
-    server_url="http://localhost:3001",
-    messages_endpoint="/message",
+http_server = StdioMCPServer(
+    server_name="Open Memory",
+    command="npx -y openmemory",
+    server_env={
+        "OPENMEMORY_API_KEY": os.getenv("OPENMEMORY_API_KEY") or "",
+        "CLIENT_NAME": os.getenv("CLIENT_NAME") or "",
+        "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY") or "",
+    },
 )
 
 # Create agent with MCP servers

@@ -64,5 +64,10 @@ chunk_ids = qdrant.upsert_file(
 pprint(chunk_ids)
 ```
 
+- feat: `ConversationStore` to provide an easy way to store, in the server-side, the convesation with the agent.
+
+- feat: `chat_id` parameter in `run` and `run_async` methods to use with `ConversationStore`.
+
 - refactor: changed all references of `gemini-2.0-flash` to `gemini-2.5-flash`
 
+- fix: Connecting to `SSEMCPServers` now does not give disconnection errors anymore.
