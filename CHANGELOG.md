@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.7.5
+- chore: changing `AgentProtocol` to `Agent` in WhatsAppBot class.
+
 ## v0.7.4
 - fix: making WhatsAppProvider an ABC, instead of protocol. To allow it to be used whitin BaseModels.
 
