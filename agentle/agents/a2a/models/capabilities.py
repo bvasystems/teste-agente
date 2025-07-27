@@ -6,6 +6,7 @@ in the A2A protocol. It specifies what features and communication modes an agent
 enabling clients to adapt their interaction accordingly.
 """
 
+from typing import Literal
 from rsb.models.base_model import BaseModel
 from rsb.models.field import Field
 
@@ -51,7 +52,7 @@ class Capabilities(BaseModel):
         ```
     """
 
-    streaming: bool | None = Field(default=None)
+    streaming: Literal[False] | None = Field(default=None)
     """
     true if the agent supports SSE
     """

@@ -4,7 +4,7 @@ requires-python = ">=3.13"
 
 [[package]]
 name = "agentle"
-version = "0.6.24"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -45,6 +45,7 @@ dev = [
     { name = "groq" },
     { name = "influxdb-client" },
     { name = "ipykernel" },
+    { name = "jsonpickle" },
     { name = "langfuse" },
     { name = "mariadb" },
     { name = "markdownify" },
@@ -170,6 +171,7 @@ dev = [
     { name = "groq", specifier = ">=0.22.0" },
     { name = "influxdb-client", specifier = ">=1.48.0" },
     { name = "ipykernel", specifier = ">=6.29.5" },
+    { name = "jsonpickle", specifier = ">=4.1.1" },
     { name = "langfuse", specifier = ">=2.60.3" },
     { name = "mariadb", specifier = ">=1.1.12" },
     { name = "markdownify", specifier = ">=1.1.0" },
@@ -1791,6 +1793,15 @@ wheels = [
 ]
 
 [[package]]
+name = "jsonpickle"
+version = "4.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/a6/d07afcfdef402900229bcca795f80506b207af13a838d4d99ad45abf530c/jsonpickle-4.1.1.tar.gz", hash = "sha256:f86e18f13e2b96c1c1eede0b7b90095bbb61d99fedc14813c44dc2f361dbbae1", size = 316885 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c1/73/04df8a6fa66d43a9fd45c30f283cc4afff17da671886e451d52af60bdc7e/jsonpickle-4.1.1-py3-none-any.whl", hash = "sha256:bb141da6057898aa2438ff268362b126826c812a1721e31cf08a6e142910dc91", size = 47125 },
+]
+
+[[package]]
 name = "jsonschema"
 version = "4.23.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3321,14 +3332,14 @@ wheels = [
 
 [[package]]
 name = "rock-solid-base"
-version = "0.1.9"
+version = "0.1.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/55/71/6ef36f1c21e52425a51e6e69b95a4dda6f7a09698bcf398bdebf05ac7cc7/rock_solid_base-0.1.9.tar.gz", hash = "sha256:5dcf654cac4fd0a68df853ef6620a0134ed5b55454078ab5b6b112bddf814cfb", size = 67038 }
+sdist = { url = "https://files.pythonhosted.org/packages/47/15/4604d97d87debfd9ffccace32ccb4c9b8d25b32f8f14128c46888b97e99e/rock_solid_base-0.1.10.tar.gz", hash = "sha256:56805b55bd1cbf124f07a653805ea08c47fe28f4cfd901073e8cd7b8eb2c87b4", size = 67012 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ea/1f/2812d0fe850887f7c82c6e2f5125e4953fe966496f04e600a3681b6c3f56/rock_solid_base-0.1.9-py3-none-any.whl", hash = "sha256:d8346611518194a7f197f6caa851e5e5a6f5ed5b8e12886c842ef9e1cb9a8df1", size = 54217 },
+    { url = "https://files.pythonhosted.org/packages/ea/f0/491f5756d2b56ecfde520469cfbadcd5f903fb8279b3e54e774497b3d57b/rock_solid_base-0.1.10-py3-none-any.whl", hash = "sha256:05db03c7a2546e826c5026ee40daf51a3b70428307f05d8789aa0566c1dc2218", size = 54252 },
 ]
 
 [[package]]

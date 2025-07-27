@@ -424,6 +424,17 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             else None
         )
 
+    def serialize(self) -> str:
+        import jsonpickle
+
+        return cast(str, jsonpickle.encode(self))
+
+    @classmethod
+    def desserialize(cls, encoded: str) -> Agent[Any]:
+        import jsonpickle
+
+        return cast(Agent[Any], jsonpickle.decode(encoded))
+
     @alru_cache(maxsize=128, typed=True)
     async def _all_tools(self) -> Sequence[Tool[Any]]:
         # Reconstruct the tool execution environment
