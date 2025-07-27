@@ -45,7 +45,7 @@ async def call_me(param: str | float | None = None) -> ExampleResponse:
 
 
 agent = Agent(
-    uid=uuid4(),
+    uid=str(uuid4()),
     name="ExampleAgent",
     description="Example agent",
     url="example url",

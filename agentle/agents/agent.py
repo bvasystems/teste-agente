@@ -196,7 +196,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         ```
     """
 
-    uid: uuid.UUID = Field(default_factory=uuid.uuid4)
+    uid: str = Field(default_factory=lambda: str(uuid.uuid4))
     """
     A unique identifier for the agent.
     """
