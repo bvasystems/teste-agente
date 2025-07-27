@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.7.2
+- refactor: changing Agent id to str to allow more flexibility
+
 ## v0.7.1
 - feat: adding serialization and deserialization to the Agent class.
 
