@@ -4,7 +4,7 @@ import asyncio
 import logging
 from collections.abc import Callable, MutableSequence, Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, cast, Optional, override
+from typing import TYPE_CHECKING, Any, Optional, cast, override
 
 from rsb.coroutines.run_sync import run_sync
 from rsb.models.base_model import BaseModel
@@ -12,8 +12,8 @@ from rsb.models.config_dict import ConfigDict
 from rsb.models.field import Field
 from rsb.models.private_attr import PrivateAttr
 
+from agentle.agents.agent import Agent
 from agentle.agents.agent_input import AgentInput
-from agentle.agents.agent_protocol import AgentProtocol
 from agentle.agents.context import Context
 from agentle.agents.whatsapp.models.data import Data
 from agentle.agents.whatsapp.models.message import Message
@@ -60,7 +60,7 @@ class WhatsAppBot(BaseModel):
     and the Agentle agent, managing sessions and message conversion.
     """
 
-    agent: AgentProtocol[Any]
+    agent: Agent[Any]
     provider: WhatsAppProvider
     config: WhatsAppBotConfig = Field(default_factory=WhatsAppBotConfig)
     context_manager: Optional[SessionManager[Context]] = Field(default=None)
