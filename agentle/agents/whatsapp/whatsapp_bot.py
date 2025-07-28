@@ -131,32 +131,56 @@ class WhatsAppBot(BaseModel):
         Args:
             message: The incoming WhatsApp message
         """
+        logger.info(
+            f"[MESSAGE_HANDLER] Received message from {message.from_number}: "
+            + f"ID={message.id}, Type={type(message).__name__}"
+        )
+
         try:
             # Mark as read if configured
             if self.config.auto_read_messages:
+                logger.debug(f"[MESSAGE_HANDLER] Marking message {message.id} as read")
                 await self.provider.mark_message_as_read(message.id)
 
             # Get or create session
+            logger.debug(f"[MESSAGE_HANDLER] Getting session for {message.from_number}")
             session = await self.provider.get_session(message.from_number)
             if not session:
-                logger.error(f"Failed to get session for {message.from_number}")
+                logger.error(
+                    f"[MESSAGE_HANDLER] Failed to get session for {message.from_number}"
+                )
                 return
+
+            logger.info(
+                f"[SESSION_STATE] Session for {message.from_number}: "
+                + f"is_processing={session.is_processing}, "
+                + f"pending_messages={len(session.pending_messages)}, "
+                + f"message_count={session.message_count}"
+            )
 
             # Check rate limiting if spam protection is enabled
             if self.config.spam_protection_enabled:
+                logger.debug(
+                    f"[SPAM_PROTECTION] Checking rate limits for {message.from_number}"
+                )
                 can_process = session.update_rate_limiting(
                     self.config.max_messages_per_minute,
                     self.config.rate_limit_cooldown_seconds,
                 )
 
                 if not can_process:
-                    logger.warning(f"Rate limited user {message.from_number}")
+                    logger.warning(
+                        f"[SPAM_PROTECTION] Rate limited user {message.from_number}"
+                    )
                     if session.is_rate_limited:
                         await self._send_rate_limit_message(message.from_number)
                     return
 
             # Check welcome message for first interaction
             if session.message_count == 0 and self.config.welcome_message:
+                logger.info(
+                    f"[WELCOME] Sending welcome message to {message.from_number}"
+                )
                 await self.provider.send_text_message(
                     message.from_number, self.config.welcome_message
                 )
@@ -166,17 +190,26 @@ class WhatsAppBot(BaseModel):
 
             # Handle message based on batching configuration
             if self.config.enable_message_batching:
+                logger.info(
+                    f"[BATCHING] Processing message with batching for {message.from_number}"
+                )
                 await self._handle_message_with_batching(message, session)
             else:
+                logger.info(
+                    f"[IMMEDIATE] Processing message immediately for {message.from_number}"
+                )
                 # Process immediately (legacy behavior)
                 await self._process_single_message(message, session)
 
         except Exception as e:
-            logger.error(f"Error handling message: {e}", exc_info=True)
+            logger.error(
+                f"[ERROR] Error handling message from {message.from_number}: {e}",
+                exc_info=True,
+            )
             # Don't send error message if it's a technical error that users shouldn't see
             if not self._is_user_facing_error(e):
                 logger.warning(
-                    f"Technical error hidden from user {message.from_number}: {e}"
+                    f"[ERROR] Technical error hidden from user {message.from_number}: {e}"
                 )
             else:
                 await self._send_error_message(message.from_number, message.id)
@@ -187,114 +220,292 @@ class WhatsAppBot(BaseModel):
         """Handle message with batching logic."""
         phone_number = message.from_number
 
+        logger.info(
+            f"[BATCHING] Starting batch handling for {phone_number}, "
+            + f"current session state: is_processing={session.is_processing}"
+        )
+
         try:
             # Get or create processing lock for this user
             if phone_number not in self._processing_locks:
+                logger.debug(
+                    f"[BATCHING] Creating new processing lock for {phone_number}"
+                )
                 self._processing_locks[phone_number] = asyncio.Lock()
 
             async with self._processing_locks[phone_number]:
+                logger.debug(f"[BATCHING] Acquired processing lock for {phone_number}")
+
                 # Convert message to storable format
                 message_data = await self._message_to_dict(message)
+                logger.debug(f"[BATCHING] Converted message to dict: {message_data}")
 
                 # Add message to pending queue
                 session.add_pending_message(message_data)
+                logger.info(
+                    f"[BATCHING] Added message to pending queue for {phone_number}. "
+                    + f"Pending messages count: {len(session.pending_messages)}"
+                )
 
                 # Update session
                 await self.provider.update_session(session)
+                logger.debug(f"[BATCHING] Updated session for {phone_number}")
 
                 # If not currently processing, start batch processor
                 if not session.is_processing:
+                    logger.info(
+                        f"[BATCHING] Session not processing, starting batch processor for {phone_number}"
+                    )
+
+                    # CRITICAL FIX: Update session state and persist BEFORE starting processor
                     session.start_batch_processing(self.config.max_batch_wait_seconds)
+
+                    # CRITICAL: Persist the session state immediately
                     await self.provider.update_session(session)
+
+                    # Verify the session was persisted correctly
+                    verification_session = await self.provider.get_session(phone_number)
+                    if verification_session and verification_session.is_processing:
+                        logger.info(
+                            f"[BATCHING] Session state verified - is_processing={verification_session.is_processing} "
+                            + f"for {phone_number}"
+                        )
+                    else:
+                        logger.error(
+                            f"[BATCHING] CRITICAL ERROR: Session state not persisted correctly for {phone_number}! "
+                            + f"verification_session exists: {verification_session is not None}, "
+                            + f"is_processing: {verification_session.is_processing if verification_session else 'N/A'}"
+                        )
+                        # Try to recover by updating again
+                        session.is_processing = True
+                        await self.provider.update_session(session)
 
                     # Cancel existing batch processor if any
                     if phone_number in self._batch_processors:
-                        self._batch_processors[phone_number].cancel()
+                        logger.debug(
+                            f"[BATCHING] Cancelling existing batch processor for {phone_number}"
+                        )
+                        old_task = self._batch_processors[phone_number]
+                        old_task.cancel()
+                        # Wait briefly for cancellation to complete
+                        try:
+                            await asyncio.wait_for(old_task, timeout=0.1)
+                        except (asyncio.TimeoutError, asyncio.CancelledError):
+                            pass
 
                     # Start new batch processor
+                    logger.info(
+                        f"[BATCHING] Creating new batch processor task for {phone_number}"
+                    )
                     self._batch_processors[phone_number] = asyncio.create_task(
                         self._batch_processor(phone_number)
                     )
 
-                    logger.debug(f"Started batch processor for {phone_number}")
+                    # CRITICAL: Verify the task was created and is running
+                    task = self._batch_processors[phone_number]
+                    if task.done():
+                        logger.error(
+                            f"[BATCHING] CRITICAL ERROR: Batch processor task completed immediately for {phone_number}! "
+                            + f"Task result: {task.result() if not task.cancelled() else 'CANCELLED'}"
+                        )
+                    else:
+                        logger.info(
+                            f"[BATCHING] Batch processor task successfully started for {phone_number}"
+                        )
+
+                    logger.info(
+                        f"[BATCHING] Started batch processor for {phone_number}"
+                    )
+                else:
+                    logger.info(
+                        f"[BATCHING] Session already processing for {phone_number}, "
+                        + f"message added to existing batch. Current pending: {len(session.pending_messages)}"
+                    )
 
         except Exception as e:
             logger.error(
-                f"Error in message batching for {phone_number}: {e}", exc_info=True
+                f"[BATCHING_ERROR] Error in message batching for {phone_number}: {e}",
+                exc_info=True,
             )
             # Fall back to immediate processing to prevent message loss
             try:
+                logger.warning(
+                    f"[FALLBACK] Falling back to immediate processing for {phone_number}"
+                )
                 await self._process_single_message(message, session)
             except Exception as fallback_error:
                 logger.error(
-                    f"Fallback processing also failed for {phone_number}: {fallback_error}",
+                    f"[FALLBACK_ERROR] Fallback processing also failed for {phone_number}: {fallback_error}",
                     exc_info=True,
                 )
                 raise
 
     async def _batch_processor(self, phone_number: str) -> None:
         """Background task to process batched messages for a user."""
+        logger.info(f"[BATCH_PROCESSOR] Starting batch processor for {phone_number}")
+
+        # CRITICAL: Verify session state at startup
+        initial_session = await self.provider.get_session(phone_number)
+        if not initial_session:
+            logger.error(
+                f"[BATCH_PROCESSOR] CRITICAL: No session found at startup for {phone_number}"
+            )
+            return
+
+        if not initial_session.is_processing:
+            logger.error(
+                f"[BATCH_PROCESSOR] CRITICAL: Session not in processing state at startup for {phone_number}! "
+                + f"is_processing={initial_session.is_processing}, "
+                + f"pending_messages={len(initial_session.pending_messages)}"
+            )
+            # Try to recover by setting processing state
+            initial_session.is_processing = True
+            await self.provider.update_session(initial_session)
+            logger.warning(
+                f"[BATCH_PROCESSOR] Attempted to recover processing state for {phone_number}"
+            )
+
+        logger.info(
+            f"[BATCH_PROCESSOR] Initial state verified for {phone_number}: "
+            + f"is_processing={initial_session.is_processing}, "
+            + f"pending_messages={len(initial_session.pending_messages)}, "
+            + f"timeout_at={initial_session.batch_processing_timeout_at}"
+        )
+
+        iteration_count = 0
         try:
             while self._running:
+                iteration_count += 1
+                if iteration_count % 50 == 0:  # Log every 5 seconds (50 * 0.1s)
+                    logger.debug(
+                        f"[BATCH_PROCESSOR] Iteration {iteration_count} for {phone_number}"
+                    )
+
                 await asyncio.sleep(0.1)  # Small polling interval
 
                 try:
                     # Get current session
                     session = await self.provider.get_session(phone_number)
-                    if not session or not session.is_processing:
+                    if not session:
+                        logger.error(
+                            f"[BATCH_PROCESSOR] No session found for {phone_number}, exiting"
+                        )
                         break
 
+                    if not session.is_processing:
+                        logger.info(
+                            f"[BATCH_PROCESSOR] Session no longer processing for {phone_number}, exiting"
+                        )
+                        break
+
+                    if (
+                        iteration_count <= 5 or iteration_count % 20 == 0
+                    ):  # Log first 5 iterations and every 2s after
+                        logger.debug(
+                            f"[BATCH_PROCESSOR] Session state for {phone_number}: "
+                            + f"pending_messages={len(session.pending_messages)}, "
+                            + f"batch_timeout_at={session.batch_processing_timeout_at}, "
+                            + f"last_activity={session.last_activity}"
+                        )
+
                     # Check if batch should be processed
-                    if session.should_process_batch(
+                    should_process = session.should_process_batch(
                         self.config.message_batch_delay_seconds,
                         self.config.max_batch_wait_seconds,
-                    ):
+                    )
+
+                    if (
+                        iteration_count <= 10 or should_process
+                    ):  # Always log the decision when it's True
+                        logger.debug(
+                            f"[BATCH_PROCESSOR] Should process batch for {phone_number}: {should_process} "
+                            + f"(iteration {iteration_count})"
+                        )
+
+                    if should_process:
+                        logger.info(
+                            f"[BATCH_PROCESSOR] Batch ready for processing for {phone_number} "
+                            + f"(delay condition met after {iteration_count} iterations)"
+                        )
                         await self._process_message_batch(phone_number, session)
                         break
 
                     # Check if max batch size reached
                     if len(session.pending_messages) >= self.config.max_batch_size:
                         logger.info(
-                            f"Max batch size reached for {phone_number}, processing immediately"
+                            f"[BATCH_PROCESSOR] Max batch size ({self.config.max_batch_size}) "
+                            + f"reached for {phone_number}, processing immediately"
                         )
                         await self._process_message_batch(phone_number, session)
                         break
 
                 except Exception as e:
                     logger.error(
-                        f"Error in batch processing loop for {phone_number}: {e}",
+                        f"[BATCH_PROCESSOR_ERROR] Error in batch processing loop for {phone_number}: {e}",
                         exc_info=True,
                     )
                     # Try to clean up the session state
                     try:
                         session = await self.provider.get_session(phone_number)
                         if session:
+                            logger.debug(
+                                f"[BATCH_PROCESSOR] Cleaning up session state for {phone_number}"
+                            )
                             session.finish_batch_processing()
                             await self.provider.update_session(session)
                     except Exception as cleanup_error:
                         logger.error(
-                            f"Failed to cleanup session for {phone_number}: {cleanup_error}"
+                            f"[BATCH_PROCESSOR] Failed to cleanup session for {phone_number}: {cleanup_error}"
                         )
                     break
 
         except asyncio.CancelledError:
-            logger.debug(f"Batch processor for {phone_number} was cancelled")
+            logger.info(
+                f"[BATCH_PROCESSOR] Batch processor for {phone_number} was cancelled"
+            )
             raise
         except Exception as e:
             logger.error(
-                f"Critical error in batch processor for {phone_number}: {e}",
+                f"[BATCH_PROCESSOR_CRITICAL] Critical error in batch processor for {phone_number}: {e}",
                 exc_info=True,
             )
         finally:
             # Clean up
+            logger.info(
+                f"[BATCH_PROCESSOR] Cleaning up batch processor for {phone_number}"
+            )
             if phone_number in self._batch_processors:
                 del self._batch_processors[phone_number]
+                logger.debug(
+                    f"[BATCH_PROCESSOR] Removed batch processor task for {phone_number}"
+                )
+
+            # Ensure session is not left in processing state
+            try:
+                cleanup_session = await self.provider.get_session(phone_number)
+                if cleanup_session and cleanup_session.is_processing:
+                    logger.warning(
+                        f"[BATCH_PROCESSOR] Cleaning up processing state for {phone_number}"
+                    )
+                    cleanup_session.finish_batch_processing()
+                    await self.provider.update_session(cleanup_session)
+            except Exception as cleanup_error:
+                logger.error(
+                    f"[BATCH_PROCESSOR] Final cleanup error for {phone_number}: {cleanup_error}"
+                )
 
     async def _process_message_batch(
         self, phone_number: str, session: WhatsAppSession
     ) -> None:
         """Process a batch of messages for a user."""
+        logger.info(
+            f"[BATCH_PROCESSING] Starting to process message batch for {phone_number}"
+        )
+
         if not session.pending_messages:
+            logger.warning(
+                f"[BATCH_PROCESSING] No pending messages for {phone_number}, finishing batch processing"
+            )
             session.finish_batch_processing()
             await self.provider.update_session(session)
             return
@@ -302,6 +513,9 @@ class WhatsAppBot(BaseModel):
         try:
             # Show typing indicator
             if self.config.typing_indicator:
+                logger.debug(
+                    f"[BATCH_PROCESSING] Sending typing indicator to {phone_number}"
+                )
                 await self.provider.send_typing_indicator(
                     phone_number, self.config.typing_duration
                 )
@@ -311,20 +525,30 @@ class WhatsAppBot(BaseModel):
             session.finish_batch_processing()
 
             logger.info(
-                f"Processing batch of {len(pending_messages)} messages for {phone_number}"
+                f"[BATCH_PROCESSING] Processing batch of {len(pending_messages)} messages for {phone_number}"
             )
 
             # Convert message batch to agent input
+            logger.debug(
+                f"[BATCH_PROCESSING] Converting message batch to agent input for {phone_number}"
+            )
             agent_input = await self._convert_message_batch_to_input(
                 pending_messages, session
             )
 
             # Process with agent
+            logger.info(f"[BATCH_PROCESSING] Running agent for {phone_number}")
             response = await self._process_with_agent(agent_input, session)
+            logger.info(
+                f"[BATCH_PROCESSING] Agent processing complete for {phone_number}"
+            )
 
             # Send response (use the first message ID for reply)
             first_message_id = (
                 pending_messages[0].get("id") if pending_messages else None
+            )
+            logger.info(
+                f"[BATCH_PROCESSING] Sending response to {phone_number} (reply to: {first_message_id})"
             )
             await self._send_response(phone_number, response, first_message_id)
 
@@ -333,13 +557,20 @@ class WhatsAppBot(BaseModel):
             session.last_activity = datetime.now()
             await self.provider.update_session(session)
 
+            logger.info(
+                f"[BATCH_PROCESSING] Successfully processed batch for {phone_number}. "
+                + f"Total messages processed: {session.message_count}"
+            )
+
         except Exception as e:
             logger.error(
-                f"Error processing message batch for {phone_number}: {e}", exc_info=True
+                f"[BATCH_PROCESSING_ERROR] Error processing message batch for {phone_number}: {e}",
+                exc_info=True,
             )
             await self._send_error_message(phone_number)
         finally:
             # Ensure session state is cleaned up
+            logger.debug(f"[BATCH_PROCESSING] Final cleanup for {phone_number}")
             session.finish_batch_processing()
             await self.provider.update_session(session)
 
@@ -347,20 +578,35 @@ class WhatsAppBot(BaseModel):
         self, message: WhatsAppMessage, session: WhatsAppSession
     ) -> None:
         """Process a single message immediately (legacy behavior)."""
+        logger.info(
+            f"[SINGLE_MESSAGE] Processing single message for {message.from_number}"
+        )
+
         try:
             # Show typing indicator
             if self.config.typing_indicator:
+                logger.debug(
+                    f"[SINGLE_MESSAGE] Sending typing indicator to {message.from_number}"
+                )
                 await self.provider.send_typing_indicator(
                     message.from_number, self.config.typing_duration
                 )
 
             # Convert WhatsApp message to agent input
+            logger.debug(
+                f"[SINGLE_MESSAGE] Converting message to agent input for {message.from_number}"
+            )
             agent_input = await self._convert_message_to_input(message, session)
 
             # Process with agent
+            logger.info(f"[SINGLE_MESSAGE] Running agent for {message.from_number}")
             response = await self._process_with_agent(agent_input, session)
+            logger.info(
+                f"[SINGLE_MESSAGE] Agent processing complete for {message.from_number}"
+            )
 
             # Send response
+            logger.info(f"[SINGLE_MESSAGE] Sending response to {message.from_number}")
             await self._send_response(message.from_number, response, message.id)
 
             # Update session
@@ -368,8 +614,16 @@ class WhatsAppBot(BaseModel):
             session.last_activity = datetime.now()
             await self.provider.update_session(session)
 
+            logger.info(
+                f"[SINGLE_MESSAGE] Successfully processed single message for {message.from_number}. "
+                + f"Total messages processed: {session.message_count}"
+            )
+
         except Exception as e:
-            logger.error(f"Error processing single message: {e}", exc_info=True)
+            logger.error(
+                f"[SINGLE_MESSAGE_ERROR] Error processing single message: {e}",
+                exc_info=True,
+            )
             raise
 
     async def _message_to_dict(self, message: WhatsAppMessage) -> dict[str, Any]:
@@ -396,12 +650,17 @@ class WhatsAppBot(BaseModel):
                 }
             )
 
+        logger.debug(f"[MESSAGE_TO_DICT] Converted message {message.id} to dict")
         return message_data
 
     async def _convert_message_batch_to_input(
         self, message_batch: Sequence[dict[str, Any]], session: WhatsAppSession
     ) -> Any:
         """Convert a batch of messages to agent input with proper context loading."""
+        logger.info(
+            f"[BATCH_CONVERSION] Converting batch of {len(message_batch)} messages to agent input"
+        )
+
         parts: MutableSequence[TextPart | FilePart] = []
 
         # Add batch header if multiple messages
@@ -414,6 +673,10 @@ class WhatsAppBot(BaseModel):
 
         # Process each message in the batch
         for i, msg_data in enumerate(message_batch):
+            logger.debug(
+                f"[BATCH_CONVERSION] Processing message {i + 1}/{len(message_batch)}: {msg_data.get('id')}"
+            )
+
             if i > 0:  # Add separator between messages
                 parts.append(TextPart(text="---"))
 
@@ -422,6 +685,7 @@ class WhatsAppBot(BaseModel):
                 text = msg_data.get("text", "")
                 if text:
                     parts.append(TextPart(text=text))
+                    logger.debug(f"[BATCH_CONVERSION] Added text part: {text[:50]}...")
 
             # Handle media messages
             elif msg_data["type"] in [
@@ -431,33 +695,49 @@ class WhatsAppBot(BaseModel):
                 "WhatsAppVideoMessage",
             ]:
                 try:
+                    logger.debug(
+                        f"[BATCH_CONVERSION] Downloading media for message {msg_data['id']}"
+                    )
                     # Download media using the original message ID
                     media_data = await self.provider.download_media(msg_data["id"])
                     parts.append(
                         FilePart(data=media_data.data, mime_type=media_data.mime_type)
+                    )
+                    logger.debug(
+                        f"[BATCH_CONVERSION] Successfully downloaded media for {msg_data['id']}"
                     )
 
                     # Add caption if present
                     caption = msg_data.get("caption")
                     if caption:
                         parts.append(TextPart(text=f"Caption: {caption}"))
+                        logger.debug(f"[BATCH_CONVERSION] Added caption: {caption}")
 
                 except Exception as e:
-                    logger.error(f"Failed to download media from batch: {e}")
+                    logger.error(
+                        f"[BATCH_CONVERSION] Failed to download media from batch: {e}"
+                    )
                     parts.append(TextPart(text="[Media file - failed to download]"))
 
         # If no parts were added, add a placeholder
         if not parts:
+            logger.warning(
+                "[BATCH_CONVERSION] No parts were created, adding placeholder"
+            )
             parts.append(TextPart(text="[Empty message batch]"))
 
         # Create user message with first message's push name
         first_message = message_batch[0] if message_batch else {}
         push_name = first_message.get("push_name", "User")
         user_message = UserMessage.create_named(parts=parts, name=push_name)
+        logger.debug(f"[BATCH_CONVERSION] Created user message with name: {push_name}")
 
         # Get or create agent context with proper persistence
         context: Context
         if session.agent_context_id:
+            logger.debug(
+                f"[BATCH_CONVERSION] Loading existing context: {session.agent_context_id}"
+            )
             # Load existing context from storage
             if self.context_manager:
                 existing_context = await self.context_manager.get_session(
@@ -465,32 +745,44 @@ class WhatsAppBot(BaseModel):
                 )
                 if existing_context:
                     context = existing_context
-                    logger.debug(f"Loaded existing context: {session.agent_context_id}")
+                    logger.debug(
+                        f"[BATCH_CONVERSION] Loaded existing context: {session.agent_context_id}"
+                    )
                 else:
                     # Context expired or not found, create new one
                     context = Context()
                     context.context_id = session.agent_context_id
                     logger.debug(
-                        f"Context not found, created new: {session.agent_context_id}"
+                        f"[BATCH_CONVERSION] Context not found, created new: {session.agent_context_id}"
                     )
             else:
                 # Context manager not available, create new context
                 context = Context()
                 context.context_id = session.agent_context_id
-                logger.debug(f"Created new context: {session.agent_context_id}")
+                logger.debug(
+                    f"[BATCH_CONVERSION] Created new context: {session.agent_context_id}"
+                )
         else:
             # Create new context
             context = Context()
             session.agent_context_id = context.context_id
-            logger.debug(f"Created new context: {context.context_id}")
+            logger.debug(
+                f"[BATCH_CONVERSION] Created new context: {context.context_id}"
+            )
 
         # Add message to context
         context.message_history.append(user_message)
+        logger.debug(
+            f"[BATCH_CONVERSION] Added message to context, total messages: {len(context.message_history)}"
+        )
 
         # Save context to storage
         if self.context_manager:
             await self.context_manager.update_session(
                 context.context_id, context, create_if_missing=True
+            )
+            logger.debug(
+                f"[BATCH_CONVERSION] Saved context to storage: {context.context_id}"
             )
 
         return context
@@ -502,26 +794,33 @@ class WhatsAppBot(BaseModel):
         Args:
             payload: Raw webhook payload
         """
+        logger.info(f"[WEBHOOK] Received webhook event: {payload.event}")
+
         try:
             await self.provider.validate_webhook(payload)
 
             # Handle Evolution API events
             if payload.event == "messages.upsert":
+                logger.debug("[WEBHOOK] Handling messages.upsert event")
                 await self._handle_message_upsert(payload)
             elif payload.event == "messages.update":
+                logger.debug("[WEBHOOK] Handling messages.update event")
                 await self._handle_message_update(payload)
             elif payload.event == "connection.update":
+                logger.debug("[WEBHOOK] Handling connection.update event")
                 await self._handle_connection_update(payload)
             # Handle Meta API events
             elif payload.entry:
+                logger.debug("[WEBHOOK] Handling Meta API webhook")
                 await self._handle_meta_webhook(payload)
 
             # Call custom handlers
             for handler in self._webhook_handlers:
+                logger.debug("[WEBHOOK] Calling custom webhook handler")
                 await handler(payload)
 
         except Exception as e:
-            logger.error(f"Error handling webhook: {e}", exc_info=True)
+            logger.error(f"[WEBHOOK_ERROR] Error handling webhook: {e}", exc_info=True)
 
     def to_blacksheep_app(
         self,
@@ -584,6 +883,9 @@ class WhatsAppBot(BaseModel):
             try:
                 # Process the webhook payload
                 payload_data: WhatsAppWebhookPayload = webhook_payload.value
+                logger.info(
+                    f"[WEBHOOK_ENDPOINT] Received webhook payload: {payload_data.event}"
+                )
                 await self.handle_webhook(payload_data)
 
                 # Return success response
@@ -592,7 +894,10 @@ class WhatsAppBot(BaseModel):
                 )
 
             except Exception as e:
-                logger.error(f"Webhook processing error: {e}", exc_info=True)
+                logger.error(
+                    f"[WEBHOOK_ENDPOINT_ERROR] Webhook processing error: {e}",
+                    exc_info=True,
+                )
                 return blacksheep.json(
                     {"status": "error", "message": "Failed to process webhook"},
                     status=500,
@@ -608,35 +913,55 @@ class WhatsAppBot(BaseModel):
         self, message: WhatsAppMessage, session: WhatsAppSession
     ) -> Any:
         """Convert WhatsApp message to agent input with proper context loading."""
+        logger.info(
+            f"[SINGLE_CONVERSION] Converting single message to agent input for {message.from_number}"
+        )
+
         parts: MutableSequence[TextPart | FilePart] = []
 
         # Handle text messages
         if isinstance(message, WhatsAppTextMessage):
             parts.append(TextPart(text=message.text))
+            logger.debug(f"[SINGLE_CONVERSION] Added text part: {message.text[:50]}...")
 
         # Handle media messages
         elif isinstance(message, WhatsAppMediaMessage):
             # Download media
             try:
+                logger.debug(
+                    f"[SINGLE_CONVERSION] Downloading media for message {message.id}"
+                )
                 media_data = await self.provider.download_media(message.id)
                 parts.append(
                     FilePart(data=media_data.data, mime_type=media_data.mime_type)
+                )
+                logger.debug(
+                    f"[SINGLE_CONVERSION] Successfully downloaded media for {message.id}"
                 )
 
                 # Add caption if present
                 if message.caption:
                     parts.append(TextPart(text=f"Caption: {message.caption}"))
+                    logger.debug(
+                        f"[SINGLE_CONVERSION] Added caption: {message.caption}"
+                    )
 
             except Exception as e:
-                logger.error(f"Failed to download media: {e}")
+                logger.error(f"[SINGLE_CONVERSION] Failed to download media: {e}")
                 parts.append(TextPart(text="[Media file - failed to download]"))
 
         # Create user message
         user_message = UserMessage.create_named(parts=parts, name=message.push_name)
+        logger.debug(
+            f"[SINGLE_CONVERSION] Created user message with name: {message.push_name}"
+        )
 
         # Get or create agent context with proper persistence
         context: Context
         if session.agent_context_id:
+            logger.debug(
+                f"[SINGLE_CONVERSION] Loading existing context: {session.agent_context_id}"
+            )
             # Load existing context from storage
             if self.context_manager:
                 existing_context = await self.context_manager.get_session(
@@ -644,32 +969,44 @@ class WhatsAppBot(BaseModel):
                 )
                 if existing_context:
                     context = existing_context
-                    logger.debug(f"Loaded existing context: {session.agent_context_id}")
+                    logger.debug(
+                        f"[SINGLE_CONVERSION] Loaded existing context: {session.agent_context_id}"
+                    )
                 else:
                     # Context expired or not found, create new one
                     context = Context()
                     context.context_id = session.agent_context_id
                     logger.debug(
-                        f"Context not found, created new: {session.agent_context_id}"
+                        f"[SINGLE_CONVERSION] Context not found, created new: {session.agent_context_id}"
                     )
             else:
                 # Context manager not available, create new context
                 context = Context()
                 context.context_id = session.agent_context_id
-                logger.debug(f"Created new context: {session.agent_context_id}")
+                logger.debug(
+                    f"[SINGLE_CONVERSION] Created new context: {session.agent_context_id}"
+                )
         else:
             # Create new context
             context = Context()
             session.agent_context_id = context.context_id
-            logger.debug(f"Created new context: {context.context_id}")
+            logger.debug(
+                f"[SINGLE_CONVERSION] Created new context: {context.context_id}"
+            )
 
         # Add message to context
         context.message_history.append(user_message)
+        logger.debug(
+            f"[SINGLE_CONVERSION] Added message to context, total messages: {len(context.message_history)}"
+        )
 
         # Save context to storage
         if self.context_manager:
             await self.context_manager.update_session(
                 context.context_id, context, create_if_missing=True
+            )
+            logger.debug(
+                f"[SINGLE_CONVERSION] Saved context to storage: {context.context_id}"
             )
 
         return context
@@ -678,10 +1015,14 @@ class WhatsAppBot(BaseModel):
         self, agent_input: AgentInput, session: WhatsAppSession
     ) -> str:
         """Process input with agent and return response text."""
+        logger.info("[AGENT_PROCESSING] Starting agent processing")
+
         try:
             async with self.agent.start_mcp_servers_async():
+                logger.debug("[AGENT_PROCESSING] Started MCP servers")
                 # Run agent with the full context
                 result = await self.agent.run_async(agent_input)
+                logger.info("[AGENT_PROCESSING] Agent run completed successfully")
 
             # Save the updated context after agent processing
             if (
@@ -695,42 +1036,77 @@ class WhatsAppBot(BaseModel):
                     create_if_missing=True,
                 )
                 logger.debug(
-                    f"Saved updated context: {cast(Context, agent_input).context_id}"
+                    f"[AGENT_PROCESSING] Saved updated context: {cast(Context, agent_input).context_id}"
                 )
 
             if result.generation:
-                return result.text
+                response_text = result.text
+                logger.info(
+                    f"[AGENT_PROCESSING] Generated response (length: {len(response_text)})"
+                )
+                return response_text
 
+            logger.warning("[AGENT_PROCESSING] No generation found in result")
             return "I processed your message but have no response."
 
         except Exception as e:
-            logger.error(f"Agent processing error: {e}", exc_info=True)
+            logger.error(
+                f"[AGENT_PROCESSING_ERROR] Agent processing error: {e}", exc_info=True
+            )
             raise
 
     async def _send_response(
         self, to: str, response: str, reply_to: str | None = None
     ) -> None:
         """Send response message(s) to user."""
+        logger.info(
+            f"[SEND_RESPONSE] Sending response to {to} (length: {len(response)}, reply_to: {reply_to})"
+        )
+
         # Split long messages
         messages = self._split_message(response)
+        logger.debug(f"[SEND_RESPONSE] Split response into {len(messages)} parts")
 
         for i, msg in enumerate(messages):
+            logger.debug(
+                f"[SEND_RESPONSE] Sending message part {i + 1}/{len(messages)} to {to}"
+            )
             # Only quote the first message
             quoted_id = reply_to if i == 0 else None
 
-            await self.provider.send_text_message(
-                to=to, text=msg, quoted_message_id=quoted_id
-            )
+            try:
+                sent_message = await self.provider.send_text_message(
+                    to=to, text=msg, quoted_message_id=quoted_id
+                )
+                logger.debug(
+                    f"[SEND_RESPONSE] Successfully sent message part {i + 1} to {to}: {sent_message.id}"
+                )
+            except Exception as e:
+                logger.error(
+                    f"[SEND_RESPONSE_ERROR] Failed to send message part {i + 1} to {to}: {e}"
+                )
+                raise
 
             # Small delay between messages
             if i < len(messages) - 1:
                 await asyncio.sleep(0.5)
 
+        logger.info(
+            f"[SEND_RESPONSE] Successfully sent all {len(messages)} message parts to {to}"
+        )
+
     async def _send_error_message(self, to: str, reply_to: str | None = None) -> None:
         """Send error message to user."""
-        await self.provider.send_text_message(
-            to=to, text=self.config.error_message, quoted_message_id=reply_to
-        )
+        logger.warning(f"[SEND_ERROR] Sending error message to {to}")
+        try:
+            await self.provider.send_text_message(
+                to=to, text=self.config.error_message, quoted_message_id=reply_to
+            )
+            logger.debug(f"[SEND_ERROR] Successfully sent error message to {to}")
+        except Exception as e:
+            logger.error(
+                f"[SEND_ERROR_ERROR] Failed to send error message to {to}: {e}"
+            )
 
     def _is_user_facing_error(self, error: Exception) -> bool:
         """Determine if an error should be communicated to the user."""
@@ -767,7 +1143,14 @@ class WhatsAppBot(BaseModel):
     async def _send_rate_limit_message(self, to: str) -> None:
         """Send rate limit notification to user."""
         message = "You're sending messages too quickly. Please wait a moment before sending more messages."
-        await self.provider.send_text_message(to=to, text=message)
+        logger.info(f"[RATE_LIMIT] Sending rate limit message to {to}")
+        try:
+            await self.provider.send_text_message(to=to, text=message)
+            logger.debug(f"[RATE_LIMIT] Successfully sent rate limit message to {to}")
+        except Exception as e:
+            logger.error(
+                f"[RATE_LIMIT_ERROR] Failed to send rate limit message to {to}: {e}"
+            )
 
     def _split_message(self, text: str) -> Sequence[str]:
         """Split long message into chunks."""
@@ -806,6 +1189,8 @@ class WhatsAppBot(BaseModel):
 
     async def _handle_message_upsert(self, payload: WhatsAppWebhookPayload) -> None:
         """Handle new message event."""
+        logger.debug("[MESSAGE_UPSERT] Processing message upsert event")
+
         # Check if this is Evolution API format
         if payload.event == "messages.upsert" and payload.data:
             # Evolution API format - single message in data field
@@ -813,53 +1198,76 @@ class WhatsAppBot(BaseModel):
 
             # Skip outgoing messages
             if data["key"].get("fromMe", False):
+                logger.debug("[MESSAGE_UPSERT] Skipping outgoing message")
                 return
 
             # Parse message directly from data (which contains the message info)
             message = self._parse_evolution_message_from_data(data)
             if message:
+                logger.info(
+                    f"[MESSAGE_UPSERT] Parsed message: {message.id} from {message.from_number}"
+                )
                 await self.handle_message(message)
+            else:
+                logger.warning(
+                    "[MESSAGE_UPSERT] Failed to parse message from Evolution API data"
+                )
 
         # Check if this is Meta API format
         elif payload.entry:
             # Meta API format - handle through provider
+            logger.debug("[MESSAGE_UPSERT] Processing Meta API message upsert")
             await self.provider.validate_webhook(payload)
             # Meta API provider should handle message parsing differently
             # For now, we'll delegate this to the provider
             pass
         else:
-            logger.warning("Unknown webhook format in message upsert")
+            logger.warning("[MESSAGE_UPSERT] Unknown webhook format in message upsert")
 
     async def _handle_message_update(self, payload: WhatsAppWebhookPayload) -> None:
         """Handle message update event (status changes)."""
         if payload.event == "messages.update" and payload.data:
             # Evolution API format
-            logger.debug(f"Message update: {payload.data}")
+            logger.debug(f"[MESSAGE_UPDATE] Message update: {payload.data}")
         elif payload.entry:
             # Meta API format
-            logger.debug(f"Message update: {payload.entry}")
+            logger.debug(f"[MESSAGE_UPDATE] Message update: {payload.entry}")
         else:
-            logger.debug(f"Message update: {payload}")
+            logger.debug(f"[MESSAGE_UPDATE] Message update: {payload}")
 
     async def _handle_connection_update(self, payload: WhatsAppWebhookPayload) -> None:
         """Handle connection status update."""
         if payload.event == "connection.update" and payload.data:
             # Evolution API format
             # Note: connection updates might have different data structure
-            logger.info(f"WhatsApp connection update: {payload.data}")
+            logger.info(
+                f"[CONNECTION_UPDATE] WhatsApp connection update: {payload.data}"
+            )
         elif payload.entry:
             # Meta API format
-            logger.info(f"WhatsApp connection update: {payload.entry}")
+            logger.info(
+                f"[CONNECTION_UPDATE] WhatsApp connection update: {payload.entry}"
+            )
         else:
-            logger.info(f"WhatsApp connection update: {payload}")
+            logger.info(f"[CONNECTION_UPDATE] WhatsApp connection update: {payload}")
 
     def _parse_evolution_message_from_data(self, data: Data) -> WhatsAppMessage | None:
         """Parse Evolution API message from webhook data field."""
+        logger.debug("[PARSE_EVOLUTION] Parsing Evolution message from data")
+
         try:
             # Extract key information
             key = data["key"]
             message_id = key.get("id")
             from_number = key.get("remoteJid")
+
+            if not message_id or not from_number:
+                logger.warning("[PARSE_EVOLUTION] Missing message ID or from_number")
+                return None
+
+            logger.debug(
+                f"[PARSE_EVOLUTION] Message ID: {message_id}, From: {from_number}"
+            )
 
             # Check if there's a message field
             if data.get("message"):
@@ -868,6 +1276,10 @@ class WhatsAppBot(BaseModel):
                 # Handle text messages
                 if msg_content.get("conversation"):
                     text = msg_content.get("conversation")
+                    logger.debug(
+                        f"[PARSE_EVOLUTION] Found conversation text: {text[:50] if text else 'None'}..."
+                    )
+
                     return WhatsAppTextMessage(
                         id=message_id,
                         push_name=data["pushName"],
@@ -888,6 +1300,10 @@ class WhatsAppBot(BaseModel):
                         if extended_text_message
                         else ""
                     )
+                    logger.debug(
+                        f"[PARSE_EVOLUTION] Found extended text: {text[:50] if text else 'None'}..."
+                    )
+
                     return WhatsAppTextMessage(
                         id=message_id,
                         from_number=from_number,
@@ -901,6 +1317,7 @@ class WhatsAppBot(BaseModel):
 
                 # Handle image messages
                 elif msg_content.get("imageMessage"):
+                    logger.debug("[PARSE_EVOLUTION] Found image message")
                     image_msg = msg_content.get("imageMessage")
                     return WhatsAppImageMessage(
                         id=message_id,
@@ -919,6 +1336,7 @@ class WhatsAppBot(BaseModel):
 
                 # Handle document messages
                 elif msg_content.get("documentMessage"):
+                    logger.debug("[PARSE_EVOLUTION] Found document message")
                     doc_msg = msg_content.get("documentMessage")
                     return WhatsAppDocumentMessage(
                         id=message_id,
@@ -940,6 +1358,7 @@ class WhatsAppBot(BaseModel):
 
                 # Handle audio messages
                 elif msg_content.get("audioMessage"):
+                    logger.debug("[PARSE_EVOLUTION] Found audio message")
                     audio_msg = msg_content.get("audioMessage")
                     return WhatsAppAudioMessage(
                         id=message_id,
@@ -955,6 +1374,7 @@ class WhatsAppBot(BaseModel):
                         else "audio/ogg",
                     )
                 elif msg_content.get("videoMessage"):
+                    logger.debug("[PARSE_EVOLUTION] Found video message")
                     video_msg = msg_content.get("videoMessage")
                     return WhatsAppVideoMessage(
                         id=message_id,
@@ -970,16 +1390,26 @@ class WhatsAppBot(BaseModel):
                         if video_msg
                         else "",
                     )
+                else:
+                    logger.warning(
+                        f"[PARSE_EVOLUTION] Unknown message type in content: {list(msg_content.keys())}"
+                    )
 
         except Exception as e:
-            logger.error(f"Error parsing Evolution message from data: {e}")
+            logger.error(
+                f"[PARSE_EVOLUTION_ERROR] Error parsing Evolution message from data: {e}",
+                exc_info=True,
+            )
 
         return None
 
     async def _handle_meta_webhook(self, payload: WhatsAppWebhookPayload) -> None:
         """Handle Meta WhatsApp Business API webhooks."""
+        logger.debug("[META_WEBHOOK] Processing Meta webhook")
+
         try:
             if not payload.entry:
+                logger.warning("[META_WEBHOOK] No entry data in Meta webhook")
                 return
 
             for entry_item in payload.entry:
@@ -989,6 +1419,7 @@ class WhatsAppBot(BaseModel):
                     value = change.get("value", {})
 
                     if field == "messages":
+                        logger.debug("[META_WEBHOOK] Processing messages field")
                         # Process incoming messages
                         messages = value.get("messages", [])
                         for msg_data in messages:
@@ -997,26 +1428,37 @@ class WhatsAppBot(BaseModel):
                                 msg_data.get("from")
                                 == self.provider.get_instance_identifier()
                             ):
+                                logger.debug("[META_WEBHOOK] Skipping outgoing message")
                                 continue
 
                             message = await self._parse_meta_message(msg_data)
                             if message:
+                                logger.info(
+                                    f"[META_WEBHOOK] Parsed message: {message.id} from {message.from_number}"
+                                )
                                 await self.handle_message(message)
 
         except Exception as e:
-            logger.error(f"Error handling Meta webhook: {e}")
+            logger.error(
+                f"[META_WEBHOOK_ERROR] Error handling Meta webhook: {e}", exc_info=True
+            )
 
     async def _parse_meta_message(
         self, msg_data: dict[str, Any]
     ) -> WhatsAppMessage | None:
         """Parse Meta API message format."""
+        logger.debug("[PARSE_META] Parsing Meta API message")
+
         try:
             message_id = msg_data.get("id")
             from_number = msg_data.get("from")
             timestamp_str = msg_data.get("timestamp")
 
             if not message_id or not from_number:
+                logger.warning("[PARSE_META] Missing message ID or from_number")
                 return None
+
+            logger.debug(f"[PARSE_META] Message ID: {message_id}, From: {from_number}")
 
             # Convert timestamp
             timestamp = (
@@ -1027,6 +1469,7 @@ class WhatsAppBot(BaseModel):
 
             # Handle different message types
             msg_type = msg_data.get("type")
+            logger.debug(f"[PARSE_META] Message type: {msg_type}")
 
             if msg_type == "text":
                 text_data = msg_data.get("text", {})
@@ -1098,7 +1541,9 @@ class WhatsAppBot(BaseModel):
                 )
 
         except Exception as e:
-            logger.error(f"Error parsing Meta message: {e}")
+            logger.error(
+                f"[PARSE_META_ERROR] Error parsing Meta message: {e}", exc_info=True
+            )
 
         return None
 
