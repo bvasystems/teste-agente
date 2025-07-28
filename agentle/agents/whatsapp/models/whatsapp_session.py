@@ -63,7 +63,8 @@ class WhatsAppSession(BaseModel):
         )
 
         self.pending_messages.append(message_data)
-        self.last_activity = datetime.now()
+        # CRITICAL FIX: Don't update last_activity here to avoid resetting the batch timer
+        # Only update when we're not in a batching process
 
         logger.info(
             f"[SESSION] Added pending message to {self.phone_number}. "
@@ -154,9 +155,9 @@ class WhatsAppSession(BaseModel):
                 + f"Messages: {self.messages_in_current_minute}/{max_messages_per_minute}"
             )
             self.is_rate_limited = True
-            self.rate_limit_until = now.replace(
-                second=now.second + cooldown_seconds, microsecond=0
-            )
+            from datetime import timedelta
+
+            self.rate_limit_until = now + timedelta(seconds=cooldown_seconds)
             return False
 
         self.last_message_at = now
@@ -200,7 +201,19 @@ class WhatsAppSession(BaseModel):
             )
             return True
 
-        # Process if delay period has passed since last message
+        # CRITICAL FIX: Use batch start time instead of last activity for delay calculation
+        if self.last_batch_started_at:
+            time_since_batch_start = (now - self.last_batch_started_at).total_seconds()
+            should_process = time_since_batch_start >= batch_delay_seconds
+
+            logger.debug(
+                f"[BATCH_DECISION] Time since batch started for {self.phone_number}: "
+                + f"{time_since_batch_start:.2f}s (threshold: {batch_delay_seconds}s) -> {should_process}"
+            )
+
+            return should_process
+
+        # Fallback to last activity if batch start time is not available
         if self.last_activity:
             time_since_last = (now - self.last_activity).total_seconds()
             should_process = time_since_last >= batch_delay_seconds
@@ -212,7 +225,9 @@ class WhatsAppSession(BaseModel):
 
             return should_process
 
-        logger.debug(f"[BATCH_DECISION] No last_activity time for {self.phone_number}")
+        logger.debug(
+            f"[BATCH_DECISION] No timing reference available for {self.phone_number}"
+        )
         return False
 
     def start_batch_processing(self, max_wait_seconds: float) -> None:

@@ -33,14 +33,14 @@ class WhatsAppBotConfig(BaseModel):
         default=True, description="Enable message batching to prevent spam"
     )
     message_batch_delay_seconds: float = Field(
-        default=2.0,
+        default=1.0,  # REDUCED from 3.0 to 1.0 for faster response
         description="Delay to wait for additional messages before processing batch",
     )
     max_batch_size: int = Field(
         default=10, description="Maximum number of messages to batch together"
     )
     max_batch_wait_seconds: float = Field(
-        default=40.0,
+        default=5.0,  # REDUCED from 10.0 to 5.0 for faster response
         description="Maximum time to wait for batching before forcing processing",
     )
     spam_protection_enabled: bool = Field(
