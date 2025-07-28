@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, MutableSequence, Sequence
+from collections.abc import Callable, MutableMapping, MutableSequence, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional, cast, override
 
@@ -54,10 +54,10 @@ logger = logging.getLogger(__name__)
 
 class WhatsAppBot(BaseModel):
     """
-    WhatsApp bot that wraps an Agentle agent.
+    WhatsApp bot that wraps an Agentle agent with message batching and spam protection.
 
     This class handles the integration between WhatsApp messages
-    and the Agentle agent, managing sessions and message conversion.
+    and the Agentle agent, managing sessions, message batching, and spam protection.
     """
 
     agent: Agent[Any]
@@ -68,6 +68,12 @@ class WhatsAppBot(BaseModel):
     _running: bool = PrivateAttr(default=False)
     _webhook_handlers: MutableSequence[Callable[..., Any]] = PrivateAttr(
         default_factory=list
+    )
+    _batch_processors: MutableMapping[str, asyncio.Task[Any]] = PrivateAttr(
+        default_factory=dict
+    )
+    _processing_locks: MutableMapping[str, asyncio.Lock] = PrivateAttr(
+        default_factory=dict
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -94,19 +100,33 @@ class WhatsAppBot(BaseModel):
         """Start the WhatsApp bot."""
         await self.provider.initialize()
         self._running = True
-        logger.info("WhatsApp bot started for agent:")
+        logger.info("WhatsApp bot started with message batching enabled")
 
     async def stop_async(self) -> None:
         """Stop the WhatsApp bot."""
         self._running = False
+
+        # Cancel all batch processors
+        for phone_number, task in self._batch_processors.items():
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                logger.debug(f"Cancelled batch processor for {phone_number}")
+
+        self._batch_processors.clear()
+        self._processing_locks.clear()
+
         await self.provider.shutdown()
         if self.context_manager:
             await self.context_manager.close()
-        logger.info("WhatsApp bot stopped for agent:")
+        logger.info("WhatsApp bot stopped")
 
     async def handle_message(self, message: WhatsAppMessage) -> None:
         """
-        Handle incoming WhatsApp message.
+        Handle incoming WhatsApp message with batching and spam protection.
 
         Args:
             message: The incoming WhatsApp message
@@ -122,12 +142,212 @@ class WhatsAppBot(BaseModel):
                 logger.error(f"Failed to get session for {message.from_number}")
                 return
 
-            # Check if this is first interaction
+            # Check rate limiting if spam protection is enabled
+            if self.config.spam_protection_enabled:
+                can_process = session.update_rate_limiting(
+                    self.config.max_messages_per_minute,
+                    self.config.rate_limit_cooldown_seconds,
+                )
+
+                if not can_process:
+                    logger.warning(f"Rate limited user {message.from_number}")
+                    if session.is_rate_limited:
+                        await self._send_rate_limit_message(message.from_number)
+                    return
+
+            # Check welcome message for first interaction
             if session.message_count == 0 and self.config.welcome_message:
                 await self.provider.send_text_message(
                     message.from_number, self.config.welcome_message
                 )
+                # Increment message count to prevent sending welcome message again
+                session.message_count += 1
+                await self.provider.update_session(session)
 
+            # Handle message based on batching configuration
+            if self.config.enable_message_batching:
+                await self._handle_message_with_batching(message, session)
+            else:
+                # Process immediately (legacy behavior)
+                await self._process_single_message(message, session)
+
+        except Exception as e:
+            logger.error(f"Error handling message: {e}", exc_info=True)
+            # Don't send error message if it's a technical error that users shouldn't see
+            if not self._is_user_facing_error(e):
+                logger.warning(
+                    f"Technical error hidden from user {message.from_number}: {e}"
+                )
+            else:
+                await self._send_error_message(message.from_number, message.id)
+
+    async def _handle_message_with_batching(
+        self, message: WhatsAppMessage, session: WhatsAppSession
+    ) -> None:
+        """Handle message with batching logic."""
+        phone_number = message.from_number
+
+        try:
+            # Get or create processing lock for this user
+            if phone_number not in self._processing_locks:
+                self._processing_locks[phone_number] = asyncio.Lock()
+
+            async with self._processing_locks[phone_number]:
+                # Convert message to storable format
+                message_data = await self._message_to_dict(message)
+
+                # Add message to pending queue
+                session.add_pending_message(message_data)
+
+                # Update session
+                await self.provider.update_session(session)
+
+                # If not currently processing, start batch processor
+                if not session.is_processing:
+                    session.start_batch_processing(self.config.max_batch_wait_seconds)
+                    await self.provider.update_session(session)
+
+                    # Cancel existing batch processor if any
+                    if phone_number in self._batch_processors:
+                        self._batch_processors[phone_number].cancel()
+
+                    # Start new batch processor
+                    self._batch_processors[phone_number] = asyncio.create_task(
+                        self._batch_processor(phone_number)
+                    )
+
+                    logger.debug(f"Started batch processor for {phone_number}")
+
+        except Exception as e:
+            logger.error(
+                f"Error in message batching for {phone_number}: {e}", exc_info=True
+            )
+            # Fall back to immediate processing to prevent message loss
+            try:
+                await self._process_single_message(message, session)
+            except Exception as fallback_error:
+                logger.error(
+                    f"Fallback processing also failed for {phone_number}: {fallback_error}",
+                    exc_info=True,
+                )
+                raise
+
+    async def _batch_processor(self, phone_number: str) -> None:
+        """Background task to process batched messages for a user."""
+        try:
+            while self._running:
+                await asyncio.sleep(0.1)  # Small polling interval
+
+                try:
+                    # Get current session
+                    session = await self.provider.get_session(phone_number)
+                    if not session or not session.is_processing:
+                        break
+
+                    # Check if batch should be processed
+                    if session.should_process_batch(
+                        self.config.message_batch_delay_seconds,
+                        self.config.max_batch_wait_seconds,
+                    ):
+                        await self._process_message_batch(phone_number, session)
+                        break
+
+                    # Check if max batch size reached
+                    if len(session.pending_messages) >= self.config.max_batch_size:
+                        logger.info(
+                            f"Max batch size reached for {phone_number}, processing immediately"
+                        )
+                        await self._process_message_batch(phone_number, session)
+                        break
+
+                except Exception as e:
+                    logger.error(
+                        f"Error in batch processing loop for {phone_number}: {e}",
+                        exc_info=True,
+                    )
+                    # Try to clean up the session state
+                    try:
+                        session = await self.provider.get_session(phone_number)
+                        if session:
+                            session.finish_batch_processing()
+                            await self.provider.update_session(session)
+                    except Exception as cleanup_error:
+                        logger.error(
+                            f"Failed to cleanup session for {phone_number}: {cleanup_error}"
+                        )
+                    break
+
+        except asyncio.CancelledError:
+            logger.debug(f"Batch processor for {phone_number} was cancelled")
+            raise
+        except Exception as e:
+            logger.error(
+                f"Critical error in batch processor for {phone_number}: {e}",
+                exc_info=True,
+            )
+        finally:
+            # Clean up
+            if phone_number in self._batch_processors:
+                del self._batch_processors[phone_number]
+
+    async def _process_message_batch(
+        self, phone_number: str, session: WhatsAppSession
+    ) -> None:
+        """Process a batch of messages for a user."""
+        if not session.pending_messages:
+            session.finish_batch_processing()
+            await self.provider.update_session(session)
+            return
+
+        try:
+            # Show typing indicator
+            if self.config.typing_indicator:
+                await self.provider.send_typing_indicator(
+                    phone_number, self.config.typing_duration
+                )
+
+            # Get all pending messages
+            pending_messages = session.clear_pending_messages()
+            session.finish_batch_processing()
+
+            logger.info(
+                f"Processing batch of {len(pending_messages)} messages for {phone_number}"
+            )
+
+            # Convert message batch to agent input
+            agent_input = await self._convert_message_batch_to_input(
+                pending_messages, session
+            )
+
+            # Process with agent
+            response = await self._process_with_agent(agent_input, session)
+
+            # Send response (use the first message ID for reply)
+            first_message_id = (
+                pending_messages[0].get("id") if pending_messages else None
+            )
+            await self._send_response(phone_number, response, first_message_id)
+
+            # Update session
+            session.message_count += len(pending_messages)
+            session.last_activity = datetime.now()
+            await self.provider.update_session(session)
+
+        except Exception as e:
+            logger.error(
+                f"Error processing message batch for {phone_number}: {e}", exc_info=True
+            )
+            await self._send_error_message(phone_number)
+        finally:
+            # Ensure session state is cleaned up
+            session.finish_batch_processing()
+            await self.provider.update_session(session)
+
+    async def _process_single_message(
+        self, message: WhatsAppMessage, session: WhatsAppSession
+    ) -> None:
+        """Process a single message immediately (legacy behavior)."""
+        try:
             # Show typing indicator
             if self.config.typing_indicator:
                 await self.provider.send_typing_indicator(
@@ -149,8 +369,131 @@ class WhatsAppBot(BaseModel):
             await self.provider.update_session(session)
 
         except Exception as e:
-            logger.error(f"Error handling message: {e}", exc_info=True)
-            await self._send_error_message(message.from_number, message.id)
+            logger.error(f"Error processing single message: {e}", exc_info=True)
+            raise
+
+    async def _message_to_dict(self, message: WhatsAppMessage) -> dict[str, Any]:
+        """Convert WhatsApp message to dictionary for storage."""
+        message_data: dict[str, Any] = {
+            "id": message.id,
+            "type": message.__class__.__name__,
+            "from_number": message.from_number,
+            "to_number": message.to_number,
+            "timestamp": message.timestamp.isoformat(),
+            "push_name": message.push_name,
+        }
+
+        # Add type-specific data
+        if isinstance(message, WhatsAppTextMessage):
+            message_data["text"] = message.text
+        elif isinstance(message, WhatsAppMediaMessage):
+            message_data.update(
+                {
+                    "media_url": message.media_url,
+                    "media_mime_type": message.media_mime_type,
+                    "caption": message.caption,
+                    "filename": getattr(message, "filename", None),
+                }
+            )
+
+        return message_data
+
+    async def _convert_message_batch_to_input(
+        self, message_batch: Sequence[dict[str, Any]], session: WhatsAppSession
+    ) -> Any:
+        """Convert a batch of messages to agent input with proper context loading."""
+        parts: MutableSequence[TextPart | FilePart] = []
+
+        # Add batch header if multiple messages
+        if len(message_batch) > 1:
+            parts.append(
+                TextPart(
+                    text=f"[Batch of {len(message_batch)} messages received together]"
+                )
+            )
+
+        # Process each message in the batch
+        for i, msg_data in enumerate(message_batch):
+            if i > 0:  # Add separator between messages
+                parts.append(TextPart(text="---"))
+
+            # Handle text messages
+            if msg_data["type"] == "WhatsAppTextMessage":
+                text = msg_data.get("text", "")
+                if text:
+                    parts.append(TextPart(text=text))
+
+            # Handle media messages
+            elif msg_data["type"] in [
+                "WhatsAppImageMessage",
+                "WhatsAppDocumentMessage",
+                "WhatsAppAudioMessage",
+                "WhatsAppVideoMessage",
+            ]:
+                try:
+                    # Download media using the original message ID
+                    media_data = await self.provider.download_media(msg_data["id"])
+                    parts.append(
+                        FilePart(data=media_data.data, mime_type=media_data.mime_type)
+                    )
+
+                    # Add caption if present
+                    caption = msg_data.get("caption")
+                    if caption:
+                        parts.append(TextPart(text=f"Caption: {caption}"))
+
+                except Exception as e:
+                    logger.error(f"Failed to download media from batch: {e}")
+                    parts.append(TextPart(text="[Media file - failed to download]"))
+
+        # If no parts were added, add a placeholder
+        if not parts:
+            parts.append(TextPart(text="[Empty message batch]"))
+
+        # Create user message with first message's push name
+        first_message = message_batch[0] if message_batch else {}
+        push_name = first_message.get("push_name", "User")
+        user_message = UserMessage.create_named(parts=parts, name=push_name)
+
+        # Get or create agent context with proper persistence
+        context: Context
+        if session.agent_context_id:
+            # Load existing context from storage
+            if self.context_manager:
+                existing_context = await self.context_manager.get_session(
+                    session.agent_context_id, refresh_ttl=True
+                )
+                if existing_context:
+                    context = existing_context
+                    logger.debug(f"Loaded existing context: {session.agent_context_id}")
+                else:
+                    # Context expired or not found, create new one
+                    context = Context()
+                    context.context_id = session.agent_context_id
+                    logger.debug(
+                        f"Context not found, created new: {session.agent_context_id}"
+                    )
+            else:
+                # Context manager not available, create new context
+                context = Context()
+                context.context_id = session.agent_context_id
+                logger.debug(f"Created new context: {session.agent_context_id}")
+        else:
+            # Create new context
+            context = Context()
+            session.agent_context_id = context.context_id
+            logger.debug(f"Created new context: {context.context_id}")
+
+        # Add message to context
+        context.message_history.append(user_message)
+
+        # Save context to storage
+        if self.context_manager:
+            await self.context_manager.update_session(
+                context.context_id, context, create_if_missing=True
+            )
+
+        return context
 
     async def handle_webhook(self, payload: WhatsAppWebhookPayload) -> None:
         """
@@ -388,6 +731,43 @@ class WhatsAppBot(BaseModel):
         await self.provider.send_text_message(
             to=to, text=self.config.error_message, quoted_message_id=reply_to
         )
+
+    def _is_user_facing_error(self, error: Exception) -> bool:
+        """Determine if an error should be communicated to the user."""
+        # Don't show technical errors to users
+        technical_errors = [
+            ValueError,  # Like the datetime error we just fixed
+            TypeError,
+            AttributeError,
+            KeyError,
+            ImportError,
+            ConnectionError,
+        ]
+
+        # Show only user-relevant errors like rate limiting
+        user_relevant_errors = [
+            "rate limit",
+            "quota exceeded",
+            "service unavailable",
+        ]
+
+        error_str = str(error).lower()
+
+        # Don't show technical errors
+        if any(isinstance(error, err_type) for err_type in technical_errors):
+            return False
+
+        # Show user-relevant errors
+        if any(keyword in error_str for keyword in user_relevant_errors):
+            return True
+
+        # Default to not showing the error to users
+        return False
+
+    async def _send_rate_limit_message(self, to: str) -> None:
+        """Send rate limit notification to user."""
+        message = "You're sending messages too quickly. Please wait a moment before sending more messages."
+        await self.provider.send_text_message(to=to, text=message)
 
     def _split_message(self, text: str) -> Sequence[str]:
         """Split long message into chunks."""
@@ -721,3 +1101,18 @@ class WhatsAppBot(BaseModel):
             logger.error(f"Error parsing Meta message: {e}")
 
         return None
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get statistics about the bot's current state."""
+        return {
+            "running": self._running,
+            "active_batch_processors": len(self._batch_processors),
+            "processing_locks": len(self._processing_locks),
+            "config": {
+                "message_batching_enabled": self.config.enable_message_batching,
+                "spam_protection_enabled": self.config.spam_protection_enabled,
+                "batch_delay_seconds": self.config.message_batch_delay_seconds,
+                "max_batch_size": self.config.max_batch_size,
+                "max_messages_per_minute": self.config.max_messages_per_minute,
+            },
+        }
