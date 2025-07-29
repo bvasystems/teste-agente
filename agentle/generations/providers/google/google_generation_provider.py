@@ -56,10 +56,8 @@ from agentle.generations.providers.google.function_calling_config import (
 )
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
-from agentle.generations.tracing.contracts.stateful_observability_client import (
-    StatefulObservabilityClient,
-)
-from agentle.generations.tracing.decorators.observe import observe
+from agentle.generations.tracing import observe
+from agentle.generations.tracing.tracing_client import TracingClient
 
 if TYPE_CHECKING:
     from google.auth.credentials import Credentials
@@ -102,7 +100,7 @@ class GoogleGenerationProvider(GenerationProvider):
     def __init__(
         self,
         *,
-        tracing_client: StatefulObservabilityClient | None = None,
+        tracing_client: TracingClient | None = None,
         use_vertex_ai: bool = False,
         api_key: str | None | None = None,
         credentials: Credentials | None = None,
@@ -137,7 +135,7 @@ class GoogleGenerationProvider(GenerationProvider):
         _http_options = http_options or types.HttpOptions()
         self._client = genai.Client(
             vertexai=use_vertex_ai,
-            api_key=api_key,
+            api_key=api_key if not use_vertex_ai else None,
             credentials=credentials,
             project=project if use_vertex_ai else None,
             location=location if use_vertex_ai else None,

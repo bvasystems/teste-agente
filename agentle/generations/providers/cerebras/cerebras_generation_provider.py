@@ -19,13 +19,12 @@ providing a consistent experience regardless of the AI provider being used.
 """
 
 import asyncio
-from collections.abc import Mapping, Sequence
 import logging
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast, override
 
 import httpx
 from rsb.adapters.adapter import Adapter
-from rsb.contracts.maybe_protocol import MaybeProtocol
 
 # idk why mypy is not recognising this as a module
 from agentle.generations.json.json_schema_builder import (  # type: ignore[attr-defined]
@@ -56,10 +55,8 @@ from agentle.generations.providers.decorators.model_kind_mapper import (
 )
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
-from agentle.generations.tracing.contracts.stateful_observability_client import (
-    StatefulObservabilityClient,
-)
-from agentle.generations.tracing.decorators.observe import observe
+from agentle.generations.tracing import observe
+from agentle.generations.tracing.tracing_client import TracingClient
 
 if TYPE_CHECKING:
     from cerebras.cloud.sdk.types.chat.completion_create_params import (
@@ -99,7 +96,7 @@ class CerebrasGenerationProvider(GenerationProvider):
         message_adapter: Adapter to convert Agentle messages to Cerebras format.
     """
 
-    tracing_client: MaybeProtocol[StatefulObservabilityClient]
+    tracing_client: TracingClient | None
     api_key: str | None
     base_url: str | httpx.URL | None
     max_retries: int
@@ -116,7 +113,7 @@ class CerebrasGenerationProvider(GenerationProvider):
     def __init__(
         self,
         *,
-        tracing_client: StatefulObservabilityClient | None = None,
+        tracing_client: TracingClient | None = None,
         api_key: str | None = None,
         base_url: str | httpx.URL | None = None,
         max_retries: int = 2,

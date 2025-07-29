@@ -5,24 +5,37 @@ This example demonstrates how to create a simple agent that generates text respo
 using the Agentle framework.
 """
 
-from agentle.agents.agent import Agent
-from agentle.generations.providers.google.google_genai_generation_provider import (
-    GoogleGenaiGenerationProvider,
-)
-from agentle.generations.tracing.langfuse import LangfuseObservabilityClient
+import logging
 
-tracing_client = LangfuseObservabilityClient()
+from dotenv import load_dotenv
+
+from agentle.agents.agent import Agent
+from agentle.generations.providers.google.google_generation_provider import (
+    GoogleGenerationProvider,
+)
+from agentle.generations.tracing.langfuse import LangfuseTracingClient
+
+logging.basicConfig(level=logging.DEBUG)
+
+load_dotenv(override=True)
 
 # Create a simple agent with minimal configuration
 agent = Agent(
     name="Simple Text Agent",
-    generation_provider=GoogleGenaiGenerationProvider(tracing_client=tracing_client),
+    generation_provider=GoogleGenerationProvider(
+        use_vertex_ai=True,
+        tracing_client=LangfuseTracingClient(host="https://cloud.langfuse.com"),
+        project="unicortex",
+        location="global",
+    ),
     model="gemini-2.5-flash",  # Use an appropriate model
     instructions="You are a helpful assistant who provides concise, accurate information.",
 )
 
 # Run the agent with a simple query
-response = agent.run("What are the three laws of robotics?")
+response = agent.run(
+    "What are the three laws of robotics? Write an extremelly long text"
+)
 
 # Print the response text
 print(response.text)

@@ -24,9 +24,9 @@ from agentle.generations.providers.ollama.adapters.tool_to_ollama_tool_adapter i
 )
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
-from agentle.generations.tracing.contracts.stateful_observability_client import (
-    StatefulObservabilityClient,
-)
+from agentle.generations.tracing import observe
+from agentle.generations.tracing.tracing_client import TracingClient
+
 
 if TYPE_CHECKING:
     from ollama._types import Options
@@ -36,7 +36,7 @@ class OllamaGenerationProvider(GenerationProvider):
     def __init__(
         self,
         *,
-        tracing_client: StatefulObservabilityClient | None = None,
+        tracing_client: TracingClient | None = None,
         options: Mapping[str, Any] | Options | None = None,
         think: bool | None = None,
         host: str | None = None,
@@ -58,6 +58,7 @@ class OllamaGenerationProvider(GenerationProvider):
     def organization(self) -> str:
         return "Ollama"
 
+    @observe
     @override
     async def generate_async[T](
         self,

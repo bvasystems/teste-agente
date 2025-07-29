@@ -27,10 +27,8 @@ from agentle.generations.providers.openai.adapters.chat_completion_to_generation
 )
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
-from agentle.generations.tracing.contracts.stateful_observability_client import (
-    StatefulObservabilityClient,
-)
-from agentle.generations.tracing.decorators.observe import observe
+from agentle.generations.tracing import observe
+from agentle.generations.tracing.tracing_client import TracingClient
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -57,7 +55,7 @@ class OpenaiGenerationProvider(GenerationProvider):
         self,
         api_key: str | None = None,
         *,
-        tracing_client: StatefulObservabilityClient | None = None,
+        tracing_client: TracingClient | None = None,
         organization_name: str | None = None,
         project_name: str | None = None,
         base_url: str | httpx.URL | None = None,

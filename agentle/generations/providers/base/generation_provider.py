@@ -22,8 +22,6 @@ import abc
 from collections.abc import MutableSequence, Sequence
 from typing import TYPE_CHECKING, Any, Never, cast
 
-from rsb.containers.maybe import Maybe
-from rsb.contracts.maybe_protocol import MaybeProtocol
 from rsb.coroutines.run_sync import run_sync
 
 from agentle.generations.models.generation.generation import Generation
@@ -43,9 +41,6 @@ from agentle.generations.models.messages.message import Message
 from agentle.generations.models.messages.user_message import UserMessage
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
-from agentle.generations.tracing.contracts.stateful_observability_client import (
-    StatefulObservabilityClient,
-)
 from agentle.prompts.models.prompt import Prompt
 
 type WithoutStructuredOutput = None
@@ -54,6 +49,7 @@ if TYPE_CHECKING:
     from agentle.generations.providers.failover.failover_generation_provider import (
         FailoverGenerationProvider,
     )
+    from agentle.generations.tracing.tracing_client import TracingClient
 
 
 class GenerationProvider(abc.ABC):
@@ -73,12 +69,12 @@ class GenerationProvider(abc.ABC):
         default_model: An optional default model to use for generation.
     """
 
-    tracing_client: MaybeProtocol[StatefulObservabilityClient]
+    tracing_client: TracingClient | None
 
     def __init__(
         self,
         *,
-        tracing_client: StatefulObservabilityClient | None = None,
+        tracing_client: TracingClient | None = None,
     ) -> None:
         """
         Initialize the generation provider.
@@ -88,7 +84,7 @@ class GenerationProvider(abc.ABC):
                 requests and responses.
             default_model: Optional default model to use for generation.
         """
-        self.tracing_client = Maybe(tracing_client)
+        self.tracing_client = tracing_client
 
     @property
     @abc.abstractmethod
@@ -404,7 +400,7 @@ class GenerationProvider(abc.ABC):
 
         return FailoverGenerationProvider(
             generation_providers=providers,
-            tracing_client=self.tracing_client.unwrap() or other.tracing_client.unwrap()
+            tracing_client=self.tracing_client or other.tracing_client
             if isinstance(other, GenerationProvider)
-            else other[0].tracing_client.unwrap(),
+            else other[0].tracing_client,
         )

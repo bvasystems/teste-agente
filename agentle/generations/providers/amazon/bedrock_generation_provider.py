@@ -40,10 +40,8 @@ from agentle.generations.providers.amazon.models.tool_config import ToolConfig
 from agentle.generations.providers.base.generation_provider import GenerationProvider
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
-from agentle.generations.tracing.contracts.stateful_observability_client import (
-    StatefulObservabilityClient,
-)
-from agentle.generations.tracing.decorators.observe import observe
+from agentle.generations.tracing import observe
+from agentle.generations.tracing.tracing_client import TracingClient
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +56,7 @@ class BedrockGenerationProvider(GenerationProvider):
     def __init__(
         self,
         *,
-        tracing_client: StatefulObservabilityClient | None = None,
+        tracing_client: TracingClient | None = None,
         region_name: str = "us-east-1",
         access_key_id: str | None = None,
         secret_access_key: str | None = None,
@@ -87,8 +85,8 @@ class BedrockGenerationProvider(GenerationProvider):
     def organization(self) -> str:
         return "aws"
 
-    @observe
     @override
+    @observe
     async def generate_async[T](
         self,
         *,

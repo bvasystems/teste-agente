@@ -21,7 +21,7 @@ import random
 from collections.abc import MutableSequence, Sequence
 from typing import override
 
-from rsb.contracts.maybe_protocol import MaybeProtocol
+
 from rsb.coroutines.fire_and_forget import fire_and_forget
 
 from agentle.generations.models.generation.generation import Generation
@@ -35,9 +35,8 @@ from agentle.generations.providers.base.generation_provider import (
 )
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
-from agentle.generations.tracing.contracts.stateful_observability_client import (
-    StatefulObservabilityClient,
-)
+
+from agentle.generations.tracing.tracing_client import TracingClient
 from agentle.resilience.circuit_breaker.circuit_breaker_protocol import (
     CircuitBreakerProtocol,
 )
@@ -69,7 +68,7 @@ class FailoverGenerationProvider(GenerationProvider):
     """
 
     generation_providers: Sequence[GenerationProvider]
-    tracing_client: MaybeProtocol[StatefulObservabilityClient]
+    tracing_client: TracingClient | None
     shuffle: bool
     circuit_breaker: CircuitBreakerProtocol | None
 
@@ -79,7 +78,7 @@ class FailoverGenerationProvider(GenerationProvider):
         generation_providers: Sequence[
             GenerationProvider | Sequence[GenerationProvider]
         ],
-        tracing_client: StatefulObservabilityClient | None = None,
+        tracing_client: TracingClient | None = None,
         shuffle: bool = False,
         circuit_breaker: CircuitBreakerProtocol | None = None,
     ) -> None:
@@ -341,9 +340,7 @@ class FailoverGenerationProvider(GenerationProvider):
 
         return FailoverGenerationProvider(
             generation_providers=filtered_providers,
-            tracing_client=self.tracing_client.unwrap()
-            if self.tracing_client
-            else None,
+            tracing_client=self.tracing_client if self.tracing_client else None,
             shuffle=self.shuffle,
             circuit_breaker=self.circuit_breaker,
         )
@@ -412,9 +409,7 @@ class FailoverGenerationProvider(GenerationProvider):
 
         return FailoverGenerationProvider(
             generation_providers=filtered_providers,
-            tracing_client=self.tracing_client.unwrap()
-            if self.tracing_client
-            else None,
+            tracing_client=self.tracing_client if self.tracing_client else None,
             shuffle=self.shuffle,
             circuit_breaker=self.circuit_breaker,
         )
