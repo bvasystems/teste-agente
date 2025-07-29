@@ -764,7 +764,7 @@ class WhatsAppBot(BaseModel):
             )
 
             if i > 0:  # Add separator between messages
-                parts.append(TextPart(text="---"))
+                parts.append(TextPart(text="\n\n"))
 
             # Handle text messages
             if msg_data["type"] == "WhatsAppTextMessage":
