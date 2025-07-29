@@ -1016,13 +1016,11 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     knowledge_contents
                 )
 
-        instructions = self._convert_instructions_to_str(self.instructions)
+        instructions = self.instructions2str(self.instructions)
         if static_knowledge_prompt:
             instructions += "\n\n" + static_knowledge_prompt
 
-        context: Context = self._convert_input_to_context(
-            input, instructions=instructions
-        )
+        context: Context = self.input2context(input, instructions=instructions)
 
         if chat_id:
             assert self.conversation_store is not None
@@ -2410,8 +2408,9 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             parsed=parsed,
         )
 
-    def _convert_instructions_to_str(
-        self, instructions: str | Prompt | Callable[[], str] | Sequence[str]
+    @classmethod
+    def instructions2str(
+        cls, instructions: str | Prompt | Callable[[], str] | Sequence[str]
     ) -> str:
         """
         Converts the instructions to a string.
@@ -2434,8 +2433,9 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         else:
             return "".join(instructions)
 
-    def _convert_input_to_context(
-        self,
+    @classmethod
+    def input2context(
+        cls,
         input: AgentInput | Any,
         instructions: str,
     ) -> Context:
