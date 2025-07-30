@@ -396,7 +396,7 @@ async def _process_successful_response(
 ) -> None:
     """Processa resposta bem-sucedida."""
     processing_start = time.perf_counter()
-    logger.info(f"📊 [TIMING] Starting successful response processing")
+    logger.info("📊 [TIMING] Starting successful response processing")
 
     # Extrair dados de uso
     usage_extraction_start = time.perf_counter()
@@ -665,7 +665,7 @@ async def _add_success_scores(
 ) -> None:
     """Adiciona pontuações de sucesso ao trace."""
     scores_start = time.perf_counter()
-    logger.debug(f"🏆 [TIMING] Starting success scores addition")
+    logger.debug("🏆 [TIMING] Starting success scores addition")
 
     try:
         # Pontuação principal de sucesso
@@ -741,7 +741,7 @@ async def _add_error_scores(
 ) -> None:
     """Adiciona pontuações de erro ao trace."""
     error_scores_start = time.perf_counter()
-    logger.debug(f"💥 [TIMING] Starting error scores addition")
+    logger.debug("💥 [TIMING] Starting error scores addition")
 
     try:
         error_type = type(error).__name__
