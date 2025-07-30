@@ -74,12 +74,12 @@ def parse(
         ```python
         from agentle.agents.agent import Agent
         from agentle.generations.models.structured_outputs_store.visual_media_description import VisualMediaDescription
-        from agentle.generations.providers.google.google_genai_generation_provider import GoogleGenaiGenerationProvider
+        from agentle.generations.providers.google.google_generation_provider import GoogleGenerationProvider
 
         custom_agent = Agent(
             model="gemini-2.0-pro-vision",
             instructions="Describe images with focus on technical details",
-            generation_provider=GoogleGenaiGenerationProvider(),
+            generation_provider=GoogleGenerationProvider(),
             response_schema=VisualMediaDescription,
         )
 

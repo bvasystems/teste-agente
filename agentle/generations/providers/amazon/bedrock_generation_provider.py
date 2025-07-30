@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 from collections.abc import Mapping
-from typing import Any, Sequence, override
+from typing import TYPE_CHECKING, Any, Sequence, override
 
 from rsb.coroutines.run_async import run_async
 
@@ -41,7 +41,9 @@ from agentle.generations.providers.base.generation_provider import GenerationPro
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
 from agentle.generations.tracing import observe
-from agentle.generations.tracing.tracing_client import TracingClient
+
+if TYPE_CHECKING:
+    from agentle.generations.tracing.otel_client import OtelClient
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +58,7 @@ class BedrockGenerationProvider(GenerationProvider):
     def __init__(
         self,
         *,
-        tracing_client: TracingClient | None = None,
+        otel_clients: Sequence[OtelClient] | OtelClient | None = None,
         region_name: str = "us-east-1",
         access_key_id: str | None = None,
         secret_access_key: str | None = None,
@@ -64,7 +66,7 @@ class BedrockGenerationProvider(GenerationProvider):
     ):
         import boto3
 
-        super().__init__(tracing_client=tracing_client)
+        super().__init__(otel_clients=otel_clients)
 
         self._client = self._client = boto3.client(
             "bedrock-runtime",

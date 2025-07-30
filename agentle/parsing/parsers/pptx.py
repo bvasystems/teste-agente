@@ -80,7 +80,7 @@ class PptxFileParser(DocumentParser):
     *   `multi_modal_provider` (GenerationProvider):
         An alternative to using a visual_description_agent. This is a generation
         provider capable of handling multi-modal content (text and images).
-        Defaults to GoogleGenaiGenerationProvider().
+        Defaults to GoogleGenerationProvider().
 
         Note: You cannot use both visual_description_agent and multi_modal_provider
         at the same time.

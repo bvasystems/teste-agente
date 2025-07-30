@@ -57,7 +57,6 @@ from agentle.generations.providers.google.function_calling_config import (
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
 from agentle.generations.tracing import observe
-from agentle.generations.tracing.tracing_client import TracingClient
 
 if TYPE_CHECKING:
     from google.auth.credentials import Credentials
@@ -65,6 +64,7 @@ if TYPE_CHECKING:
         DebugConfig,
     )
     from google.genai.types import Content, GenerateContentResponse, HttpOptions
+    from agentle.generations.tracing.otel_client import OtelClient
 
 
 type WithoutStructuredOutput = None
@@ -100,7 +100,7 @@ class GoogleGenerationProvider(GenerationProvider):
     def __init__(
         self,
         *,
-        tracing_client: TracingClient | None = None,
+        otel_clients: Sequence[OtelClient] | OtelClient | None = None,
         use_vertex_ai: bool = False,
         api_key: str | None | None = None,
         credentials: Credentials | None = None,
@@ -114,7 +114,7 @@ class GoogleGenerationProvider(GenerationProvider):
         Initialize the Google Generation Provider.
 
         Args:
-            tracing_client: Optional client for observability and tracing.
+            otel_clients: Optional client for observability and tracing.
             use_vertex_ai: Whether to use Google Vertex AI instead of standard API.
             api_key: Optional API key for authentication with Google AI.
             credentials: Optional credentials object for authentication.
@@ -128,7 +128,7 @@ class GoogleGenerationProvider(GenerationProvider):
         from google import genai
         from google.genai import types
 
-        super().__init__(tracing_client=tracing_client)
+        super().__init__(otel_clients=otel_clients)
         self.message_adapter = MessageToGoogleContentAdapter()
         self.function_calling_config = function_calling_config or {}
 

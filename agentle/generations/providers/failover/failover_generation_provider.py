@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import MutableSequence, Sequence
-from typing import override
+from typing import TYPE_CHECKING, override
 
 
 from rsb.coroutines.fire_and_forget import fire_and_forget
@@ -36,10 +36,13 @@ from agentle.generations.providers.base.generation_provider import (
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
 
-from agentle.generations.tracing.tracing_client import TracingClient
 from agentle.resilience.circuit_breaker.circuit_breaker_protocol import (
     CircuitBreakerProtocol,
 )
+
+if TYPE_CHECKING:
+    from agentle.generations.tracing.otel_client import OtelClient
+
 
 type WithoutStructuredOutput = None
 
@@ -60,7 +63,7 @@ class FailoverGenerationProvider(GenerationProvider):
 
     Attributes:
         generation_providers: Sequence of underlying generation providers to use.
-        tracing_client: Optional client for observability and tracing of generation
+        otel_clients: Optional client for observability and tracing of generation
             requests and responses.
         shuffle: Whether to randomly shuffle the order of providers for each request.
         circuit_breaker: Optional circuit breaker to track provider failures and
@@ -68,7 +71,7 @@ class FailoverGenerationProvider(GenerationProvider):
     """
 
     generation_providers: Sequence[GenerationProvider]
-    tracing_client: TracingClient | None
+    otel_clients: Sequence[OtelClient]
     shuffle: bool
     circuit_breaker: CircuitBreakerProtocol | None
 
@@ -78,7 +81,7 @@ class FailoverGenerationProvider(GenerationProvider):
         generation_providers: Sequence[
             GenerationProvider | Sequence[GenerationProvider]
         ],
-        tracing_client: TracingClient | None = None,
+        otel_clients: Sequence[OtelClient] | OtelClient | None = None,
         shuffle: bool = False,
         circuit_breaker: CircuitBreakerProtocol | None = None,
     ) -> None:
@@ -86,7 +89,7 @@ class FailoverGenerationProvider(GenerationProvider):
         Initialize the Failover Generation Provider.
 
         Args:
-            tracing_client: Optional client for observability and tracing of generation
+            otel_clients: Optional client for observability and tracing of generation
                 requests and responses.
             generation_providers: Sequence of underlying generation providers or sequences
                 of providers to try in order. Nested sequences will be flattened.
@@ -95,7 +98,7 @@ class FailoverGenerationProvider(GenerationProvider):
             circuit_breaker: Optional circuit breaker to track provider failures and
                 temporarily skip failing providers. If None, circuit breaker logic is disabled.
         """
-        super().__init__(tracing_client=tracing_client)
+        super().__init__(otel_clients=otel_clients)
 
         # Flatten nested sequences of providers
         flattened_providers: MutableSequence[GenerationProvider] = []
@@ -340,7 +343,7 @@ class FailoverGenerationProvider(GenerationProvider):
 
         return FailoverGenerationProvider(
             generation_providers=filtered_providers,
-            tracing_client=self.tracing_client if self.tracing_client else None,
+            otel_clients=self.otel_clients if self.otel_clients else None,
             shuffle=self.shuffle,
             circuit_breaker=self.circuit_breaker,
         )
@@ -409,7 +412,7 @@ class FailoverGenerationProvider(GenerationProvider):
 
         return FailoverGenerationProvider(
             generation_providers=filtered_providers,
-            tracing_client=self.tracing_client if self.tracing_client else None,
+            otel_clients=self.otel_clients if self.otel_clients else None,
             shuffle=self.shuffle,
             circuit_breaker=self.circuit_breaker,
         )

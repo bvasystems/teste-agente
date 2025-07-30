@@ -5,7 +5,7 @@ This module provides a high-performance, minimal tracing solution that integrate
 with Langfuse V3. The architecture consists of three main components:
 
 1. TracingClient - Simple base interface
-2. LangfuseTracingClient - High-performance Langfuse V3 implementation  
+2. LangfuseTracingClient - High-performance Langfuse V3 implementation
 3. @observe decorator - Zero-overhead tracing decorator
 
 Usage:
@@ -19,7 +19,7 @@ tracing_client = LangfuseTracingClient()
 class MyProvider(GenerationProvider):
     def __init__(self):
         super().__init__(tracing_client=tracing_client)
-    
+
     @observe
     async def generate_async(self, ...):
         # Your generation logic
@@ -33,12 +33,12 @@ The design prioritizes performance through:
 - Simple, flat API without complex hierarchies
 """
 
-from agentle.generations.tracing.tracing_client import TracingClient
-from agentle.generations.tracing.langfuse import LangfuseTracingClient
+from agentle.generations.tracing.langfuse_otel_client import LangfuseOtelClient
 from agentle.generations.tracing.observe import observe
+from agentle.generations.tracing.otel_client import OtelClient
 
 __all__ = [
-    "TracingClient",
-    "LangfuseTracingClient",
+    "OtelClient",
+    "LangfuseOtelClient",
     "observe",
 ]

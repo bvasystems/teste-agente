@@ -25,7 +25,7 @@ def audio_description_agent_default_factory(
 
     The agent is configured with:
     - Model: gemini-2.5-flash
-    - Provider: GoogleGenaiGenerationProvider
+    - Provider: GoogleGenerationProvider
     - Response schema: AudioDescription
 
     Returns:

@@ -25,25 +25,25 @@ from agentle.generations.providers.ollama.adapters.tool_to_ollama_tool_adapter i
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
 from agentle.generations.tracing import observe
-from agentle.generations.tracing.tracing_client import TracingClient
-
 
 if TYPE_CHECKING:
     from ollama._types import Options
+
+    from agentle.generations.tracing.otel_client import OtelClient
 
 
 class OllamaGenerationProvider(GenerationProvider):
     def __init__(
         self,
         *,
-        tracing_client: TracingClient | None = None,
+        otel_clients: Sequence[OtelClient] | OtelClient | None = None,
         options: Mapping[str, Any] | Options | None = None,
         think: bool | None = None,
         host: str | None = None,
     ) -> None:
         from ollama._client import AsyncClient
 
-        super().__init__(tracing_client=tracing_client)
+        super().__init__(otel_clients=otel_clients)
         self._client = AsyncClient(host=host)
         self.options = options
         self.think = think
@@ -101,7 +101,7 @@ class OllamaGenerationProvider(GenerationProvider):
 
         return ChatResponseToGenerationAdapter(
             model=_model, response_schema=response_schema
-        ).adapt(response)
+        ).adapt(response)  # type: ignore
 
     @override
     def price_per_million_tokens_input(

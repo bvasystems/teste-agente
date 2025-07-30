@@ -12,11 +12,12 @@ from agentle.agents.a2a.tasks.task_query_params import TaskQueryParams
 from agentle.agents.a2a.tasks.task_send_params import TaskSendParams
 from agentle.agents.a2a.tasks.task_state import TaskState
 from agentle.agents.agent import Agent
-from agentle.generations.providers.google.google_genai_generation_provider import (
-    GoogleGenaiGenerationProvider,
+from agentle.generations.providers.google.google_generation_provider import (
+    GoogleGenerationProvider,
 )
 
-provider = GoogleGenaiGenerationProvider(api_key=os.environ.get("GOOGLE_API_KEY"))
+
+provider = GoogleGenerationProvider(api_key=os.environ.get("GOOGLE_API_KEY"))
 agent = Agent(
     name="Example Agent", generation_provider=provider, model="gemini-2.5-flash"
 )

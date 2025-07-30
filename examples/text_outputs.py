@@ -13,7 +13,8 @@ from agentle.agents.agent import Agent
 from agentle.generations.providers.google.google_generation_provider import (
     GoogleGenerationProvider,
 )
-from agentle.generations.tracing.langfuse import LangfuseTracingClient
+from agentle.generations.tracing.langfuse_otel_client import LangfuseOtelClient
+
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -24,7 +25,7 @@ agent = Agent(
     name="Simple Text Agent",
     generation_provider=GoogleGenerationProvider(
         use_vertex_ai=True,
-        tracing_client=LangfuseTracingClient(host="https://cloud.langfuse.com"),
+        otel_clients=LangfuseOtelClient(host="https://cloud.langfuse.com"),
         project="unicortex",
         location="global",
     ),
@@ -34,7 +35,12 @@ agent = Agent(
 
 # Run the agent with a simple query
 response = agent.run(
-    "What are the three laws of robotics? Write an extremelly long text"
+    "What are the three laws of robotics? Write an extremelly long text", trace_params={
+        "name": "Agentle Workflow",
+        "user_id": "arthur123",
+        "session_id": "session-123",
+        "tags": ["example tags"]
+    }
 )
 
 # Print the response text

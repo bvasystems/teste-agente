@@ -26,7 +26,7 @@ def visual_description_agent_default_factory(
 
     The agent is configured with:
     - Model: gemini-2.0-pro-vision
-    - Provider: GoogleGenaiGenerationProvider
+    - Provider: GoogleGenerationProvider
     - Response schema: VisualMediaDescription
 
     Returns:

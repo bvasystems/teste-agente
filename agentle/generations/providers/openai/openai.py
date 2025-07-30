@@ -28,10 +28,11 @@ from agentle.generations.providers.openai.adapters.chat_completion_to_generation
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
 from agentle.generations.tracing import observe
-from agentle.generations.tracing.tracing_client import TracingClient
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
+    from agentle.generations.tracing.otel_client import OtelClient
+
 
 type WithoutStructuredOutput = None
 
@@ -55,7 +56,7 @@ class OpenaiGenerationProvider(GenerationProvider):
         self,
         api_key: str | None = None,
         *,
-        tracing_client: TracingClient | None = None,
+        otel_clients: Sequence[OtelClient] | OtelClient | None = None,
         organization_name: str | None = None,
         project_name: str | None = None,
         base_url: str | httpx.URL | None = None,
@@ -67,7 +68,7 @@ class OpenaiGenerationProvider(GenerationProvider):
     ) -> None:
         from openai import AsyncOpenAI
 
-        super().__init__(tracing_client=tracing_client)
+        super().__init__(otel_clients=otel_clients)
 
         self._client = AsyncOpenAI(
             api_key=api_key,

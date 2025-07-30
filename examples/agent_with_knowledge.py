@@ -1,12 +1,11 @@
 from agentle.agents.agent import Agent
-from agentle.generations.providers.google.google_genai_generation_provider import (
-    GoogleGenaiGenerationProvider,
+from agentle.generations.providers.google.google_generation_provider import (
+    GoogleGenerationProvider,
 )
-
 
 agent = Agent(
     name="Research Assistant",
-    generation_provider=GoogleGenaiGenerationProvider(),
+    generation_provider=GoogleGenerationProvider(),
     model="gemini-2.5-flash",
     instructions="You help analysing websites.",
     # Array of string-based knowledge sources (no caching)

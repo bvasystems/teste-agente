@@ -64,11 +64,11 @@ class AgentToStreamlit[T = None](Adapter["Agent[T]", "Callable[[], None]"]):
         Example:
             ```python
             from agentle.agents.agent import Agent
-            from agentle.generations.providers.google.google_genai_generation_provider import GoogleGenaiGenerationProvider
+            from agentle.generations.providers.google.google_generation_provider import GoogleGenerationProvider
 
             # Create an agent
             agent = Agent(
-                generation_provider=GoogleGenaiGenerationProvider(),
+                generation_provider=GoogleGenerationProvider(),
                 model="gemini-2.5-flash",
                 instructions="You are a helpful assistant."
             )

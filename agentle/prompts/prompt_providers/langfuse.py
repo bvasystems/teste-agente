@@ -14,7 +14,7 @@ from agentle.prompts.models.prompt import Prompt
 from agentle.prompts.prompt_providers.prompt_provider import PromptProvider
 
 if TYPE_CHECKING:
-    from langfuse import Langfuse
+    from langfuse._client.client import Langfuse
 
 
 class LangfusePromptProvider(PromptProvider):

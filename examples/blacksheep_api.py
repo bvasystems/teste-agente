@@ -9,11 +9,11 @@ from agentle.agents.agent import Agent
 from agentle.agents.asgi.blacksheep.agent_to_blacksheep_application_adapter import (
     AgentToBlackSheepApplicationAdapter,
 )
-from agentle.generations.providers.google.google_genai_generation_provider import (
-    GoogleGenaiGenerationProvider,
+from agentle.generations.providers.google.google_generation_provider import (
+    GoogleGenerationProvider,
 )
 
-generation_provider = GoogleGenaiGenerationProvider()
+generation_provider = GoogleGenerationProvider()
 
 # Create a simple agent
 code_assistant = Agent(

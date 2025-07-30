@@ -17,28 +17,28 @@ Example:
 ```python
 from agentle.agents.agent import Agent
 from agentle.agents.pipelines.agent_pipeline import AgentPipeline
-from agentle.generations.providers.google.google_genai_generation_provider import GoogleGenaiGenerationProvider
+from agentle.generations.providers.google.google_generation_provider import GoogleGenerationProvider
 
 # Create specialized agents
 research_agent = Agent(
     name="Research Agent",
     instructions="You are a research agent. Your task is to gather information on a topic.",
     model="gemini-2.5-flash",
-    generation_provider=GoogleGenaiGenerationProvider(),
+    generation_provider=GoogleGenerationProvider(),
 )
 
 analysis_agent = Agent(
     name="Analysis Agent",
     instructions="You are an analysis agent. Your task is to analyze information and identify patterns.",
     model="gemini-2.5-flash",
-    generation_provider=GoogleGenaiGenerationProvider(),
+    generation_provider=GoogleGenerationProvider(),
 )
 
 summary_agent = Agent(
     name="Summary Agent",
     instructions="You are a summary agent. Your task is to create concise summaries.",
     model="gemini-2.5-flash",
-    generation_provider=GoogleGenaiGenerationProvider(),
+    generation_provider=GoogleGenerationProvider(),
 )
 
 # Create a pipeline of agents

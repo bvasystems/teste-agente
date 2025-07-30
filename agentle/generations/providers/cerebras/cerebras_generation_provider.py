@@ -56,7 +56,6 @@ from agentle.generations.providers.decorators.model_kind_mapper import (
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
 from agentle.generations.tracing import observe
-from agentle.generations.tracing.tracing_client import TracingClient
 
 if TYPE_CHECKING:
     from cerebras.cloud.sdk.types.chat.completion_create_params import (
@@ -64,6 +63,8 @@ if TYPE_CHECKING:
         MessageSystemMessageRequestTyped,
         MessageUserMessageRequestTyped,
     )
+    from agentle.generations.tracing.otel_client import OtelClient
+
 
 logger = logging.getLogger(__name__)
 type WithoutStructuredOutput = None
@@ -82,7 +83,7 @@ class CerebrasGenerationProvider(GenerationProvider):
     structured output parsing via response schemas.
 
     Attributes:
-        tracing_client: Optional client for observability and tracing of generation
+        otel_clients: Optional client for observability and tracing of generation
             requests and responses.
         api_key: Optional API key for authentication with Cerebras AI.
         base_url: Optional custom base URL for the Cerebras API.
@@ -96,7 +97,7 @@ class CerebrasGenerationProvider(GenerationProvider):
         message_adapter: Adapter to convert Agentle messages to Cerebras format.
     """
 
-    tracing_client: TracingClient | None
+    otel_clients: Sequence[OtelClient]
     api_key: str | None
     base_url: str | httpx.URL | None
     max_retries: int
@@ -113,7 +114,7 @@ class CerebrasGenerationProvider(GenerationProvider):
     def __init__(
         self,
         *,
-        tracing_client: TracingClient | None = None,
+        otel_clients: Sequence[OtelClient] | OtelClient | None = None,
         api_key: str | None = None,
         base_url: str | httpx.URL | None = None,
         max_retries: int = 2,
@@ -132,7 +133,7 @@ class CerebrasGenerationProvider(GenerationProvider):
         Initialize the Cerebras Generation Provider.
 
         Args:
-            tracing_client: Optional client for observability and tracing of generation
+            otel_clients: Optional client for observability and tracing of generation
                 requests and responses.
             api_key: Optional API key for authentication with Cerebras AI.
             base_url: Optional custom base URL for the Cerebras API.
@@ -145,7 +146,7 @@ class CerebrasGenerationProvider(GenerationProvider):
             warm_tcp_connection: Whether to keep the TCP connection warm.
             message_adapter: Optional adapter to convert Agentle messages to Cerebras format.
         """
-        super().__init__(tracing_client=tracing_client)
+        super().__init__(otel_clients=otel_clients)
         self.api_key = api_key
         self.base_url = base_url
         self.max_retries = max_retries

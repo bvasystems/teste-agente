@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from agentle.generations.providers.failover.failover_generation_provider import (
         FailoverGenerationProvider,
     )
-    from agentle.generations.tracing.tracing_client import TracingClient
+    from agentle.generations.tracing.otel_client import OtelClient
 
 
 class GenerationProvider(abc.ABC):
@@ -69,12 +69,12 @@ class GenerationProvider(abc.ABC):
         default_model: An optional default model to use for generation.
     """
 
-    tracing_client: TracingClient | None
+    otel_clients: Sequence[OtelClient]
 
     def __init__(
         self,
         *,
-        tracing_client: TracingClient | None = None,
+        otel_clients: Sequence[OtelClient] | OtelClient | None = None,
     ) -> None:
         """
         Initialize the generation provider.
@@ -84,7 +84,15 @@ class GenerationProvider(abc.ABC):
                 requests and responses.
             default_model: Optional default model to use for generation.
         """
-        self.tracing_client = tracing_client
+
+        from agentle.generations.tracing.no_op_otel_client import NoOpOtelClient
+
+        if otel_clients is None:
+            otel_clients = [NoOpOtelClient()]
+
+        self.otel_clients = (
+            otel_clients if isinstance(otel_clients, Sequence) else [otel_clients]
+        )
 
     @property
     @abc.abstractmethod
@@ -400,7 +408,7 @@ class GenerationProvider(abc.ABC):
 
         return FailoverGenerationProvider(
             generation_providers=providers,
-            tracing_client=self.tracing_client or other.tracing_client
+            otel_clients=self.otel_clients or other.otel_clients
             if isinstance(other, GenerationProvider)
-            else other[0].tracing_client,
+            else other[0].otel_clients,
         )

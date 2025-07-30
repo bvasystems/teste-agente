@@ -11,15 +11,16 @@ from agentle.agents.agent import Agent
 from agentle.agents.asgi.blacksheep.agent_to_blacksheep_application_adapter import (
     AgentToBlackSheepApplicationAdapter,
 )
-from agentle.generations.providers.google.google_genai_generation_provider import (
-    GoogleGenaiGenerationProvider,
+from agentle.generations.providers.google.google_generation_provider import (
+    GoogleGenerationProvider,
 )
+
 
 # Create a simple agent
 code_assistant = Agent(
     name="Async Code Assistant",
     description="An AI assistant specialized in helping with programming tasks asynchronously.",
-    generation_provider=GoogleGenaiGenerationProvider(),
+    generation_provider=GoogleGenerationProvider(),
     model="gemini-2.5-flash",
     instructions="""You are a helpful programming assistant.
     You can answer questions about programming languages, help debug code,

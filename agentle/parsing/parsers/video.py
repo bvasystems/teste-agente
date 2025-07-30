@@ -75,13 +75,13 @@ class VideoFileParser(DocumentParser):
     ```python
     from agentle.agents.agent import Agent
     from agentle.generations.models.structured_outputs_store.visual_media_description import VisualMediaDescription
-    from agentle.generations.providers.google.google_genai_generation_provider import GoogleGenaiGenerationProvider
+    from agentle.generations.providers.google.google_generation_provider import GoogleGenerationProvider
 
     # Create a custom agent for specialized video analysis
     sports_video_agent = Agent(
         model="gemini-2.0-pro-vision",
         instructions="Analyze sports videos with focus on player movements and game statistics",
-        generation_provider=GoogleGenaiGenerationProvider(),
+        generation_provider=GoogleGenerationProvider(),
         response_schema=VisualMediaDescription
     )
 

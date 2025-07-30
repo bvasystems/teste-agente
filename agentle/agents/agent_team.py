@@ -19,10 +19,10 @@ Example:
 from agentle.agents.agent import Agent
 from agentle.agents.agent_team import AgentTeam
 from agentle.agents.agent_config import AgentConfig
-from agentle.generations.providers.google.google_genai_generation_provider import GoogleGenaiGenerationProvider
+from agentle.generations.providers.google.google_generation_provider import GoogleGenerationProvider
 
 # Create provider for all agents
-provider = GoogleGenaiGenerationProvider()
+provider = GoogleGenerationProvider()
 
 # Create specialized agents
 research_agent = Agent(
@@ -145,7 +145,7 @@ class AgentTeam(BaseModel):
     Examples:
         ```python
         # Create a basic team with several specialized agents
-        provider = GoogleGenaiGenerationProvider()
+        provider = GoogleGenerationProvider()
 
         math_agent = Agent(
             name="Math Agent",
