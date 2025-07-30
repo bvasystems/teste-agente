@@ -63,6 +63,8 @@ response = agent.run(
 )
 ```
 
+- feat: Added new `performance_metrics` attribute (an instance of `PerformanceMetrics`) to help users identify bottlenecks in Agent execution. This implementation introduces zero overhead to the final response time.
+
 ## v0.7.5
 - chore: changing `AgentProtocol` to `Agent` in WhatsAppBot class.
 
