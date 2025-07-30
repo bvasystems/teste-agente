@@ -1,5 +1,68 @@
 # Changelog
 
+## v0.7.6
+- BREAKING: support for OpenTelemetry clients. The parameter "tracing_client" was now replaced with "otel_clients", inside the base `GenerationProvider` class. The parameters for Langfuse stays the same, but the class is different. Here is how you can migrate:
+
+### LEGACY WAY:
+```python
+from agentle.generations.tracing.langfuse import LangfuseObservabilityClient
+from agentle.agents.agent import Agent
+from agentle.generations.providers.google.google_generation_provider import GoogleGenerationProvider
+
+# Create a tracing client
+tracing_client = LangfuseObservabilityClient()
+
+# Create an agent with tracing enabled
+agent = Agent(
+    name="Traceable Agent",
+    generation_provider=GoogleGenerationProvider(tracing_client=tracing_client),
+    model="gemini-2.5-flash",
+    instructions="You are a helpful assistant.",
+    # Tracing is automatically enabled
+)
+
+# Run the agent - tracing happens automatically
+response = agent.run(
+    "What's the weather in Tokyo?", 
+    trace_params={
+        "name": "weather_query",
+        "user_id": "user123",
+        "metadata": {"source": "mobile_app"}
+    }
+)
+```
+
+### New way
+```python
+from agentle.generations.tracing.langfuse_otel_client import LangfuseOtelClient
+from agentle.agents.agent import Agent
+from agentle.generations.providers.google.google_generation_provider import GoogleGenerationProvider
+
+# Create a tracing client
+langfuse = LangfuseOtelClient()
+
+# Create an agent with tracing enabled
+agent = Agent(
+    name="Traceable Agent",
+    generation_provider=GoogleGenerationProvider(otel_clients=[langfuse]), # more clients later
+    #or
+    #generation_provider=GoogleGenerationProvider(otel_clients=langfuse),
+    model="gemini-2.5-flash",
+    instructions="You are a helpful assistant.",
+    # Tracing is automatically enabled
+)
+
+# Run the agent - tracing happens automatically
+response = agent.run(
+    "What's the weather in Tokyo?", 
+    trace_params={
+        "name": "weather_query",
+        "user_id": "user123",
+        "metadata": {"source": "mobile_app"}
+    }
+)
+```
+
 ## v0.7.5
 - chore: changing `AgentProtocol` to `Agent` in WhatsAppBot class.
 
