@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.7.6
+## v0.7.5
 - BREAKING: support for OpenTelemetry clients. The parameter "tracing_client" was now replaced with "otel_clients", inside the base `GenerationProvider` class. The parameters for Langfuse stays the same, but the class is different. Here is how you can migrate:
 
 ### LEGACY WAY:
@@ -65,7 +65,6 @@ response = agent.run(
 
 - feat: Added new `performance_metrics` attribute (an instance of `PerformanceMetrics`) to help users identify bottlenecks in Agent execution. This implementation introduces zero overhead to the final response time.
 
-## v0.7.5
 - chore: changing `AgentProtocol` to `Agent` in WhatsAppBot class.
 
 ## v0.7.4
