@@ -17,7 +17,7 @@ from langfuse._client.span import LangfuseGeneration, LangfuseSpan
 from .otel_client import GenerationContext, OtelClient, TraceContext
 
 
-class LangfuseTraceContext:
+class _LangfuseTraceContext:
     """Contexto de trace específico do Langfuse."""
 
     def __init__(self, span: LangfuseSpan):
@@ -33,7 +33,7 @@ class LangfuseTraceContext:
         return self._span
 
 
-class LangfuseGenerationContext:
+class _LangfuseGenerationContext:
     """Contexto de geração específico do Langfuse."""
 
     def __init__(self, generation: LangfuseGeneration):
@@ -130,7 +130,7 @@ class LangfuseOtelClient(OtelClient):
                         tags=list(tags) if tags else None,
                     )
 
-                yield LangfuseTraceContext(span)
+                yield _LangfuseTraceContext(span)
 
         except Exception as e:
             self._logger.error(f"Erro ao criar trace context: {e}")
@@ -169,7 +169,7 @@ class LangfuseOtelClient(OtelClient):
                 input=dict(input_data),
                 metadata=generation_metadata,
             ) as generation:
-                yield LangfuseGenerationContext(generation)
+                yield _LangfuseGenerationContext(generation)
 
         except Exception as e:
             self._logger.error(f"Erro ao criar generation context: {e}")
@@ -191,7 +191,7 @@ class LangfuseOtelClient(OtelClient):
         Esta implementação garante que as contagens de tokens e custos
         sejam registrados com precisão no Langfuse UI.
         """
-        if not isinstance(generation_context, LangfuseGenerationContext):
+        if not isinstance(generation_context, _LangfuseGenerationContext):
             return
 
         try:
@@ -280,7 +280,7 @@ class LangfuseOtelClient(OtelClient):
         end_time: Optional[datetime] = None,
     ) -> None:
         """Atualiza um trace com dados finais."""
-        if not isinstance(trace_context, LangfuseTraceContext):
+        if not isinstance(trace_context, _LangfuseTraceContext):
             return
 
         try:
@@ -359,7 +359,7 @@ class LangfuseOtelClient(OtelClient):
         comment: Optional[str] = None,
     ) -> None:
         """Adiciona uma pontuação ao trace."""
-        if not isinstance(trace_context, LangfuseTraceContext):
+        if not isinstance(trace_context, _LangfuseTraceContext):
             return
 
         try:
@@ -396,7 +396,7 @@ class LangfuseOtelClient(OtelClient):
 
             # Atualizar geração com erro se existir
             if generation_context and isinstance(
-                generation_context, LangfuseGenerationContext
+                generation_context, _LangfuseGenerationContext
             ):
                 generation = generation_context.generation
                 generation.update(
@@ -406,7 +406,7 @@ class LangfuseOtelClient(OtelClient):
                 )
 
             # Adicionar pontuações de erro ao trace
-            if trace_context and isinstance(trace_context, LangfuseTraceContext):
+            if trace_context and isinstance(trace_context, _LangfuseTraceContext):
                 # Pontuação de sucesso do trace
                 await self.add_trace_score(
                     trace_context,
