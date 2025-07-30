@@ -12,16 +12,16 @@ import logging
 import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
-from typing import Any, TypeVar, cast, get_args, Dict, List
+from typing import Any, Dict, List, TypeVar, cast, get_args
 
 from rsb.coroutines.fire_and_forget import fire_and_forget
 
 from agentle.generations.models.generation.generation import Generation
 from agentle.generations.models.generation.generation_config import GenerationConfig
+from agentle.generations.models.messages.message import Message
 from agentle.generations.providers.base.generation_provider import GenerationProvider
 from agentle.generations.providers.types.model_kind import ModelKind
-from agentle.generations.models.messages.message import Message
-from .otel_client import OtelClient
+from agentle.generations.tracing.otel_client import OtelClient
 
 T = TypeVar("T")
 F = TypeVar("F", bound=Callable[..., Any])
