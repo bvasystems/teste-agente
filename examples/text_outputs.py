@@ -35,12 +35,13 @@ agent = Agent(
 
 # Run the agent with a simple query
 response = agent.run(
-    "What are the three laws of robotics? Write an extremelly long text", trace_params={
+    "hi",
+    trace_params={
         "name": "Agentle Workflow",
         "user_id": "arthur123",
         "session_id": "session-123",
-        "tags": ["example tags"]
-    }
+        "tags": ["example tags"],
+    },
 )
 
 # Print the response text
