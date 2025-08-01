@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.7.8
+## v0.7.9
 
 - test

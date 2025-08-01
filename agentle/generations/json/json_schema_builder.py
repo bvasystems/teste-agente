@@ -193,11 +193,11 @@ class JsonSchemaBuilder:
 
         # Assemble the final schema structure
         final_schema: Dict[str, Any] = {}
-        
+
         # Only add $schema if not in clean_output mode
         if not self.clean_output:
             final_schema["$schema"] = self.schema_draft_uri
-            
+
         final_schema.update(
             root_schema_content
         )  # Directly use the result (inline or $ref)
@@ -2310,53 +2310,38 @@ class JsonSchemaBuilder:
         """Check if a value is a JSON primitive (string, number, boolean, null)."""
         return isinstance(value, (str, int, float, bool, type(None)))
 
-    def _clean_schema_for_strict_providers(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+    def _clean_schema_for_strict_providers(
+        self, schema: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
-        Aggressively clean schema to only keep keys that strict providers like Cerebras accept.
-        
-        Based on Cerebras documentation, they only support:
-        - type, properties, required, additionalProperties
-        - $ref, $defs (for references)  
-        - Basic constraints: enum, anyOf, const, items, etc.
-        
-        They do NOT support: title, description, examples, and other metadata keys.
+        Clean schema to remove keys that strict providers like Cerebras don't accept.
+
+        This is a less aggressive approach that only removes known problematic keys
+        while preserving the essential schema structure.
         """
-        # Keys that Cerebras explicitly supports
-        ALLOWED_OBJECT_KEYS = {
-            "type", "properties", "required", "additionalProperties",
-            "$ref", "$defs", "definitions"  # References
-        }
-        
-        ALLOWED_PROPERTY_KEYS = {
-            "type", "enum", "const", "anyOf", "oneOf", "allOf",
-            "items", "minItems", "maxItems", "minLength", "maxLength",
-            "minimum", "maximum", "format", "$ref"
-        }
-        
+
         def clean_schema_recursive(obj: Any) -> Any:
             if isinstance(obj, dict):
                 cleaned = {}
-                
-                # Determine which keys are allowed based on context
-                if "type" in obj and obj["type"] == "object":
-                    allowed_keys = ALLOWED_OBJECT_KEYS
-                else:
-                    allowed_keys = ALLOWED_PROPERTY_KEYS
-                
-                # Only keep allowed keys
+
+                # Copy all keys except the ones we know cause problems
                 for key, value in obj.items():
-                    if key in allowed_keys:
-                        cleaned[key] = clean_schema_recursive(value)
-                
-                # Special handling for additionalProperties - Cerebras requires it to be false for objects
-                if "type" in cleaned and cleaned["type"] == "object" and "properties" in cleaned:
+                    # Remove keys that Cerebras explicitly rejects
+                    if key in ("title", "description", "examples", "format"):
+                        continue  # Skip these metadata keys
+
+                    # Keep all other keys but clean their values recursively
+                    cleaned[key] = clean_schema_recursive(value)
+
+                # Ensure additionalProperties is false for objects
+                if cleaned.get("type") == "object" and "properties" in cleaned:
                     if "additionalProperties" not in cleaned:
                         cleaned["additionalProperties"] = False
-                
+
                 return cleaned
             elif isinstance(obj, list):
                 return [clean_schema_recursive(item) for item in obj]
             else:
                 return obj
-        
+
         return clean_schema_recursive(schema)
