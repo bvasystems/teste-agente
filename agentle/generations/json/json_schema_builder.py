@@ -97,6 +97,7 @@ class JsonSchemaBuilder:
         _target_type: The Python type to generate a schema for.
         remove_examples: Whether to remove example data from the generated schema.
         schema_draft_uri: The URI of the JSON Schema draft to use.
+        clean_output: Whether to remove metadata keys that some providers don't accept.
         _definitions: Dictionary storing schema definitions for complex types.
         _definitions_mapping: Mapping between Python types and definition references.
         _processing: Set of types currently being processed (for recursion detection).
@@ -105,6 +106,7 @@ class JsonSchemaBuilder:
     _target_type: Type[Any]
     remove_examples: bool
     schema_draft_uri: str
+    clean_output: bool
     _definitions: Dict[str, Dict[str, Any]]
     _definitions_mapping: Dict[Type[Any], str]
     _processing: set[
@@ -117,6 +119,7 @@ class JsonSchemaBuilder:
         remove_examples: bool = False,
         schema_draft_uri: str = "http://json-schema.org/draft-07/schema#",
         use_defs_instead_of_definitions: bool = False,
+        clean_output: bool = False,
     ) -> None:
         """
         Initialize a JSON Schema builder for a specific Python type.
@@ -128,11 +131,15 @@ class JsonSchemaBuilder:
             use_defs_instead_of_definitions: If True, use '$defs' instead of 'definitions'
                 for schema definitions. This is required by some providers and is the
                 standard for JSON Schema Draft 2019-09 and later.
+            clean_output: If True, removes metadata keys like '$schema' that some providers
+                (like Cerebras) don't accept. This produces a cleaner schema with only
+                the essential structure.
         """
         self._target_type = target_type
         self.remove_examples = remove_examples
         self.schema_draft_uri = schema_draft_uri
         self.use_defs_instead_of_definitions = use_defs_instead_of_definitions
+        self.clean_output = clean_output
         self._definitions = {}
         self._definitions_mapping = {}
         self._processing = set()
@@ -185,9 +192,12 @@ class JsonSchemaBuilder:
         )
 
         # Assemble the final schema structure
-        final_schema: Dict[str, Any] = {
-            "$schema": self.schema_draft_uri,
-        }
+        final_schema: Dict[str, Any] = {}
+
+        # Only add $schema if not in clean_output mode
+        if not self.clean_output:
+            final_schema["$schema"] = self.schema_draft_uri
+
         final_schema.update(
             root_schema_content
         )  # Directly use the result (inline or $ref)
@@ -263,7 +273,7 @@ class JsonSchemaBuilder:
                 dereferenced_schema = resolve_refs(dereferenced_schema)
 
                 # Atualiza o esquema final
-                final_schema = dereferenced_schema
+                final_schema: dict[str, Any] = dereferenced_schema
 
                 # Mantém as definições para compatibilidade com testes, mas resolve referências dentro delas
                 if self._definitions_key in final_schema:
@@ -282,6 +292,20 @@ class JsonSchemaBuilder:
                     stacklevel=2,
                 )
                 raise RuntimeError(f"Dereferencing failed: {e}") from e
+
+        # Additional cleaning for providers that don't accept certain keys
+        if self.clean_output:
+            # Remove any other metadata keys that might cause issues
+            keys_to_remove = []
+            for key in final_schema.keys():
+                # Remove keys that start with $ except for $ref and $defs/definitions
+                if key.startswith("$") and key not in ("$ref", "$defs"):
+                    keys_to_remove.append(key)
+                # Some providers might not like 'definitions' even if they accept the content
+                # This is handled by use_defs_instead_of_definitions parameter
+
+            for key in keys_to_remove:
+                final_schema.pop(key, None)  # type: ignore
 
         return final_schema
 

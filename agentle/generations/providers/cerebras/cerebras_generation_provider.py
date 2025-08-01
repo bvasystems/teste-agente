@@ -17,6 +17,7 @@ This implementation transforms Agentle's unified message format into Cerebras's
 request format and adapts responses back into Agentle's Generation objects,
 providing a consistent experience regardless of the AI provider being used.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -259,6 +260,7 @@ class CerebrasGenerationProvider(GenerationProvider):
                                 "schema": JsonSchemaBuilder(
                                     cast(type[Any], response_schema),
                                     use_defs_instead_of_definitions=True,
+                                    clean_output=True,  # Use clean_output for Cerebras compatibility
                                 ).build(dereference=True),
                             },
                         }

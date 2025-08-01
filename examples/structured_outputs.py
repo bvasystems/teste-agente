@@ -14,12 +14,11 @@ from agentle.agents.agent import Agent
 from agentle.agents.agent_config import AgentConfig
 from agentle.generations.models.generation.generation_config import GenerationConfig
 from agentle.generations.models.generation.trace_params import TraceParams
-from agentle.generations.providers.openai.openai import OpenaiGenerationProvider
-from agentle.generations.tracing.langfuse import LangfuseObservabilityClient
+from agentle.generations.providers.cerebras.cerebras_generation_provider import CerebrasGenerationProvider
+
 
 load_dotenv()
 
-tracing_client = LangfuseObservabilityClient()
 
 
 # Define a structured response schema using Pydantic
@@ -34,7 +33,7 @@ class WeatherForecast(BaseModel):
 # Create an agent with the response schema
 structured_agent = Agent(
     name="Weather Agent",
-    generation_provider=OpenaiGenerationProvider(),
+    generation_provider=CerebrasGenerationProvider(),
     model="category_standard_experimental",
     instructions="You are a weather forecasting assistant. When asked about weather, provide accurate forecasts.",
     response_schema=WeatherForecast,  # This defines the expected response structure
