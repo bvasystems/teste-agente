@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
 from rsb.models.base_model import BaseModel
 from rsb.models.field import Field
 
@@ -108,6 +113,125 @@ class WhatsAppBotConfig(BaseModel):
     def max_batch_wait_seconds(self, value: float) -> None:
         """Deprecated: Use max_batch_timeout_seconds instead."""
         self.max_batch_timeout_seconds = value
+
+    # === Override Method ===
+
+    def with_overrides(
+        self,
+        *,
+        # Core Bot Behavior
+        typing_indicator: bool | None = None,
+        typing_duration: int | None = None,
+        auto_read_messages: bool | None = None,
+        quote_messages: bool | None = None,
+        session_timeout_minutes: int | None = None,
+        max_message_length: int | None = None,
+        error_message: str | None = None,
+        welcome_message: str | None = None,
+        # Message Batching
+        enable_message_batching: bool | None = None,
+        batch_delay_seconds: float | None = None,
+        max_batch_size: int | None = None,
+        max_batch_timeout_seconds: float | None = None,
+        # Spam Protection
+        spam_protection_enabled: bool | None = None,
+        min_message_interval_seconds: float | None = None,
+        max_messages_per_minute: int | None = None,
+        rate_limit_cooldown_seconds: int | None = None,
+        # Debug and Monitoring
+        debug_mode: bool | None = None,
+        track_response_times: bool | None = None,
+        slow_response_threshold_seconds: float | None = None,
+        # Error Handling
+        retry_failed_messages: bool | None = None,
+        max_retry_attempts: int | None = None,
+        retry_delay_seconds: float | None = None,
+    ) -> WhatsAppBotConfig:
+        """
+        Create a new configuration instance with specified parameters overridden.
+
+        Args:
+            All parameters are optional and correspond to the configuration fields.
+            Only non-None parameters will override the current configuration.
+
+        Returns:
+            New WhatsAppBotConfig instance with overridden parameters.
+
+        Example:
+            >>> base_config = WhatsAppBotConfig.production()
+            >>> debug_config = base_config.with_overrides(
+            ...     debug_mode=True,
+            ...     typing_duration=1,
+            ...     welcome_message="Debug mode enabled!"
+            ... )
+        """
+        # Get current configuration as dict
+        current_config = self.model_dump()
+
+        # Build overrides dict, only including non-None values
+        overrides: Mapping[str, Any] = {}
+
+        # Core Bot Behavior
+        if typing_indicator is not None:
+            overrides["typing_indicator"] = typing_indicator
+        if typing_duration is not None:
+            overrides["typing_duration"] = typing_duration
+        if auto_read_messages is not None:
+            overrides["auto_read_messages"] = auto_read_messages
+        if quote_messages is not None:
+            overrides["quote_messages"] = quote_messages
+        if session_timeout_minutes is not None:
+            overrides["session_timeout_minutes"] = session_timeout_minutes
+        if max_message_length is not None:
+            overrides["max_message_length"] = max_message_length
+        if error_message is not None:
+            overrides["error_message"] = error_message
+        if welcome_message is not None:
+            overrides["welcome_message"] = welcome_message
+
+        # Message Batching
+        if enable_message_batching is not None:
+            overrides["enable_message_batching"] = enable_message_batching
+        if batch_delay_seconds is not None:
+            overrides["batch_delay_seconds"] = batch_delay_seconds
+        if max_batch_size is not None:
+            overrides["max_batch_size"] = max_batch_size
+        if max_batch_timeout_seconds is not None:
+            overrides["max_batch_timeout_seconds"] = max_batch_timeout_seconds
+
+        # Spam Protection
+        if spam_protection_enabled is not None:
+            overrides["spam_protection_enabled"] = spam_protection_enabled
+        if min_message_interval_seconds is not None:
+            overrides["min_message_interval_seconds"] = min_message_interval_seconds
+        if max_messages_per_minute is not None:
+            overrides["max_messages_per_minute"] = max_messages_per_minute
+        if rate_limit_cooldown_seconds is not None:
+            overrides["rate_limit_cooldown_seconds"] = rate_limit_cooldown_seconds
+
+        # Debug and Monitoring
+        if debug_mode is not None:
+            overrides["debug_mode"] = debug_mode
+        if track_response_times is not None:
+            overrides["track_response_times"] = track_response_times
+        if slow_response_threshold_seconds is not None:
+            overrides["slow_response_threshold_seconds"] = (
+                slow_response_threshold_seconds
+            )
+
+        # Error Handling
+        if retry_failed_messages is not None:
+            overrides["retry_failed_messages"] = retry_failed_messages
+        if max_retry_attempts is not None:
+            overrides["max_retry_attempts"] = max_retry_attempts
+        if retry_delay_seconds is not None:
+            overrides["retry_delay_seconds"] = retry_delay_seconds
+
+        # Update configuration with overrides
+        current_config.update(overrides)
+
+        # Create and return new instance
+        return self.__class__(**current_config)
 
     # === Simplified Constructors ===
 
