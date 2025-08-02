@@ -239,6 +239,22 @@ class CerebrasGenerationProvider(GenerationProvider):
         )
 
         tool_adapter = AgentleToolToCerebrasToolAdapter()
+        _response_format: dict[str, Any] | None = (
+            {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "json_schema",
+                    "strict": True,
+                    "schema": JsonSchemaBuilder(
+                        cast(type[Any], response_schema),
+                        use_defs_instead_of_definitions=True,
+                        clean_output=True,  # Use clean_output for Cerebras compatibility
+                    ).build(dereference=True),
+                },
+            }
+            if bool(response_schema)
+            else None
+        )
 
         try:
             async with asyncio.timeout(_generation_config.timeout_in_seconds):
@@ -252,20 +268,7 @@ class CerebrasGenerationProvider(GenerationProvider):
                         tools=[tool_adapter.adapt(tool) for tool in tools]
                         if tools
                         else None,
-                        response_format={
-                            "type": "json_schema",
-                            "json_schema": {
-                                "name": "json_schema",
-                                "strict": True,
-                                "schema": JsonSchemaBuilder(
-                                    cast(type[Any], response_schema),
-                                    use_defs_instead_of_definitions=True,
-                                    clean_output=True,  # Use clean_output for Cerebras compatibility
-                                ).build(dereference=True),
-                            },
-                        }
-                        if bool(response_schema)
-                        else None,
+                        response_format=_response_format,
                         stream=False,
                     ),
                 )

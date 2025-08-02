@@ -5,16 +5,17 @@ Este módulo contém toda a lógica específica do Langfuse, isolada da interfac
 Utiliza o novo SDK V3 que é baseado em OpenTelemetry para melhor performance e
 compatibilidade com o ecossistema OTEL.
 """
+from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import Any, AsyncGenerator, Optional, cast
-
-from langfuse._client.client import Langfuse
-from langfuse._client.span import LangfuseGeneration, LangfuseSpan
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional, cast
 
 from .otel_client import GenerationContext, OtelClient, TraceContext
+
+if TYPE_CHECKING:
+    from langfuse._client.span import LangfuseGeneration, LangfuseSpan
 
 
 class _LangfuseTraceContext:
@@ -87,6 +88,8 @@ class LangfuseOtelClient(OtelClient):
             environment: Ambiente de execução
             release: Versão/release da aplicação
         """
+        from langfuse._client.client import Langfuse
+
         self._client = Langfuse(
             public_key=public_key,
             secret_key=secret_key,
