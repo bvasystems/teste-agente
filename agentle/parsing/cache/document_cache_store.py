@@ -8,7 +8,6 @@ for caching parsed documents in the Agentle framework.
 import abc
 from typing import Literal
 
-from rsb.models.config_dict import ConfigDict
 
 from agentle.parsing.parsed_file import ParsedFile
 
@@ -44,11 +43,6 @@ class DocumentCacheStore(abc.ABC):
             print("Found cached document!")
         ```
     """
-
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        # Remove frozen=True to allow post-init modifications
-    )
 
     @abc.abstractmethod
     async def get_async(self, key: str) -> ParsedFile | None:
