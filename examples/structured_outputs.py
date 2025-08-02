@@ -7,10 +7,10 @@ using a Pydantic model as a response schema.
 
 from collections.abc import Sequence
 from textwrap import dedent
-from typing import Literal
+from typing import Annotated, Literal
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Discriminator
 from rsb.models.field import Field
 
 from agentle.agents.agent import Agent
@@ -91,7 +91,7 @@ class InputOutput(BaseModel):
         description="Mensagem mostrada pela assistente antes do título do campo."
     )
 
-    title: str = Field(
+    input_title: str = Field(
         description="Título do campo, exibido logo acima do input para o usuário preencher."
     )
 
@@ -138,12 +138,12 @@ class InputOutput(BaseModel):
         from textwrap import dedent
 
         if mode == "markdown":
-            return f"""**{self.title}**  \n_{self.kind}_  \n{self.message}"""
+            return f"""**{self.input_title}**  \n_{self.kind}_  \n{self.message}"""
 
         return dedent(f"""
             <InputOutput>
                 <Message>{self.message}</Message>
-                <Title>{self.title}</Title>
+                <Title>{self.input_title}</Title>
                 <Kind>{self.kind}</Kind>
             </InputOutput>
         """)
@@ -234,7 +234,9 @@ class TextOutput(BaseModel):
         """)
 
 
-OutputType = FileOutput | InputOutput | TableOutput | TextOutput | Options
+OutputType = Annotated[
+    FileOutput | InputOutput | TableOutput | TextOutput | Options, Discriminator("type")
+]
 
 
 class Output(BaseModel):
@@ -250,3 +252,5 @@ structured_agent = Agent(
 
 # Run the agent with a query that requires structured data
 response = structured_agent.run("Give me an example Input of type date.")
+
+print(response.pretty_formatted())

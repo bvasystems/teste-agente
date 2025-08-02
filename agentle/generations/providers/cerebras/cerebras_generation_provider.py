@@ -248,7 +248,8 @@ class CerebrasGenerationProvider(GenerationProvider):
                     "schema": JsonSchemaBuilder(
                         cast(type[Any], response_schema),
                         use_defs_instead_of_definitions=True,
-                        clean_output=True,  # Use clean_output for Cerebras compatibility
+                        clean_output=True,
+                        strict_mode=True,
                     ).build(dereference=True),
                 },
             }

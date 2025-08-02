@@ -98,6 +98,7 @@ class JsonSchemaBuilder:
         remove_examples: Whether to remove example data from the generated schema.
         schema_draft_uri: The URI of the JSON Schema draft to use.
         clean_output: Whether to remove metadata keys that some providers don't accept.
+        strict_mode: Whether to ensure strict compatibility (all properties required).
         _definitions: Dictionary storing schema definitions for complex types.
         _definitions_mapping: Mapping between Python types and definition references.
         _processing: Set of types currently being processed (for recursion detection).
@@ -107,6 +108,7 @@ class JsonSchemaBuilder:
     remove_examples: bool
     schema_draft_uri: str
     clean_output: bool
+    strict_mode: bool
     _definitions: Dict[str, Dict[str, Any]]
     _definitions_mapping: Dict[Type[Any], str]
     _processing: set[
@@ -120,6 +122,7 @@ class JsonSchemaBuilder:
         schema_draft_uri: str = "http://json-schema.org/draft-07/schema#",
         use_defs_instead_of_definitions: bool = False,
         clean_output: bool = False,
+        strict_mode: bool = False,
     ) -> None:
         """
         Initialize a JSON Schema builder for a specific Python type.
@@ -134,12 +137,17 @@ class JsonSchemaBuilder:
             clean_output: If True, removes metadata keys like '$schema' that some providers
                 (like Cerebras) don't accept. This produces a cleaner schema with only
                 the essential structure.
+            strict_mode: If True, ensures all properties are marked as required and removes
+                metadata that might cause strict validation issues.
         """
         self._target_type = target_type
         self.remove_examples = remove_examples
         self.schema_draft_uri = schema_draft_uri
         self.use_defs_instead_of_definitions = use_defs_instead_of_definitions
         self.clean_output = clean_output
+        self.strict_mode = (
+            strict_mode or clean_output
+        )  # strict_mode implied by clean_output
         self._definitions = {}
         self._definitions_mapping = {}
         self._processing = set()
@@ -294,7 +302,7 @@ class JsonSchemaBuilder:
                 raise RuntimeError(f"Dereferencing failed: {e}") from e
 
         # Additional cleaning for providers that don't accept certain keys
-        if self.clean_output:
+        if self.clean_output or self.strict_mode:
             final_schema = self._clean_schema_for_strict_providers(final_schema)
 
         return final_schema
@@ -317,9 +325,12 @@ class JsonSchemaBuilder:
                 # Corrigir autoreferência substituindo pelo schema real
                 corrected_schema = {
                     "type": "object",
-                    "title": def_name,
                     "properties": {},
                 }
+
+                # Only add title if not in strict mode
+                if not self.strict_mode:
+                    corrected_schema["title"] = def_name
 
                 # Encontrar o tipo original, se possível
                 original_type = None
@@ -411,6 +422,13 @@ class JsonSchemaBuilder:
                         # Em caso de erro, manter schema básico
                         pass
 
+                # In strict mode, all properties must be required
+                if self.strict_mode and corrected_schema["properties"]:
+                    corrected_schema["required"] = sorted(
+                        corrected_schema["properties"].keys()
+                    )
+                    corrected_schema["additionalProperties"] = False
+
                 # Atualizar a definição no schema
                 definitions[def_name] = corrected_schema
 
@@ -422,6 +440,10 @@ class JsonSchemaBuilder:
             ):
                 # Garantir que objetos vazios tenham ao menos properties vazio para evitar KeyError
                 def_schema["properties"] = {}
+
+                # In strict mode, ensure additionalProperties is false
+                if self.strict_mode:
+                    def_schema["additionalProperties"] = False
 
     def _is_complex_type(self, cls_type: Type[Any]) -> bool:
         """Check if a type should potentially be added to definitions."""
@@ -615,7 +637,10 @@ class JsonSchemaBuilder:
             self._definitions_mapping[cls_type] = ref_path
             # Adicionar um placeholder no definitions para evitar problemas com recursão
             # Isso garante que mesmo em caso de recursão, teremos uma entrada para o schema
-            self._definitions[definition_name] = {"type": "object", "properties": {}}
+            placeholder_schema = {"type": "object", "properties": {}}
+            if self.strict_mode:
+                placeholder_schema["additionalProperties"] = False
+            self._definitions[definition_name] = placeholder_schema
 
             # Tentar inicializar com um schema básico mais completo para modelos Pydantic
             if hasattr(cls_type, "model_fields") or hasattr(cls_type, "__fields__"):
@@ -635,6 +660,15 @@ class JsonSchemaBuilder:
                         for field_name in field_names:
                             properties[field_name] = {}
                         self._definitions[definition_name]["properties"] = properties
+
+                        # In strict mode, make all properties required
+                        if self.strict_mode:
+                            self._definitions[definition_name]["required"] = sorted(
+                                field_names
+                            )
+                            self._definitions[definition_name][
+                                "additionalProperties"
+                            ] = False
                 except Exception:
                     # Se qualquer erro ocorrer, mantém o placeholder básico
                     pass
@@ -688,6 +722,26 @@ class JsonSchemaBuilder:
                         and "properties" not in definition_schema
                     ):
                         definition_schema["properties"] = {}
+
+                    # In strict mode, ensure all properties are required and additionalProperties is false
+                    if self.strict_mode and definition_schema.get("type") == "object":
+                        if (
+                            "properties" in definition_schema
+                            and definition_schema["properties"]
+                        ):
+                            if "required" not in definition_schema:
+                                definition_schema["required"] = sorted(
+                                    definition_schema["properties"].keys()
+                                )
+                            elif set(definition_schema["required"]) != set(
+                                definition_schema["properties"].keys()
+                            ):
+                                # Ensure all properties are in required
+                                definition_schema["required"] = sorted(
+                                    definition_schema["properties"].keys()
+                                )
+                        definition_schema["additionalProperties"] = False
+
                     # Store the fully built schema in definitions
                     self._definitions[definition_name] = definition_schema  # type: ignore
                     # Return the reference
@@ -697,9 +751,26 @@ class JsonSchemaBuilder:
                     # Pass correct namespaces
                     current_local_ns = {cls_type.__name__: cls_type, **(local_ns or {})}
                     current_global_ns = {**(global_ns or {}), **globals()}
-                    return schema_builder_func(  # type: ignore
+                    schema = schema_builder_func(  # type: ignore
                         cls_type, current_global_ns, current_local_ns
                     )
+
+                    # Apply strict mode rules even for inline schemas
+                    if (
+                        self.strict_mode
+                        and isinstance(schema, dict)
+                        and schema.get("type") == "object"
+                    ):
+                        if "properties" in schema and schema["properties"]:
+                            if "required" not in schema:
+                                schema["required"] = sorted(schema["properties"].keys())
+                            elif set(schema["required"]) != set(
+                                schema["properties"].keys()
+                            ):
+                                schema["required"] = sorted(schema["properties"].keys())
+                        schema["additionalProperties"] = False
+
+                    return schema
                 else:  # Complex but not hashable
                     warnings.warn(
                         f"Complex type {cls_type} is not hashable, generating schema inline.",
@@ -709,9 +780,26 @@ class JsonSchemaBuilder:
                     # Pass correct namespaces
                     current_local_ns = {cls_type.__name__: cls_type, **(local_ns or {})}
                     current_global_ns = {**(global_ns or {}), **globals()}
-                    return schema_builder_func(  # type: ignore
+                    schema = schema_builder_func(  # type: ignore
                         cls_type, current_global_ns, current_local_ns
                     )
+
+                    # Apply strict mode rules
+                    if (
+                        self.strict_mode
+                        and isinstance(schema, dict)
+                        and schema.get("type") == "object"
+                    ):
+                        if "properties" in schema and schema["properties"]:
+                            if "required" not in schema:
+                                schema["required"] = sorted(schema["properties"].keys())
+                            elif set(schema["required"]) != set(
+                                schema["properties"].keys()
+                            ):
+                                schema["required"] = sorted(schema["properties"].keys())
+                        schema["additionalProperties"] = False
+
+                    return schema
             else:
                 # If no specific builder found, but _is_complex was True, it's an issue.
                 if is_complex:
@@ -796,10 +884,12 @@ class JsonSchemaBuilder:
             if cls_type is list:
                 return {"type": "array", "items": {}}  # Items default to Any schema
             if cls_type is dict:
-                return {
-                    "type": "object",
-                    "additionalProperties": {},
-                }  # Props default to Any schema
+                schema = {"type": "object", "additionalProperties": {}}
+                # In strict mode, we need to be more specific about objects
+                if self.strict_mode:
+                    schema["additionalProperties"] = False
+                    schema["properties"] = {}
+                return schema
             if cls_type is tuple:
                 return {"type": "array"}  # No constraints on items
         except TypeError:
@@ -842,7 +932,13 @@ class JsonSchemaBuilder:
                 value_schema = self._build_schema_recursive(
                     cast(Type[Any], value_type), global_ns, local_ns
                 )
-            return {"type": "object", "additionalProperties": value_schema}
+
+            schema = {"type": "object", "additionalProperties": value_schema}
+            # In strict mode, we need properties to be defined
+            if self.strict_mode:
+                schema["additionalProperties"] = False
+                schema["properties"] = {}
+            return schema
 
         if (
             origin is Union or origin is types.UnionType  # type: ignore
@@ -1124,11 +1220,14 @@ class JsonSchemaBuilder:
 
         values = [item.value for item in cls_type]
         if not values:
-            return {
-                "title": cls_type.__name__,
+            schema = {
                 "type": "null",
                 "enum": [],
             }  # Empty enum
+            # Only add title if not in strict mode
+            if not self.strict_mode:
+                schema["title"] = cls_type.__name__
+            return schema
 
         value_details = []  # Store tuples: (original_value, json_primitive_value, json_schema_type_str | None)
         has_truly_non_primitive = False
@@ -1176,7 +1275,11 @@ class JsonSchemaBuilder:
 
             value_details.append((value, json_value, json_type_str))
 
-        schema: Dict[str, Any] = {"title": cls_type.__name__}
+        schema: Dict[str, Any] = {}
+
+        # Only add title if not in strict mode
+        if not self.strict_mode:
+            schema["title"] = cls_type.__name__
 
         if has_truly_non_primitive:
             # Test 'test_non_primitive_enum' expects anyOf even if only string results
@@ -1321,9 +1424,9 @@ class JsonSchemaBuilder:
             if field.metadata:
                 description = field.metadata.get("description")
                 examples = field.metadata.get("examples")
-                if description:
+                if description and not self.strict_mode:
                     field_schema["description"] = description
-                if examples:
+                if examples and not self.remove_examples and not self.strict_mode:
                     field_schema["examples"] = examples
 
             # Determine requirement and default value handling
@@ -1333,7 +1436,7 @@ class JsonSchemaBuilder:
                 # Add primitive defaults to the schema
                 if self._is_json_primitive(field.default):
                     # Avoid adding default: None explicitly unless it's Literal[None]
-                    if field.default is not None:
+                    if field.default is not None and not self.strict_mode:
                         field_schema["default"] = field.default
                 # Else: Default is complex (list, dict, instance), not represented in schema 'default'. Field is NOT required.
             elif field.default_factory is not dataclasses.MISSING:
@@ -1352,25 +1455,46 @@ class JsonSchemaBuilder:
                 if origin is Union and any(arg in none_types for arg in args):
                     is_required = False  # Type hint makes it optional
 
+            # In strict mode, make all fields required unless explicitly optional
+            if self.strict_mode:
+                origin = get_origin(field_type)
+                args = get_args(field_type)
+                none_types = (types.NoneType, type(None))
+                # Only make it not required if it's explicitly Optional or has a default
+                if (
+                    not (origin is Union and any(arg in none_types for arg in args))
+                    and field.default is dataclasses.MISSING
+                    and field.default_factory is dataclasses.MISSING
+                ):
+                    is_required = True
+
             if is_required:
                 required.append(field_name)
-            # Do NOT pop default if one was explicitly added for a primitive non-required field
-            # elif not has_explicit_primitive_default:
-            # field_schema.pop("default", None)
 
             properties[field_name] = field_schema
 
         # Assemble the schema for the dataclass itself
         schema: Dict[str, Any] = {
             "type": "object",
-            "title": cls_type.__name__,
             "properties": properties,
         }
-        # Ensure required list is unique and sorted for deterministic output
-        if required:
-            schema["required"] = sorted(list(set(required)))
+
+        # Only add title if not in strict mode
+        if not self.strict_mode:
+            schema["title"] = cls_type.__name__
+
+        # In strict mode, all properties must be required if any properties exist
+        if self.strict_mode:
+            if properties:
+                schema["required"] = sorted(properties.keys())
+                schema["additionalProperties"] = False
+        else:
+            # Ensure required list is unique and sorted for deterministic output
+            if required:
+                schema["required"] = sorted(list(set(required)))
+
         doc = inspect.getdoc(cls_type)
-        if doc:
+        if doc and not self.strict_mode:
             schema["description"] = doc
         return schema
 
@@ -1449,7 +1573,11 @@ class JsonSchemaBuilder:
             if field_name in defaults:
                 default_val = defaults[field_name]
                 # Check if default is a simple primitive we can represent
-                if self._is_json_primitive(default_val) and default_val is not None:
+                if (
+                    self._is_json_primitive(default_val)
+                    and default_val is not None
+                    and not self.strict_mode
+                ):
                     field_schema["default"] = default_val
                 is_required = False  # Has a default, so not required
             else:
@@ -1460,6 +1588,17 @@ class JsonSchemaBuilder:
                 if origin is Union and any(arg in none_types for arg in args):
                     is_required = False
 
+            # In strict mode, make all fields required unless explicitly optional
+            if self.strict_mode:
+                origin = get_origin(field_type)
+                args = get_args(field_type)
+                none_types = (types.NoneType, type(None))
+                if (
+                    not (origin is Union and any(arg in none_types for arg in args))
+                    and field_name not in defaults
+                ):
+                    is_required = True
+
             if is_required:
                 required.append(field_name)
 
@@ -1467,13 +1606,24 @@ class JsonSchemaBuilder:
 
         schema: Dict[str, Any] = {
             "type": "object",
-            "title": cls_type.__name__,
             "properties": properties,
         }
-        if required:
-            schema["required"] = sorted(list(set(required)))
+
+        # Only add title if not in strict mode
+        if not self.strict_mode:
+            schema["title"] = cls_type.__name__
+
+        # In strict mode, all properties must be required if any properties exist
+        if self.strict_mode:
+            if properties:
+                schema["required"] = sorted(properties.keys())
+                schema["additionalProperties"] = False
+        else:
+            if required:
+                schema["required"] = sorted(list(set(required)))
+
         doc = inspect.getdoc(cls_type)
-        if doc:
+        if doc and not self.strict_mode:
             schema["description"] = doc
         return schema
 
@@ -1487,6 +1637,11 @@ class JsonSchemaBuilder:
             # Use by_alias=False if needed, ref_template is key
             ref_template = f"{self._reference_prefix}{{model}}"
             schema_dict = cls_type.schema(ref_template=ref_template)
+
+            # Clean the schema early to handle discriminated unions
+            if self.strict_mode or self.clean_output:
+                schema_dict = self._clean_pydantic_discriminated_unions(schema_dict)
+
             # Pydantic v1 uses 'definitions'
             if "definitions" in schema_dict:
                 pydantic_defs = schema_dict.pop("definitions")
@@ -1516,6 +1671,10 @@ class JsonSchemaBuilder:
                                 )
                         # Do not overwrite if already exists
                     else:
+                        # Clean the definition schema for strict mode
+                        if self.strict_mode or self.clean_output:
+                            def_schema = self._clean_schema_recursive(def_schema)
+
                         # Detectar e corrigir referência recursiva direta
                         # Isso ocorre quando um schema refere a si mesmo diretamente com $ref
                         if (
@@ -1532,179 +1691,53 @@ class JsonSchemaBuilder:
                                 # Usar as propriedades do schema alternativo
                                 def_schema = {
                                     "type": "object",
-                                    "title": def_name,
                                     "properties": alt_schema["properties"],
                                 }
+                                if not self.strict_mode:
+                                    def_schema["title"] = def_name
                                 if "required" in alt_schema:
                                     def_schema["required"] = sorted(
                                         alt_schema["required"]
                                     )
+                                if self.strict_mode:
+                                    def_schema["additionalProperties"] = False
                             else:
                                 # Fallback - criar um schema vazio
                                 def_schema = {
                                     "type": "object",
-                                    "title": def_name,
                                     "properties": {},
                                 }
+                                if not self.strict_mode:
+                                    def_schema["title"] = def_name
+                                if self.strict_mode:
+                                    def_schema["additionalProperties"] = False
 
-                        # Normalize properties - remove 'title' from simple property schemas
-                        if "properties" in def_schema:
-                            for _, prop_schema in def_schema["properties"].items():  # type: ignore
-                                # Process Enum properties - ensure enum field is present
-                                if (
-                                    isinstance(prop_schema, dict)
-                                    and "$ref" in prop_schema
-                                ):
-                                    ref_name = prop_schema["$ref"].split("/")[-1]
-                                    # Se for uma referência para um tipo Enum no próprio schema
-                                    if (
-                                        ref_name in pydantic_defs
-                                        and pydantic_defs[ref_name].get("type")
-                                        == "string"
-                                        and pydantic_defs[ref_name].get("enum")
-                                        is not None
-                                    ):
-                                        # Use inline enum ao invés de referência
-                                        enum_values = pydantic_defs[ref_name]["enum"]
-                                        prop_schema.pop("$ref")
-                                        prop_schema["type"] = "string"
-                                        prop_schema["enum"] = enum_values
-                                # Se for schema simples (contém type e poucos campos), remover title
-                                elif (
-                                    isinstance(prop_schema, dict)
-                                    and "type" in prop_schema
-                                    and "default" in prop_schema
-                                ):
-                                    # Campo com valor default - remover title
-                                    prop_schema.pop("title", None)
-                                elif (
-                                    isinstance(prop_schema, dict)
-                                    and "type" in prop_schema
-                                    and len(prop_schema) <= 2  # type: ignore
-                                ):
-                                    prop_schema.pop("title", None)
-                                # Limpar campos anyOf com mais de 2 itens e com title/default
-                                elif (
-                                    isinstance(prop_schema, dict)
-                                    and "anyOf" in prop_schema
-                                ):
-                                    # Remover title e default de campos opcional (Union/Optional)
-                                    prop_schema.pop("title", None)
-                                    prop_schema.pop("default", None)
-
-                                    # Processar Union com Literal - verificar se algum item no anyOf é um Literal string
-                                    self._process_literal_in_anyof(prop_schema)
-
-                        # Garantir que modelos com object type tenham properties
-                        if (
-                            "type" in def_schema
-                            and def_schema.get("type") == "object"
-                            and "properties" not in def_schema
-                        ):
-                            def_schema["properties"] = {}
-
-                        # Garantir ordem consistente para campos obrigatórios
-                        if "required" in def_schema:
-                            # Campos obrigatórios em ordem alfabética, importante para testes
-                            def_schema["required"] = sorted(def_schema["required"])  # type: ignore
+                        # Apply strict mode transformations
+                        if self.strict_mode and def_schema.get("type") == "object":
+                            if "properties" in def_schema and def_schema["properties"]:
+                                def_schema["required"] = sorted(
+                                    def_schema["properties"].keys()
+                                )
+                                def_schema["additionalProperties"] = False
 
                         self._definitions[def_name] = def_schema
 
-            # Detectar e corrigir referência recursiva direta no schema principal
-            if "$ref" in schema_dict and schema_dict["$ref"].startswith(
-                self._reference_prefix
-            ):
-                ref_name = schema_dict["$ref"].split("/")[-1]
-                # Verificar se a definição existe e tem properties
-                if (
-                    ref_name in self._definitions
-                    and "properties" in self._definitions[ref_name]
-                ):
-                    # Schema já está processado corretamente, não precisa fazer nada
-                    pass
-                else:
-                    # Tentar obter um schema alternativo para o modelo
-                    alt_schema = cls_type.schema(ref_template="#/ignored/{model}")
-                    if "properties" in alt_schema:
-                        # Adicionar as propriedades no schema de definição
-                        if ref_name not in self._definitions:
-                            self._definitions[ref_name] = {
-                                "type": "object",
-                                "title": ref_name,
-                                "properties": alt_schema["properties"],
-                            }
-                            if "required" in alt_schema:
-                                self._definitions[ref_name]["required"] = sorted(
-                                    alt_schema["required"]
-                                )
-                        elif "properties" not in self._definitions[ref_name]:
-                            # Atualizar definição existente sem quebrar
-                            self._definitions[ref_name]["type"] = "object"
-                            self._definitions[ref_name]["properties"] = alt_schema[
-                                "properties"
-                            ]
-                            if "required" in alt_schema:
-                                self._definitions[ref_name]["required"] = sorted(
-                                    alt_schema["required"]
-                                )
+            # Clean the main schema
+            if self.strict_mode or self.clean_output:
+                schema_dict = self._clean_schema_recursive(schema_dict)
 
-            # Normalize properties at top level too
-            if "properties" in schema_dict:
-                for _, prop_schema in schema_dict["properties"].items():
-                    # Process Enum properties
-                    if isinstance(prop_schema, dict) and "$ref" in prop_schema:
-                        ref_name = prop_schema["$ref"].split("/")[-1]
-                        # Se for uma referência para um tipo Enum no próprio schema
-                        if (
-                            ref_name in pydantic_defs  # type: ignore
-                            and pydantic_defs[ref_name].get("type") == "string"  # type: ignore
-                            and pydantic_defs[ref_name].get("enum") is not None  # type: ignore
-                        ):
-                            # Use inline enum ao invés de referência
-                            enum_values = pydantic_defs[ref_name]["enum"]  # type: ignore
-                            prop_schema.pop("$ref")
-                            prop_schema["type"] = "string"
-                            prop_schema["enum"] = enum_values
-                    elif (
-                        isinstance(prop_schema, dict)
-                        and "type" in prop_schema
-                        and "default" in prop_schema
-                    ):
-                        # Campo com valor default - remover title
-                        prop_schema.pop("title", None)
-                    elif (
-                        isinstance(prop_schema, dict)
-                        and "type" in prop_schema
-                        and len(prop_schema) <= 2  # type: ignore
-                    ):
-                        prop_schema.pop("title", None)
-                    # Limpar campos anyOf com mais de 2 itens e com title/default
-                    elif isinstance(prop_schema, dict) and "anyOf" in prop_schema:
-                        # Remover title e default de campos opcional (Union/Optional)
-                        prop_schema.pop("title", None)
-                        prop_schema.pop("default", None)
+            # Apply strict mode transformations to main schema
+            if self.strict_mode and schema_dict.get("type") == "object":
+                if "properties" in schema_dict and schema_dict["properties"]:
+                    schema_dict["required"] = sorted(schema_dict["properties"].keys())
+                    schema_dict["additionalProperties"] = False
 
-                        # Processar Union com Literal
-                        self._process_literal_in_anyof(prop_schema)
-
-            # Garantir que tipo objeto tenha properties no nível superior
-            if (
-                "type" in schema_dict
-                and schema_dict.get("type") == "object"
-                and "properties" not in schema_dict
-            ):
-                schema_dict["properties"] = {}
-
-            # Garantir ordem consistente para campos obrigatórios no schema de topo
-            if "required" in schema_dict:
-                schema_dict["required"] = sorted(schema_dict["required"])
-
-            # Ensure title and description are present
-            if "title" not in schema_dict:
+            # Ensure title and description are present only if not in strict mode
+            if "title" not in schema_dict and not self.strict_mode:
                 schema_dict["title"] = cls_type.__name__
             doc = inspect.getdoc(cls_type)
             # Add description from docstring if not already present in schema
-            if "description" not in schema_dict and doc:
+            if "description" not in schema_dict and doc and not self.strict_mode:
                 schema_dict["description"] = doc
             # Remove schema URI if Pydantic added it, we add our own at the top level
             schema_dict.pop("$schema", None)
@@ -1718,51 +1751,6 @@ class JsonSchemaBuilder:
             # Fallback uses passed-in (already combined) namespaces
             return self._build_generic_class_schema(cls_type, global_ns, local_ns)
 
-    def _process_literal_in_anyof(self, schema_obj: Any) -> None:
-        """Processa um schema anyOf para garantir que Literals string apareçam corretamente"""
-        if not isinstance(schema_obj, dict) or "anyOf" not in schema_obj:
-            return
-
-        # Verificar se tem um literal string constante no objeto
-        has_string_const = False
-        anyof_items = schema_obj.get("anyOf", [])
-
-        # Check for type=string and const (direct Literal handling)
-        for i, item in enumerate(anyof_items):  # type: ignore
-            if (
-                isinstance(item, dict)
-                and item.get("type") == "string"
-                and "const" in item
-            ):
-                has_string_const = True
-                # Convert const to enum for better compatibility
-                const_value = item["const"]
-                anyof_items[i] = {"type": "string", "enum": [const_value]}
-
-        # Se não encontramos Literal direto, procuramos nos refs
-        if not has_string_const:
-            # Procurar por referências que possam conter enums
-
-            # Adicionar um item enum para "placeholder" explicitamente se não existir
-            # Isso é um hack para os casos de teste, mas pode ser útil em alguns casos reais
-            if "placeholder" in str(schema_obj):  # type: ignore
-                # Verificar se já existe um enum com "placeholder"
-                has_placeholder = False
-                for item in anyof_items:
-                    if (
-                        isinstance(item, dict)
-                        and item.get("type") == "string"
-                        and "enum" in item
-                        and "placeholder" in item["enum"]
-                    ):
-                        has_placeholder = True
-                        break
-
-                if not has_placeholder:
-                    # Adicionar um item específico para 'placeholder' no anyOf
-                    anyof_items.append({"type": "string", "enum": ["placeholder"]})
-                    schema_obj["anyOf"] = anyof_items
-
     def _build_pydantic_v2_schema(
         self,
         cls_type: Type[Any],
@@ -1774,6 +1762,11 @@ class JsonSchemaBuilder:
             # Use correct template based on draft? Assume #/definitions for now for Draft 7 target
             ref_template = f"{self._reference_prefix}{{model}}"
             schema_dict = cls_type.model_json_schema(ref_template=ref_template)
+
+            # Clean the schema early to handle discriminated unions
+            if self.strict_mode or self.clean_output:
+                schema_dict = self._clean_pydantic_discriminated_unions(schema_dict)
+
             # Pydantic v2 uses '$defs' (consistent with Draft 2019-09+) but we map to 'definitions' for Draft 7
             if "$defs" in schema_dict:
                 pydantic_defs = schema_dict.pop("$defs")
@@ -1801,236 +1794,67 @@ class JsonSchemaBuilder:
 
                         # Do not overwrite if already exists
                     else:
-                        # Detectar e corrigir referência recursiva direta
-                        # Isso ocorre quando um schema refere a si mesmo diretamente com $ref
+                        # Clean the definition schema for strict mode
+                        if self.strict_mode or self.clean_output:
+                            def_schema = self._clean_schema_recursive(def_schema)
+
+                        # Similar handling as v1...
                         if (
                             "$ref" in def_schema
                             and def_schema["$ref"] == f"#/definitions/{def_name}"
                         ):
-                            # Substituir por um schema real com propriedades
-                            # Primeiro verificamos se tem um schema alternativo para o modelo
                             alt_schema = cls_type.model_json_schema(
                                 ref_template="#/ignored/{model}"
                             )
                             if "properties" in alt_schema:
-                                # Usar as propriedades do schema alternativo
                                 def_schema = {
                                     "type": "object",
-                                    "title": def_name,
                                     "properties": alt_schema["properties"],
                                 }
+                                if not self.strict_mode:
+                                    def_schema["title"] = def_name
                                 if "required" in alt_schema:
                                     def_schema["required"] = sorted(
                                         alt_schema["required"]
                                     )
+                                if self.strict_mode:
+                                    def_schema["additionalProperties"] = False
                             else:
-                                # Fallback - criar um schema vazio
                                 def_schema = {
                                     "type": "object",
-                                    "title": def_name,
                                     "properties": {},
                                 }
+                                if not self.strict_mode:
+                                    def_schema["title"] = def_name
+                                if self.strict_mode:
+                                    def_schema["additionalProperties"] = False
 
-                        # Verificar e corrigir definições incompletas devido a recursão mútua
-                        # Problema: objetos com recursão mútua podem ter schemas sem propriedades
-                        if (
-                            "type" in def_schema
-                            and def_schema.get("type") == "object"
-                            and "properties" not in def_schema
-                        ):
-                            # Tentar obter um schema alternativo do modelo
-                            try:
-                                # Tenta achar a classe original para este def_name
-                                original_model = None
-                                # Busca na lista de tipos já processados
-                                for typ, ref in self._definitions_mapping.items():
-                                    if ref == f"{self._reference_prefix}{def_name}":
-                                        original_model = typ
-                                        break
-
-                                if original_model:
-                                    # Se encontramos o modelo original, gerar schema alternativo
-                                    alt_schema = original_model.model_json_schema(
-                                        ref_template="#/ignored/{model}"
-                                    )
-                                    if "properties" in alt_schema:
-                                        def_schema["properties"] = alt_schema[
-                                            "properties"
-                                        ]
-                                        if "required" in alt_schema:
-                                            def_schema["required"] = sorted(
-                                                alt_schema["required"]
-                                            )
-                                    else:
-                                        def_schema["properties"] = {}
-                                else:
-                                    # Se não conseguir encontrar o modelo original, usar schema vazio
-                                    def_schema["properties"] = {}
-                            except Exception:
-                                # Se falhar qualquer etapa, garantir que pelo menos temos properties vazio
-                                def_schema["properties"] = {}
-
-                        # Normalize properties - remove 'title' from simple property schemas
-                        if "properties" in def_schema:
-                            for _, prop_schema in def_schema["properties"].items():  # type: ignore
-                                # Process Enum properties - ensure enum field is present
-                                if (
-                                    isinstance(prop_schema, dict)
-                                    and "$ref" in prop_schema
-                                ):
-                                    ref_name = prop_schema["$ref"].split("/")[-1]
-                                    # Se for uma referência para um tipo Enum no próprio schema
-                                    if (
-                                        ref_name in pydantic_defs
-                                        and pydantic_defs[ref_name].get("type")
-                                        == "string"
-                                        and pydantic_defs[ref_name].get("enum")
-                                        is not None
-                                    ):
-                                        # Use inline enum ao invés de referência
-                                        enum_values = pydantic_defs[ref_name]["enum"]
-                                        prop_schema.pop("$ref")
-                                        prop_schema["type"] = "string"
-                                        prop_schema["enum"] = enum_values
-                                # Campo com default value, remover title
-                                elif (
-                                    isinstance(prop_schema, dict)
-                                    and "type" in prop_schema
-                                    and "default" in prop_schema
-                                ):
-                                    # Campo com valor default - remover title
-                                    prop_schema.pop("title", None)
-                                # Remove title de schemas simples
-                                elif (
-                                    isinstance(prop_schema, dict)
-                                    and "type" in prop_schema
-                                    and len(prop_schema) <= 2  # type: ignore
-                                ):
-                                    prop_schema.pop("title", None)
-                                # Limpar campos anyOf com mais de 2 itens e com title/default
-                                elif (
-                                    isinstance(prop_schema, dict)
-                                    and "anyOf" in prop_schema
-                                ):
-                                    # Remover title e default de campos opcional (Union/Optional)
-                                    prop_schema.pop("title", None)
-                                    prop_schema.pop("default", None)
-
-                                    # Processar Union com Literal - verificar se algum item no anyOf é um Literal string
-                                    self._process_literal_in_anyof(prop_schema)
-
-                        # Garantir que modelos com object type tenham properties
-                        if (
-                            "type" in def_schema
-                            and def_schema.get("type") == "object"
-                            and "properties" not in def_schema
-                        ):
-                            def_schema["properties"] = {}
-
-                        # Garantir ordem consistente para campos obrigatórios
-                        if "required" in def_schema:
-                            # Campos obrigatórios em ordem alfabética, importante para testes
-                            def_schema["required"] = sorted(def_schema["required"])  # type: ignore
+                        # Apply strict mode transformations
+                        if self.strict_mode and def_schema.get("type") == "object":
+                            if "properties" in def_schema and def_schema["properties"]:
+                                def_schema["required"] = sorted(
+                                    def_schema["properties"].keys()
+                                )
+                                def_schema["additionalProperties"] = False
 
                         self._definitions[def_name] = def_schema
 
-            # Detectar e corrigir referência recursiva direta no schema principal
-            if "$ref" in schema_dict and schema_dict["$ref"].startswith(
-                self._reference_prefix
-            ):
-                ref_name = schema_dict["$ref"].split("/")[-1]
-                # Verificar se a definição existe e tem properties
-                if (
-                    ref_name in self._definitions
-                    and "properties" in self._definitions[ref_name]
-                ):
-                    # Schema já está processado corretamente, não precisa fazer nada
-                    pass
-                else:
-                    # Tentar obter um schema alternativo para o modelo
-                    alt_schema = cls_type.model_json_schema(
-                        ref_template="#/ignored/{model}"
-                    )
-                    if "properties" in alt_schema:
-                        # Adicionar as propriedades no schema de definição
-                        if ref_name not in self._definitions:
-                            self._definitions[ref_name] = {
-                                "type": "object",
-                                "title": ref_name,
-                                "properties": alt_schema["properties"],
-                            }
-                            if "required" in alt_schema:
-                                self._definitions[ref_name]["required"] = sorted(
-                                    alt_schema["required"]
-                                )
-                        elif "properties" not in self._definitions[ref_name]:
-                            # Atualizar definição existente sem quebrar
-                            self._definitions[ref_name]["type"] = "object"
-                            self._definitions[ref_name]["properties"] = alt_schema[
-                                "properties"
-                            ]
-                            if "required" in alt_schema:
-                                self._definitions[ref_name]["required"] = sorted(
-                                    alt_schema["required"]
-                                )
+            # Clean the main schema
+            if self.strict_mode or self.clean_output:
+                schema_dict = self._clean_schema_recursive(schema_dict)
 
-            # Normalize properties at top level too
-            if "properties" in schema_dict:
-                for _, prop_schema in schema_dict["properties"].items():
-                    # Process Enum properties at top level too
-                    if isinstance(prop_schema, dict) and "$ref" in prop_schema:
-                        ref_name = prop_schema["$ref"].split("/")[-1]
-                        # Se for uma referência para um tipo Enum no próprio schema
-                        if (
-                            ref_name in pydantic_defs  # type: ignore
-                            and pydantic_defs[ref_name].get("type") == "string"  # type: ignore
-                            and pydantic_defs[ref_name].get("enum") is not None  # type: ignore
-                        ):
-                            # Use inline enum ao invés de referência
-                            enum_values = pydantic_defs[ref_name]["enum"]  # type: ignore
-                            prop_schema.pop("$ref")
-                            prop_schema["type"] = "string"
-                            prop_schema["enum"] = enum_values
-                    elif (
-                        isinstance(prop_schema, dict)
-                        and "type" in prop_schema
-                        and "default" in prop_schema
-                    ):
-                        # Campo com valor default - remover title
-                        prop_schema.pop("title", None)
-                    elif (
-                        isinstance(prop_schema, dict)
-                        and "type" in prop_schema
-                        and len(prop_schema) <= 2  # type: ignore
-                    ):
-                        prop_schema.pop("title", None)
-                    # Limpar campos anyOf com mais de 2 itens e com title/default
-                    elif isinstance(prop_schema, dict) and "anyOf" in prop_schema:
-                        # Remover title e default de campos opcional (Union/Optional)
-                        prop_schema.pop("title", None)
-                        prop_schema.pop("default", None)
+            # Apply strict mode transformations to main schema
+            if self.strict_mode and schema_dict.get("type") == "object":
+                if "properties" in schema_dict and schema_dict["properties"]:
+                    schema_dict["required"] = sorted(schema_dict["properties"].keys())
+                    schema_dict["additionalProperties"] = False
 
-                        # Processar Union com Literal
-                        self._process_literal_in_anyof(prop_schema)
-
-            # Garantir que tipo objeto tenha properties no nível superior
-            if (
-                "type" in schema_dict
-                and schema_dict.get("type") == "object"
-                and "properties" not in schema_dict
-            ):
-                schema_dict["properties"] = {}
-
-            # Garantir ordem consistente para campos obrigatórios no schema de topo
-            if "required" in schema_dict:
-                schema_dict["required"] = sorted(schema_dict["required"])
-
-            # Ensure title and description are present
-            if "title" not in schema_dict:
+            # Ensure title and description are present only if not in strict mode
+            if "title" not in schema_dict and not self.strict_mode:
                 schema_dict["title"] = cls_type.__name__
             doc = inspect.getdoc(cls_type)
             # Add description from docstring if not already present in schema
-            if "description" not in schema_dict and doc:
+            if "description" not in schema_dict and doc and not self.strict_mode:
                 schema_dict["description"] = doc
             # Remove schema URI if Pydantic added it
             schema_dict.pop("$schema", None)
@@ -2047,6 +1871,50 @@ class JsonSchemaBuilder:
             )
             # Fallback uses passed-in (already combined) namespaces
             return self._build_generic_class_schema(cls_type, global_ns, local_ns)
+
+    def _clean_pydantic_discriminated_unions(
+        self, schema: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Clean Pydantic-generated schemas to handle discriminated unions that Cerebras doesn't support.
+
+        Converts:
+        - discriminator + oneOf -> anyOf
+        - Removes unsupported discriminator fields
+        """
+
+        def clean_recursive(obj: Any) -> Any:
+            if isinstance(obj, dict):
+                cleaned = {}
+
+                # Handle discriminated union pattern
+                if "discriminator" in obj and "oneOf" in obj:
+                    # Convert to anyOf pattern that Cerebras supports
+                    cleaned["anyOf"] = [clean_recursive(item) for item in obj["oneOf"]]
+
+                    # Copy other fields except discriminator and oneOf
+                    for key, value in obj.items():
+                        if key not in ("discriminator", "oneOf"):
+                            cleaned[key] = clean_recursive(value)
+
+                    return cleaned
+
+                # Regular object cleaning
+                for key, value in obj.items():
+                    if key == "discriminator":
+                        continue  # Skip discriminator fields
+                    elif isinstance(value, (dict, list)):
+                        cleaned[key] = clean_recursive(value)
+                    else:
+                        cleaned[key] = value
+
+                return cleaned
+            elif isinstance(obj, list):
+                return [clean_recursive(item) for item in obj]
+            else:
+                return obj
+
+        return clean_recursive(schema)
 
     def _build_generic_class_schema(
         self,
@@ -2166,6 +2034,7 @@ class JsonSchemaBuilder:
                     if (
                         self._is_json_primitive(param.default)
                         and param.default is not None
+                        and not self.strict_mode
                     ):
                         field_schema["default"] = param.default
                     # If default exists, it's not required
@@ -2194,7 +2063,7 @@ class JsonSchemaBuilder:
                             ),
                         )
                     )
-                    if is_simple_default:
+                    if is_simple_default and not self.strict_mode:
                         field_schema["default"] = class_default
                         is_required = False  # Has class default
                     else:
@@ -2220,11 +2089,16 @@ class JsonSchemaBuilder:
                     if not (origin is Union and any(arg in none_types for arg in args)):
                         is_required = True  # No default, not Optional -> required
 
+            # In strict mode, make all fields required unless explicitly optional
+            if self.strict_mode:
+                origin = get_origin(field_type)
+                args = get_args(field_type)
+                none_types = (types.NoneType, type(None))
+                if not (origin is Union and any(arg in none_types for arg in args)):
+                    is_required = True
+
             if is_required:
                 required.append(field_name)
-            # Do NOT pop default if one was explicitly added for a primitive non-required field
-            # elif not has_explicit_primitive_default:
-            # field_schema.pop("default", None)
 
             properties[field_name] = field_schema
 
@@ -2247,13 +2121,24 @@ class JsonSchemaBuilder:
 
         schema: Dict[str, Any] = {
             "type": "object",
-            "title": cls_type.__name__,
             "properties": properties,
         }
-        if required:
-            schema["required"] = sorted(list(set(required)))
+
+        # Only add title if not in strict mode
+        if not self.strict_mode:
+            schema["title"] = cls_type.__name__
+
+        # In strict mode, all properties must be required if any properties exist
+        if self.strict_mode:
+            if properties:
+                schema["required"] = sorted(properties.keys())
+                schema["additionalProperties"] = False
+        else:
+            if required:
+                schema["required"] = sorted(list(set(required)))
+
         doc = inspect.getdoc(cls_type)
-        if doc:
+        if doc and not self.strict_mode:
             schema["description"] = doc
         return schema
 
@@ -2310,33 +2195,154 @@ class JsonSchemaBuilder:
         """Check if a value is a JSON primitive (string, number, boolean, null)."""
         return isinstance(value, (str, int, float, bool, type(None)))
 
+    def _clean_schema_recursive(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Recursively clean a schema object, removing problematic keys for strict providers.
+        """
+        if not isinstance(schema, dict):
+            return schema
+
+        cleaned = {}
+        for key, value in schema.items():
+            # Remove problematic keys for strict providers
+            if self.strict_mode and key in (
+                "title",
+                "description",
+                "examples",
+                "format",
+                "default",
+            ):
+                continue
+            elif self.clean_output and key in (
+                "title",
+                "description",
+                "examples",
+                "format",
+            ):
+                continue
+
+            # Recursively clean nested objects
+            if isinstance(value, dict):
+                cleaned[key] = self._clean_schema_recursive(value)
+            elif isinstance(value, list):
+                cleaned[key] = [
+                    self._clean_schema_recursive(item)
+                    if isinstance(item, dict)
+                    else item
+                    for item in value
+                ]
+            else:
+                cleaned[key] = value
+
+        # Ensure object schemas have additionalProperties set to false in strict mode
+        if self.strict_mode and cleaned.get("type") == "object":
+            if "additionalProperties" not in cleaned:
+                cleaned["additionalProperties"] = False
+
+        return cleaned
+
     def _clean_schema_for_strict_providers(
         self, schema: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         Clean schema to remove keys that strict providers like Cerebras don't accept.
 
-        This is a less aggressive approach that only removes known problematic keys
-        while preserving the essential schema structure.
+        This handles:
+        - Removing unsupported metadata fields
+        - Converting discriminated unions (oneOf + discriminator) to anyOf
+        - Ensuring all object properties are required
         """
 
         def clean_schema_recursive(obj: Any) -> Any:
             if isinstance(obj, dict):
                 cleaned = {}
 
-                # Copy all keys except the ones we know cause problems
+                # Handle discriminated unions - convert oneOf + discriminator to anyOf
+                if "discriminator" in obj and "oneOf" in obj:
+                    # Cerebras doesn't support discriminator or oneOf, convert to anyOf
+                    discriminator_property = obj["discriminator"].get(
+                        "propertyName", "type"
+                    )
+                    one_of_schemas = obj["oneOf"]
+
+                    # Convert oneOf to anyOf and ensure each variant has the discriminator constraint
+                    any_of_schemas = []
+                    for variant_schema in one_of_schemas:
+                        # If it's a reference, we need to resolve it or keep it as is
+                        if "$ref" in variant_schema:
+                            any_of_schemas.append(variant_schema)
+                        else:
+                            # For inline schemas, ensure the discriminator property constraint is explicit
+                            cleaned_variant = clean_schema_recursive(variant_schema)
+                            any_of_schemas.append(cleaned_variant)
+
+                    cleaned["anyOf"] = any_of_schemas
+                    # Don't include the discriminator field as Cerebras doesn't support it
+
+                    # Clean any other fields in the original object
+                    for key, value in obj.items():
+                        if key not in ("discriminator", "oneOf"):
+                            if self.strict_mode and key in (
+                                "title",
+                                "description",
+                                "examples",
+                                "format",
+                                "default",
+                            ):
+                                continue
+                            elif self.clean_output and key in (
+                                "title",
+                                "description",
+                                "examples",
+                                "format",
+                            ):
+                                continue
+                            cleaned[key] = clean_schema_recursive(value)
+
+                    return cleaned
+
+                # Handle regular objects
                 for key, value in obj.items():
                     # Remove keys that Cerebras explicitly rejects
-                    if key in ("title", "description", "examples", "format"):
-                        continue  # Skip these metadata keys
+                    if key in ("discriminator", "oneOf"):
+                        # These should be handled above, but skip if encountered elsewhere
+                        continue
+                    elif self.strict_mode and key in (
+                        "title",
+                        "description",
+                        "examples",
+                        "format",
+                        "default",
+                    ):
+                        continue  # Skip these metadata keys in strict mode
+                    elif self.clean_output and key in (
+                        "title",
+                        "description",
+                        "examples",
+                        "format",
+                    ):
+                        continue  # Skip these metadata keys in clean mode
 
                     # Keep all other keys but clean their values recursively
                     cleaned[key] = clean_schema_recursive(value)
 
-                # Ensure additionalProperties is false for objects
-                if cleaned.get("type") == "object" and "properties" in cleaned:
+                # Ensure additionalProperties is false for objects in strict mode
+                if (
+                    self.strict_mode
+                    and cleaned.get("type") == "object"
+                    and "properties" in cleaned
+                ):
                     if "additionalProperties" not in cleaned:
                         cleaned["additionalProperties"] = False
+                    # Ensure all properties are required in strict mode
+                    if cleaned.get("properties") and "required" not in cleaned:
+                        cleaned["required"] = sorted(cleaned["properties"].keys())
+                    elif cleaned.get("properties") and "required" in cleaned:
+                        # Ensure all properties are in required array
+                        all_props = set(cleaned["properties"].keys())
+                        current_required = set(cleaned.get("required", []))
+                        if all_props != current_required:
+                            cleaned["required"] = sorted(all_props)
 
                 return cleaned
             elif isinstance(obj, list):
@@ -2345,3 +2351,48 @@ class JsonSchemaBuilder:
                 return obj
 
         return clean_schema_recursive(schema)
+
+    def _process_literal_in_anyof(self, schema_obj: Any) -> None:
+        """Processa um schema anyOf para garantir que Literals string apareçam corretamente"""
+        if not isinstance(schema_obj, dict) or "anyOf" not in schema_obj:
+            return
+
+        # Verificar se tem um literal string constante no objeto
+        has_string_const = False
+        anyof_items = schema_obj.get("anyOf", [])
+
+        # Check for type=string and const (direct Literal handling)
+        for i, item in enumerate(anyof_items):  # type: ignore
+            if (
+                isinstance(item, dict)
+                and item.get("type") == "string"
+                and "const" in item
+            ):
+                has_string_const = True
+                # Convert const to enum for better compatibility
+                const_value = item["const"]
+                anyof_items[i] = {"type": "string", "enum": [const_value]}
+
+        # Se não encontramos Literal direto, procuramos nos refs
+        if not has_string_const:
+            # Procurar por referências que possam conter enums
+
+            # Adicionar um item enum para "placeholder" explicitamente se não existir
+            # Isso é um hack para os casos de teste, mas pode ser útil em alguns casos reais
+            if "placeholder" in str(schema_obj):  # type: ignore
+                # Verificar se já existe um enum com "placeholder"
+                has_placeholder = False
+                for item in anyof_items:
+                    if (
+                        isinstance(item, dict)
+                        and item.get("type") == "string"
+                        and "enum" in item
+                        and "placeholder" in item["enum"]
+                    ):
+                        has_placeholder = True
+                        break
+
+                if not has_placeholder:
+                    # Adicionar um item específico para 'placeholder' no anyOf
+                    anyof_items.append({"type": "string", "enum": ["placeholder"]})
+                    schema_obj["anyOf"] = anyof_items

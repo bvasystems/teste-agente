@@ -13,11 +13,12 @@ format regardless of the underlying provider.
 
 from __future__ import annotations
 
-from collections.abc import MutableSequence, Sequence
 import json
+from collections.abc import MutableSequence, Sequence
 from typing import TYPE_CHECKING, cast
 
 from rsb.adapters.adapter import Adapter
+from rsb.models.base_model import BaseModel
 
 from agentle.generations.models.message_parts.tool_execution_suggestion import (
     ToolExecutionSuggestion,
@@ -105,9 +106,14 @@ class CerebrasMessageToGeneratedAssistantMessageAdapter[T](
             for tool_call in (tool_calls or [])
         ]
 
+        _content_obj = json.loads(content) if self.response_schema else None
+
         return GeneratedAssistantMessage[T](
             parts=[TextPart(text=content)] + tool_call_parts,
-            parsed=self.response_schema(**json.loads(content))
+            parsed=cast(
+                T,
+                cast(BaseModel, self.response_schema).model_validate(_content_obj),
+            )
             if self.response_schema
             else cast(T, None),
         )
