@@ -66,6 +66,9 @@ from agentle.agents.agent_config import AgentConfig
 from agentle.agents.agent_config_dict import AgentConfigDict
 from agentle.agents.agent_input import AgentInput
 from agentle.agents.agent_run_output import AgentRunOutput
+from agentle.agents.apis.api import API
+from agentle.agents.apis.endpoint import Endpoint
+from agentle.agents.apis.endpoints_to_tools import endpoints_to_tools
 from agentle.agents.context import Context
 from agentle.agents.conversations.conversation_store import ConversationStore
 from agentle.agents.errors.max_tool_calls_exceeded_error import (
@@ -398,6 +401,16 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
     vector_stores: MutableSequence[VectorStore] | None = Field(default=None)
 
+    endpoints: MutableSequence[Endpoint] = Field(
+        default_factory=list,
+        description="HTTP API endpoints that the agent can call. These will be automatically converted to tools.",
+    )
+
+    apis: MutableSequence[API] = Field(
+        default_factory=list,
+        description="Complete APIs with multiple endpoints that the agent can use. All endpoints in these APIs will be automatically converted to tools.",
+    )
+
     # Internal fields
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -407,6 +420,22 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         _vs = self.vector_stores or []
         for vector_store in _vs:
             self.tools.append(vector_store.as_search_tool())
+
+        # Collect all endpoints and APIs
+        all_endpoints: MutableSequence[Endpoint | API] = []
+        all_endpoints.extend(self.endpoints)
+        all_endpoints.extend(self.apis)
+
+        if all_endpoints:
+            # Convert to tools
+            api_tools = endpoints_to_tools(all_endpoints)
+
+            # Add to existing tools
+            self.tools.extend(api_tools)
+
+            logger.debug(
+                f"Converted {len(all_endpoints)} endpoints/APIs to {len(api_tools)} tools"
+            )
 
     def add_tool(self, tool: Callable[..., Any] | Callable[..., Awaitable[Any] | Tool]):
         self.tools += [tool]
@@ -2857,15 +2886,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     return Context(
                         message_history=[
                             developer_message,
-                            UserMessage(
-                                parts=[
-                                    TextPart(
-                                        text=np.array2string(
-                                            cast(np.ndarray[Any, Any], input)
-                                        )
-                                    )
-                                ]
-                            ),
+                            UserMessage(parts=[TextPart(text=np.array2string(input))]),
                         ]
                     )
             except ImportError:

@@ -1,3 +1,5 @@
+# type: ignore
+
 """
 JSON Schema generation for Python types in the Agentle framework.
 
