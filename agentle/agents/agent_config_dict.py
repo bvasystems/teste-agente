@@ -73,3 +73,7 @@ class AgentConfigDict(TypedDict):
 
     maxIterations: NotRequired[int]
     """Maximum number of agent reasoning iterations before terminating."""
+
+    maxCallPerTool: NotRequired[int]
+
+    maxIdenticalToolCalls: NotRequired[int]

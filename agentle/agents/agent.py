@@ -1282,8 +1282,6 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         # Initialize tracking systems before the while loop
         tool_call_patterns: dict[str, int] = {}  # pattern_hash -> count
         tool_budget: dict[str, int] = {}  # tool_name -> call_count
-        MAX_CALLS_PER_TOOL = 3
-        MAX_IDENTICAL_CALLS = 1
 
         while state.iteration < self.agent_config.maxIterations:
             current_iteration = state.iteration + 1
@@ -1336,9 +1334,9 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 # Add budget warnings
                 budget_warnings: MutableSequence[str] = []
                 for tool_name, count in tool_budget.items():
-                    if count >= MAX_CALLS_PER_TOOL - 1:
+                    if count >= self.agent_config.maxCallPerTool - 1:
                         budget_warnings.append(
-                            f"(warning) Tool '{tool_name}' approaching limit: {count}/{MAX_CALLS_PER_TOOL} calls"
+                            f"(warning) Tool '{tool_name}' approaching limit: {count}/{self.agent_config.maxCallPerTool} calls"
                         )
 
                 if budget_warnings:
@@ -1684,7 +1682,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
                 # Check if this exact pattern was already called
                 pattern_count = tool_call_patterns.get(pattern_key, 0)
-                if pattern_count >= MAX_IDENTICAL_CALLS:
+                if pattern_count >= self.agent_config.maxIdenticalToolCalls:
                     _logger.bind_optional(
                         lambda log: log.warning(
                             "Blocking redundant tool call: %s with args: %s (already called %d times)",
@@ -1739,7 +1737,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 # Check budget
                 tool_name = tool_execution_suggestion.tool_name
                 current_tool_calls = tool_budget.get(tool_name, 0)
-                if current_tool_calls >= MAX_CALLS_PER_TOOL:
+                if current_tool_calls >= self.agent_config.maxCallPerTool:
                     _logger.bind_optional(
                         lambda log: log.warning(
                             "Tool budget exceeded for: %s (already called %d times)",
@@ -1748,7 +1746,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         )
                     )
 
-                    error_msg = f"Tool '{tool_name}' budget exceeded ({MAX_CALLS_PER_TOOL} calls max)"
+                    error_msg = f"Tool '{tool_name}' budget exceeded ({self.agent_config.maxCallPerTool} calls max)"
                     step.add_tool_execution_result(
                         suggestion=tool_execution_suggestion,
                         result=error_msg,

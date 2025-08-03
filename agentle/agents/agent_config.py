@@ -83,6 +83,10 @@ class AgentConfig(BaseModel):
     maxIterations: int = Field(default=10)
     """Maximum number of agent reasoning iterations before terminating."""
 
+    maxCallPerTool: int = Field(default=5)
+
+    maxIdenticalToolCalls: int = Field(default=2)
+
     def clone(
         self,
         new_generation_config: GenerationConfig | GenerationConfigDict | None = None,
