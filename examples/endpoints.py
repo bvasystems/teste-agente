@@ -67,8 +67,6 @@ facts_agent = Agent(
     ],
 )
 
-response = facts_agent.run(
-    "Tell me an interesting cat fact and information about popular cat breeds"
-)
+response = facts_agent.run("Give me two cat breeds")
 
 print(f"Cat Facts Response: {response.pretty_formatted()}")
