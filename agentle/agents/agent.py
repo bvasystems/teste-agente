@@ -1971,8 +1971,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
         _logger.bind_optional(
             lambda log: log.error(
-                "Max tool calls exceeded with execution summary:\n%s",
-                execution_summary
+                "Max tool calls exceeded with execution summary:\n%s", execution_summary
             )
         )
 
@@ -3123,7 +3122,15 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         self, tool_name: str, args: Mapping[str, object]
     ) -> str:
         """Generate a deterministic key for tracking tool call patterns."""
-        return f"{tool_name}:{json.dumps(args, sort_keys=True)}"
+        # Ensure consistent types for serialization
+        normalized_args = {}
+        for k, v in args.items():
+            if isinstance(v, (int, float, bool, str, type(None))):
+                normalized_args[k] = v
+            else:
+                normalized_args[k] = str(v)
+
+        return f"{tool_name}:{json.dumps(normalized_args, sort_keys=True, default=str)}"
 
     def _format_tool_call_summary(
         self,
