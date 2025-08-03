@@ -67,12 +67,6 @@ facts_agent = Agent(
     ],
 )
 
-
-print("=== API Integration Examples with Real Public APIs ===\n")
-
-# Example 3: Cat facts
-print("1. Fun Cat Facts Example:")
-
 response = facts_agent.run(
     "Tell me an interesting cat fact and information about popular cat breeds"
 )
