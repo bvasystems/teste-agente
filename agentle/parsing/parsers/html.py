@@ -8,7 +8,6 @@ organize the document into a readable format.
 
 from pathlib import Path
 from typing import Literal, override
-from bs4 import BeautifulSoup, Tag
 import hashlib
 import base64
 import re
@@ -148,6 +147,8 @@ class HTMLParser(DocumentParser):
             asyncio.run(process_html())
             ```
         """
+        from bs4 import BeautifulSoup, Tag
+
         from markdownify import markdownify as md_converter
 
         # Read the HTML file
