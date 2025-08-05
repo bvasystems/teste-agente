@@ -1319,16 +1319,36 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         parts=list(original_user_message.parts)
                     )
 
-                    # Add tool execution results as proper parts
-                    for suggestion, result in called_tools.values():
-                        tool_execution_result = ToolExecutionResult(
-                            suggestion=suggestion,
-                            result=result,
-                            execution_time_ms=None,  # Could be tracked if needed
-                            success=True,  # Set based on actual execution status
-                            error_message=None,  # Set if there were execution errors
+                    # Get the tool calls from the previous iteration's generation
+                    # We need to look at the last assistant message to see what tools were called
+                    last_assistant_message_index = -1
+                    for i in range(len(message_history) - 1, -1, -1):
+                        if isinstance(message_history[i], AssistantMessage):
+                            last_assistant_message_index = i
+                            break
+
+                    current_iteration_tool_ids = set()
+                    if last_assistant_message_index >= 0:
+                        last_assistant_message: AssistantMessage = cast(
+                            AssistantMessage,
+                            message_history[last_assistant_message_index],
                         )
-                        cloned_user_message.insert_at_end(tool_execution_result)
+                        # Get the tool call IDs from the last assistant message
+                        current_iteration_tool_ids = {
+                            tc.id for tc in last_assistant_message.tool_calls
+                        }
+
+                    # Only add tool execution results for the current iteration's calls
+                    for tool_id, (suggestion, result) in called_tools.items():
+                        if tool_id in current_iteration_tool_ids:
+                            tool_execution_result = ToolExecutionResult(
+                                suggestion=suggestion,
+                                result=result,
+                                execution_time_ms=None,
+                                success=True,
+                                error_message=None,
+                            )
+                            cloned_user_message.insert_at_end(tool_execution_result)
 
                     # Replace the last user message with the modified one
                     message_history[last_user_message_index] = cloned_user_message
