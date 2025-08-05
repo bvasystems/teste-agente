@@ -2853,7 +2853,15 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     return Context(
                         message_history=[
                             developer_message,
-                            UserMessage(parts=[TextPart(text=np.array2string(input))]),
+                            UserMessage(
+                                parts=[
+                                    TextPart(
+                                        text=np.array2string(
+                                            cast(np.ndarray[Any, Any], input)
+                                        )
+                                    )
+                                ]
+                            ),
                         ]
                     )
             except ImportError:
