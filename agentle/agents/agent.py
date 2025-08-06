@@ -26,7 +26,6 @@ output = weather_agent.run("Hello. What is the weather in Tokyo?")
 # type: ignore[reportGeneralTypeIssues]
 
 from __future__ import annotations
-import jsonpickle
 
 import datetime
 import importlib.util
@@ -50,6 +49,7 @@ from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING, Any, Literal, cast, override
 
+import jsonpickle
 from async_lru import alru_cache
 from rsb.containers.maybe import Maybe
 from rsb.coroutines.run_sync import run_sync
@@ -1284,6 +1284,9 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         tool_call_patterns: dict[str, int] = {}  # pattern_hash -> count
         tool_budget: dict[str, int] = {}  # tool_name -> call_count
 
+        # FIX: Track all tool suggestions to ensure unique IDs
+        all_tool_suggestions: set[str] = set()
+
         while state.iteration < self.agent_config.maxIterations:
             current_iteration = state.iteration + 1
             iteration_count = current_iteration
@@ -1325,10 +1328,6 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         last_assistant_message_index = i
                         break
 
-                cloned_assistant_message = AssistantMessage(
-                    parts=list(message_history[last_assistant_message_index].parts)
-                )
-
                 # Add tool execution results as proper parts
                 for suggestion, result in called_tools.values():
                     tool_execution_result = ToolExecutionResult(
@@ -1340,12 +1339,9 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     )
                     cloned_user_message.insert_at_beggining(tool_execution_result)
 
-                    cloned_assistant_message.insert_at_end(suggestion)
-
                 # Replace the last user message with the modified one
                 message_history[last_user_message_index] = cloned_user_message
 
-                message_history[last_assistant_message_index] = cloned_assistant_message
 
                 _logger.bind_optional(
                     lambda log: log.debug(
@@ -1353,6 +1349,41 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         + f"Message now has {len(cloned_user_message.parts)} parts"
                     )
                 )
+
+                # FIX: Validate message history before continuing
+                # Check that tool suggestions match tool results
+                assistant_suggestions = [
+                    part
+                    for part in message_history[last_assistant_message_index].parts
+                    if isinstance(part, ToolExecutionSuggestion)
+                ]
+                user_results = [
+                    part
+                    for part in cloned_user_message.parts
+                    if isinstance(part, ToolExecutionResult)
+                ]
+
+                if len(assistant_suggestions) != len(user_results):
+                    _logger.bind_optional(
+                        lambda log: log.error(
+                            "Mismatch: %d tool suggestions but %d tool results",
+                            len(assistant_suggestions),
+                            len(user_results),
+                        )
+                    )
+                    # Log the actual suggestions and results for debugging
+                    for s in assistant_suggestions:
+                        _logger.bind_optional(
+                            lambda log: log.debug(
+                                "Suggestion ID: %s, Tool: %s", s.id, s.tool_name
+                            )
+                        )
+                    for r in user_results:
+                        _logger.bind_optional(
+                            lambda log: log.debug(
+                                "Result for suggestion ID: %s", r.suggestion.id
+                            )
+                        )
 
             _logger.bind_optional(
                 lambda log: log.debug("Generating tool call response")
@@ -1365,6 +1396,23 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 generation_config=self.agent_config.generation_config,
                 tools=all_tools,
             )
+
+            # FIX: Validate that tool suggestions have unique IDs
+            generated_suggestions = tool_call_generation.tool_calls
+            for suggestion in generated_suggestions:
+                if suggestion.id in all_tool_suggestions:
+                    _logger.bind_optional(
+                        lambda log: log.warning(
+                            "Duplicate tool suggestion ID detected: %s. Creating new ID.",
+                            suggestion.id,
+                        )
+                    )
+                    # Create a new unique ID for the duplicate
+                    import uuid
+
+                    suggestion.id = str(uuid.uuid4())
+                all_tool_suggestions.add(suggestion.id)
+
             context.message_history.append(
                 tool_call_generation.message.to_assistant_message()
             )
@@ -1690,9 +1738,10 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
                 _logger.bind_optional(
                     lambda log: log.debug(
-                        "Executing tool: %s with args: %s",
+                        "Executing tool: %s with args: %s (ID: %s)",
                         tool_execution_suggestion.tool_name,
                         tool_execution_suggestion.args,
+                        tool_execution_suggestion.id,
                     )
                 )
 
