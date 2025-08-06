@@ -1339,7 +1339,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                             success=True,  # Set based on actual execution status
                             error_message=None,  # Set if there were execution errors
                         )
-                        cloned_user_message.insert_at_end(tool_execution_result)
+                        cloned_user_message.insert_at_beggining(tool_execution_result)
 
                         cloned_assistant_message.insert_at_end(suggestion)
 
