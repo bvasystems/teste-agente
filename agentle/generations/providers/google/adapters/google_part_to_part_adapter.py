@@ -130,7 +130,7 @@ class GooglePartToPartAdapter(Adapter["GooglePart", Part]):
             tool_part = adapter.adapt(google_part)  # Returns ToolExecutionSuggestion
             ```
         """
-        if _f.text:
+        if _f.text is not None:
             return TextPart(text=_f.text)
 
         if _f.inline_data:

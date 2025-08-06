@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping, MutableSequence, Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, cast, override
 
 from agentle.generations.models.generation.generation import Generation
@@ -251,11 +251,11 @@ class GoogleGenerationProvider(GenerationProvider):
         ):
             messages = list(messages) + [UserMessage(parts=[TextPart(text=".")])]
 
-        contents: MutableSequence[Content] = [
-            self.message_adapter.adapt(message)
-            for message in messages
-            if not isinstance(message, DeveloperMessage)
-        ]
+        # Developer message is usuarlly the first message. if it's not, then there is no developer message
+        if isinstance(messages[0], DeveloperMessage):
+            messages = messages[1:]
+
+        contents = [self.message_adapter.adapt(msg) for msg in messages]
 
         try:
             async with asyncio.timeout(_generation_config.timeout_in_seconds):

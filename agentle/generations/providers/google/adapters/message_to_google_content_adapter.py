@@ -45,7 +45,6 @@ from agentle.generations.models.messages.message import Message
 from agentle.generations.providers.google.adapters.part_to_google_part_adapter import (
     PartToGooglePartAdapter,
 )
-from agentle.generations.tools.tool import Tool
 
 if TYPE_CHECKING:
     from google.genai.types import Content
@@ -162,12 +161,6 @@ class MessageToGoogleContentAdapter(Adapter[Message, "Content"]):
                 role = "user"
 
         return Content(
-            parts=[
-                part_adapter.adapt(part)
-                for part in _f.parts
-                if not isinstance(  # Impossible that an AI declares a tool
-                    part, Tool
-                )
-            ],
+            parts=[part_adapter.adapt(part) for part in _f.parts],
             role=role,
         )

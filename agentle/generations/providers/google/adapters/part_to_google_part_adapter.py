@@ -54,7 +54,10 @@ if TYPE_CHECKING:
 
 
 class PartToGooglePartAdapter(
-    Adapter[TextPart | FilePart | ToolExecutionSuggestion | Tool, "GooglePart"]
+    Adapter[
+        TextPart | FilePart | ToolExecutionSuggestion | ToolExecutionResult | Tool,
+        "GooglePart",
+    ]
 ):
     """
     Adapter for converting Agentle Part objects to Google AI Part format.
