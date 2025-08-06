@@ -38,6 +38,26 @@ class AssistantMessage(BaseModel):
         description="The sequence of message parts that make up this assistant message.",
     )
 
+    def insert_at_end(
+        self,
+        parts: TextPart
+        | FilePart
+        | Tool[Any]
+        | ToolExecutionSuggestion
+        | ToolExecutionResult
+        | Sequence[
+            TextPart
+            | FilePart
+            | Tool[Any]
+            | ToolExecutionSuggestion
+            | ToolExecutionResult
+        ],
+    ) -> None:
+        if isinstance(parts, Sequence):
+            self.parts.extend(parts)
+            return
+        self.parts.append(parts)
+
     @property
     def tool_calls(self) -> Sequence[ToolExecutionSuggestion]:
         tool_calls = cast(

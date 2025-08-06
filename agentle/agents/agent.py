@@ -1319,6 +1319,17 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         parts=list(original_user_message.parts)
                     )
 
+                    # Find the last assistant message and clone it
+                    last_assistant_message_index = -1
+                    for i in range(len(message_history) - 1, -1, -1):
+                        if isinstance(message_history[i], AssistantMessage):
+                            last_assistant_message_index = i
+                            break
+
+                    cloned_assistant_message = AssistantMessage(
+                        parts=list(message_history[last_assistant_message_index].parts)
+                    )
+
                     # Add tool execution results as proper parts
                     for suggestion, result in called_tools.values():
                         tool_execution_result = ToolExecutionResult(
@@ -1330,8 +1341,14 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         )
                         cloned_user_message.insert_at_end(tool_execution_result)
 
+                        cloned_assistant_message.insert_at_end(suggestion)
+
                     # Replace the last user message with the modified one
                     message_history[last_user_message_index] = cloned_user_message
+
+                    message_history[last_assistant_message_index] = (
+                        cloned_assistant_message
+                    )
 
                     _logger.bind_optional(
                         lambda log: log.debug(
