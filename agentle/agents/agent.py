@@ -352,7 +352,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
     The model to use for the agent's service provider.
     """
 
-    instructions: str | Prompt | Callable[[], str] | Sequence[str] = Field(
+    instructions: str | Prompt | Callable[[], str] | MutableSequence[str] = Field(
         default="You are a helpful assistant."
     )
     """
@@ -413,6 +413,43 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
     # Internal fields
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def append_instructions(
+        self, instructions: str | Sequence[str] | None = None
+    ) -> None:
+        """
+        Appends instructions to the existing agent instructions.
+
+        Args:
+            instructions: Instructions to append. Can be a string, sequence of strings, or None.
+                        If None, no action is taken.
+        """
+        if instructions is None:
+            return
+
+        # Convert current instructions to a list of strings
+        current_instructions: list[str] = []
+
+        if isinstance(self.instructions, str):
+            current_instructions = [self.instructions]
+        elif isinstance(self.instructions, Prompt):
+            current_instructions = [self.instructions.text]
+        elif callable(self.instructions):
+            current_instructions = [self.instructions()]
+        else:
+            # Must be MutableSequence[str] - convert all items to strings
+            current_instructions = [str(item) for item in self.instructions]
+
+        # Convert new instructions to list of strings
+        if isinstance(instructions, str):
+            new_instructions = [instructions]
+        else:
+            # Must be Sequence[str] - convert all items to strings
+            new_instructions = [str(item) for item in instructions]
+
+        # Combine and update
+        current_instructions.extend(new_instructions)
+        self.instructions = current_instructions
 
     @override
     def model_post_init(self, context: Any) -> None:
@@ -1309,11 +1346,12 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 # Find the last assistant message that contains tool suggestions
                 last_assistant_with_tools_index = -1
                 assistant_tool_suggestions = []
-                
+
                 for i in range(len(message_history) - 1, -1, -1):
                     if isinstance(message_history[i], AssistantMessage):
                         msg_tool_suggestions = [
-                            part for part in message_history[i].parts
+                            part
+                            for part in message_history[i].parts
                             if isinstance(part, ToolExecutionSuggestion)
                         ]
                         if msg_tool_suggestions:
@@ -1325,27 +1363,30 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 if last_assistant_with_tools_index >= 0 and assistant_tool_suggestions:
                     # Find or create the next user message after this assistant message
                     next_user_message_index = -1
-                    for i in range(last_assistant_with_tools_index + 1, len(message_history)):
+                    for i in range(
+                        last_assistant_with_tools_index + 1, len(message_history)
+                    ):
                         if isinstance(message_history[i], UserMessage):
                             next_user_message_index = i
                             break
-                    
+
                     if next_user_message_index >= 0:
                         # Clone the existing user message
                         original_user_message = message_history[next_user_message_index]
-                        
+
                         # Check if this user message already has tool results
                         existing_results = [
-                            part for part in original_user_message.parts
+                            part
+                            for part in original_user_message.parts
                             if isinstance(part, ToolExecutionResult)
                         ]
-                        
+
                         # Only add results if they're not already there
                         if not existing_results:
                             cloned_user_message = UserMessage(
                                 parts=list(original_user_message.parts)
                             )
-                            
+
                             # Add tool execution results for each suggestion
                             for suggestion in assistant_tool_suggestions:
                                 if suggestion.id in called_tools:
@@ -1357,10 +1398,14 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                                         success=True,
                                         error_message=None,
                                     )
-                                    cloned_user_message.insert_at_beggining(tool_execution_result)
-                            
+                                    cloned_user_message.insert_at_beggining(
+                                        tool_execution_result
+                                    )
+
                             # Replace the user message with the modified one
-                            message_history[next_user_message_index] = cloned_user_message
+                            message_history[next_user_message_index] = (
+                                cloned_user_message
+                            )
                     else:
                         # No user message after assistant message with tools
                         # This shouldn't happen in normal flow, but let's handle it
@@ -1369,7 +1414,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                                 "No user message found after assistant message with tool suggestions"
                             )
                         )
-                        
+
                         # Create a new user message with just the tool results
                         tool_results_parts: list[ToolExecutionResult] = []
                         for suggestion in assistant_tool_suggestions:
@@ -1383,10 +1428,12 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                                     error_message=None,
                                 )
                                 tool_results_parts.append(tool_execution_result)
-                        
+
                         if tool_results_parts:
                             # Add a new user message with the results
-                            new_user_message = UserMessage(parts=tool_results_parts)
+                            new_user_message = UserMessage(
+                                parts=list(tool_results_parts)
+                            )
                             message_history.append(new_user_message)
 
             _logger.bind_optional(
@@ -1400,11 +1447,13 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 generation_config=self.agent_config.generation_config,
                 tools=all_tools,
             )
-            
+
             # Store the assistant message WITH tool suggestions
-            assistant_message_with_tools = tool_call_generation.message.to_assistant_message()
+            assistant_message_with_tools = (
+                tool_call_generation.message.to_assistant_message()
+            )
             context.message_history.append(assistant_message_with_tools)
-            
+
             generation_time_single = (time.perf_counter() - generation_start) * 1000
             generation_time_total += generation_time_single
 
@@ -1982,7 +2031,6 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         context.metadata["execution_summary_on_failure"] = execution_summary
 
         raise MaxToolCallsExceededError(enhanced_error_message)
-
 
     def to_api(self, *extra_routes: type[Controller]) -> Application:
         from agentle.agents.asgi.blacksheep.agent_to_blacksheep_application_adapter import (
