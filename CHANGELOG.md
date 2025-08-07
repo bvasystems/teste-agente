@@ -1,5 +1,8 @@
 # Changelog
 
-## v0.7.27
+## v0.7.28
 
-- pypi test
+- feat(agent): add append_instructions method and improve tool execution handling
+
+- Implement append_instructions to allow dynamic instruction updates
+- Enhance tool execution flow by properly handling tool results in message history
