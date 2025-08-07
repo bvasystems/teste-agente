@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.7.30
+
+feat(agent): add change_instructions method to modify agent instructions
+
 ## v0.7.29
 - feat(agent): add methods to modify agent properties
 
