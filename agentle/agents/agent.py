@@ -414,6 +414,17 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
     # Internal fields
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    def change_name(self, name: str | None = None) -> None:
+        self.name = name or self.name
+
+    def change_apis(self, apis: MutableSequence[API] | None = None) -> None:
+        self.apis = apis or self.apis
+
+    def change_endpoints(
+        self, endpoints: MutableSequence[Endpoint] | None = None
+    ) -> None:
+        self.endpoints = endpoints or self.endpoints
+
     def append_instructions(
         self, instructions: str | Sequence[str] | None = None
     ) -> None:
