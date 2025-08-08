@@ -177,6 +177,15 @@ class Generation[T](BaseModel):
     def get_message(self, choice: int) -> GeneratedAssistantMessage[T]:
         return self.choices[choice].message
 
+    def append_tool_calls(
+        self,
+        tool_calls: Sequence[ToolExecutionSuggestion] | ToolExecutionSuggestion,
+        choice: int = 0,
+    ) -> None:
+        if isinstance(tool_calls, ToolExecutionSuggestion):
+            tool_calls = [tool_calls]
+        self.choices[choice].message.parts.extend(tool_calls)
+
     @property
     def tool_calls(self) -> Sequence[ToolExecutionSuggestion]:
         """

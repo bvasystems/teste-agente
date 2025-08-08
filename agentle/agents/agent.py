@@ -978,31 +978,6 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
         Raises:
             MaxToolCallsExceededError: If the maximum number of tool calls is exceeded.
-
-        Example:
-            ```python
-            # Asynchronous use with performance analysis
-            result = await agent.run_async("What's the weather like in London?")
-
-            # Processing the response
-            response_text = result.artifacts[0].parts[0].text
-            print(response_text)
-
-            # Analyze performance metrics
-            if result.performance_metrics:
-                print(f"Total time: {result.performance_metrics.total_execution_time_ms:.2f}ms")
-                print(f"Tool execution: {result.performance_metrics.tool_execution_time_ms:.2f}ms")
-
-                # Get optimization recommendations
-                recommendations = result.performance_metrics.get_optimization_recommendations()
-                for rec in recommendations:
-                    print(f"Optimization: {rec}")
-
-            # With structured response schema
-            if result.parsed:
-                location = result.parsed.location
-                weather = result.parsed.weather
-            ```
         """
         import time
 
@@ -1335,9 +1310,11 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         }
 
         state = RunState[T_Schema].init_state()
-        # Convert all tools in the array to Tool objects
-        called_tools: dict[str, tuple[ToolExecutionSuggestion, Any]] = {}
-
+        
+        # CRITICAL: Track ALL tool suggestions and results across ALL iterations
+        all_tool_suggestions: MutableSequence[ToolExecutionSuggestion] = []
+        all_tool_results: dict[str, tuple[ToolExecutionSuggestion, Any]] = {}
+        
         # Initialize tracking systems before the while loop
         tool_call_patterns: dict[str, int] = {}  # pattern_hash -> count
         tool_budget: dict[str, int] = {}  # tool_name -> call_count
@@ -1353,73 +1330,82 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 )
             )
 
-            # Clone message history to avoid modifying the original context
+            # Build message history for this iteration
             message_history = list(context.message_history)
-
-            # Add tool execution results directly to the last user message if any exist
-            if called_tools:
+            
+            # If we have tool results from ANY previous iterations, we need to add them
+            if all_tool_results:
                 _logger.bind_optional(
                     lambda log: log.debug(
-                        "Adding %d tool execution results to message", len(called_tools)
+                        "Processing %d total tool results across all iterations", 
+                        len(all_tool_results)
                     )
                 )
-
-                # Find the last user message and clone it
-                last_user_message_index = -1
+                
+                # Find the last assistant message with tool suggestions
+                last_assistant_index = -1
                 for i in range(len(message_history) - 1, -1, -1):
-                    if isinstance(message_history[i], UserMessage):
-                        last_user_message_index = i
+                    if isinstance(message_history[i], AssistantMessage):
+                        last_assistant_index = i
                         break
-
-                if last_user_message_index >= 0:
-                    original_user_message = message_history[last_user_message_index]
-                    cloned_user_message = UserMessage(
-                        parts=list(original_user_message.parts)
+                
+                if last_assistant_index >= 0:
+                    # Clone the assistant message and ensure it has ALL tool suggestions
+                    original_assistant = message_history[last_assistant_index]
+                    cloned_assistant = AssistantMessage(
+                        parts=list(original_assistant.parts)
                     )
-
-                    # Find the last assistant message
-                    last_assistant_message_index = -1
-                    for i in range(len(message_history) - 1, -1, -1):
-                        if isinstance(message_history[i], AssistantMessage):
-                            last_assistant_message_index = i
+                    
+                    # Add any missing tool suggestions to the assistant message
+                    existing_suggestion_ids = {
+                        part.id for part in cloned_assistant.parts
+                        if isinstance(part, ToolExecutionSuggestion)
+                    }
+                    
+                    for suggestion in all_tool_suggestions:
+                        if suggestion.id not in existing_suggestion_ids:
+                            cloned_assistant.parts.append(suggestion)
+                    
+                    message_history[last_assistant_index] = cloned_assistant
+                    
+                    # Now find or create the user message after the assistant message
+                    next_user_index = -1
+                    for i in range(last_assistant_index + 1, len(message_history)):
+                        if isinstance(message_history[i], UserMessage):
+                            next_user_index = i
                             break
-
-                    if last_assistant_message_index >= 0:
-                        # Get tool suggestions from the assistant message
-                        assistant_message = message_history[
-                            last_assistant_message_index
-                        ]
-                        assistant_suggestions = [
-                            part
-                            for part in assistant_message.parts
-                            if isinstance(part, ToolExecutionSuggestion)
-                        ]
-
-                        # Add tool execution results ONLY for suggestions in the last assistant message
-                        # This is the key: we only add results for the most recent suggestions
-                        for suggestion in assistant_suggestions:
-                            if suggestion.id in called_tools:
-                                tool_suggestion, result = called_tools[suggestion.id]
+                    
+                    if next_user_index == -1:
+                        # Create a new user message
+                        new_user_message = UserMessage(parts=[])
+                        message_history.append(new_user_message)
+                        next_user_index = len(message_history) - 1
+                    
+                    # Clone the user message and add ALL tool results
+                    original_user = message_history[next_user_index]
+                    cloned_user = UserMessage(parts=list(original_user.parts))
+                    
+                    # Remove any existing tool results to avoid duplicates
+                    cloned_user.parts = [
+                        part for part in cloned_user.parts
+                        if not isinstance(part, ToolExecutionResult)
+                    ]
+                    
+                    # Add ALL tool results that correspond to suggestions in the assistant message
+                    for suggestion in cloned_assistant.parts:
+                        if isinstance(suggestion, ToolExecutionSuggestion):
+                            if suggestion.id in all_tool_results:
+                                _, result = all_tool_results[suggestion.id]
                                 tool_execution_result = ToolExecutionResult(
-                                    suggestion=tool_suggestion,
+                                    suggestion=suggestion,
                                     result=result,
                                     execution_time_ms=None,
                                     success=True,
                                     error_message=None,
                                 )
-                                cloned_user_message.insert_at_beggining(
-                                    tool_execution_result
-                                )
-
-                        # Replace the last user message with the modified one
-                        message_history[last_user_message_index] = cloned_user_message
-
-                        _logger.bind_optional(
-                            lambda log: log.debug(
-                                "Added tool execution results to user message. "
-                                + f"Message now has {len(cloned_user_message.parts)} parts"
-                            )
-                        )
+                                cloned_user.parts.insert(0, tool_execution_result)
+                    
+                    message_history[next_user_index] = cloned_user
 
             _logger.bind_optional(
                 lambda log: log.debug("Generating tool call response")
@@ -1432,9 +1418,12 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 generation_config=self.agent_config.generation_config,
                 tools=all_tools,
             )
+            
+            # Add this generation to context
             context.message_history.append(
                 tool_call_generation.message.to_assistant_message()
             )
+            
             generation_time_single = (time.perf_counter() - generation_start) * 1000
             generation_time_total += generation_time_single
 
@@ -1456,6 +1445,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         "Agent didn't call any tool, generating final response"
                     )
                 )
+                
                 # Create a step for the final generation (no tools called)
                 final_step_start_time = time.perf_counter()
                 final_step = Step(
@@ -1481,6 +1471,11 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         response_schema=self.response_schema,
                         generation_config=self.agent_config.generation_config,
                     )
+                    
+                    # CRITICAL: Append ALL tool calls to the final generation
+                    if all_tool_suggestions:
+                        generation.append_tool_calls(all_tool_suggestions)
+                    
                     context.message_history.append(
                         generation.message.to_assistant_message()
                     )
@@ -1573,6 +1568,10 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     lambda log: log.debug("Using existing text response")
                 )
 
+                # CRITICAL: Append ALL tool calls to the final generation
+                if all_tool_suggestions:
+                    tool_call_generation.append_tool_calls(all_tool_suggestions)
+
                 # Complete the final step and add to context
                 final_step_duration = (
                     time.perf_counter() - final_step_start_time
@@ -1647,6 +1646,10 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     "Processing %d tool calls", len(tool_call_generation.tool_calls)
                 )
             )
+            
+            # Add these tool suggestions to our tracking
+            for suggestion in tool_call_generation.tool_calls:
+                all_tool_suggestions.append(suggestion)
 
             # Create a step to track this iteration's tool executions
             step_start_time = time.perf_counter()
@@ -1689,9 +1692,9 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         )
                     )
 
-                    # Find the previous result from called_tools
+                    # Find the previous result from all_tool_results
                     previous_result = None
-                    for prev_suggestion, prev_result in called_tools.values():
+                    for prev_suggestion, prev_result in all_tool_results.values():
                         if (
                             prev_suggestion.tool_name
                             == tool_execution_suggestion.tool_name
@@ -1702,7 +1705,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
                     if previous_result is not None:
                         # Reuse the previous result
-                        called_tools[tool_execution_suggestion.id] = (
+                        all_tool_results[tool_execution_suggestion.id] = (
                             tool_execution_suggestion,
                             previous_result,
                         )
@@ -1785,7 +1788,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     )
 
                     # Update tracking structures
-                    called_tools[tool_execution_suggestion.id] = (
+                    all_tool_results[tool_execution_suggestion.id] = (
                         tool_execution_suggestion,
                         tool_result,
                     )
@@ -1824,7 +1827,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         tool_suggestion=tool_execution_suggestion,
                         current_iteration=current_iteration,
                         all_tools=all_tools,
-                        called_tools=called_tools,
+                        called_tools=all_tool_results,
                         current_step=step.model_dump()
                         if hasattr(step, "model_dump")
                         else None,
@@ -1928,9 +1931,9 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             )
 
         # Generate detailed execution summary
-        tool_call_summary = self._format_tool_call_summary(called_tools)
+        tool_call_summary = self._format_tool_call_summary(all_tool_results)
         steps_summary = self._format_steps_summary(context.steps)
-        pattern_analysis = self._analyze_tool_call_patterns(called_tools)
+        pattern_analysis = self._analyze_tool_call_patterns(all_tool_results)
 
         execution_summary = dedent(f"""
         EXECUTION SUMMARY:
