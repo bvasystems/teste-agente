@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.31
+
+refactor(agent): simplify tool execution results handling in message history
+
+Improve message history handling by directly adding tool execution results to the last user message instead of complex multi-step processing. This makes the code more straightforward and reduces edge cases while maintaining the same functionality.
+
 ## v0.7.30
 
 feat(agent): add change_instructions method to modify agent instructions
