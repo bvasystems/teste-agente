@@ -67,6 +67,7 @@ facts_agent = Agent(
     ],
 )
 
-response = facts_agent.run("Give me two cat breeds")
+if __name__ == "__main__":
+    response = facts_agent.run("Give me two cat breeds")
 
-print(f"Cat Facts Response: {response.pretty_formatted()}")
+    print(f"Cat Facts Response: {response.pretty_formatted()}")
