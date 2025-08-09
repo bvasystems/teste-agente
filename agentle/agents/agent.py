@@ -971,6 +971,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         Args:
             input: The input for the agent, which can be of various types.
             trace_params: Optional trace parameters for observability purposes.
+            chat_id: Optional chat ID for conversation persistence.
 
         Returns:
             AgentRunOutput[T_Schema]: The result of the agent execution with performance metrics,
@@ -1138,18 +1139,25 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         if static_knowledge_prompt:
             instructions += "\n\n" + static_knowledge_prompt
 
+        # Create context with current input
         context: Context = self.input2context(input, instructions=instructions)
-
+        
+        # CRITICAL: Store the current user message BEFORE replacing message history
+        current_user_message = context.last_message
+        
+        # Handle conversation store integration
         if chat_id:
             assert self.conversation_store is not None
-
-            await self.conversation_store.add_message_async(
-                chat_id, context.last_message
-            )
-
-            context.add_messages(
-                await self.conversation_store.get_conversation_history_async(chat_id)
-            )
+            
+            # Get existing conversation history
+            conversation_history = await self.conversation_store.get_conversation_history_async(chat_id)
+            
+            # Replace message history with conversation history, keeping developer messages
+            if conversation_history:
+                context.replace_message_history(conversation_history, keep_developer_messages=True)
+                # Add the current user message to the context
+                context.message_history.append(current_user_message)
+            # If no conversation history, context already has the current message, so we're good
 
         # Start execution tracking
         context.start_execution()
@@ -1281,6 +1289,13 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 longest_step_duration_ms=step_duration,
                 shortest_step_duration_ms=step_duration,
             )
+
+            # Save to conversation store after successful execution
+            if chat_id:
+                assert self.conversation_store is not None
+                # Add the current user message and AI response to conversation store
+                await self.conversation_store.add_message_async(chat_id, current_user_message)
+                await self.conversation_store.add_message_async(chat_id, generation.message.to_assistant_message())
 
             return AgentRunOutput(
                 generation=generation,
@@ -1559,6 +1574,13 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         ),
                     )
 
+                    # Save to conversation store after successful execution
+                    if chat_id:
+                        assert self.conversation_store is not None
+                        # Add the current user message and AI response to conversation store
+                        await self.conversation_store.add_message_async(chat_id, current_user_message)
+                        await self.conversation_store.add_message_async(chat_id, generation.message.to_assistant_message())
+
                     return self._build_agent_run_output(
                         context=context,
                         generation=generation,
@@ -1635,6 +1657,13 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         [s.duration_ms for s in step_metrics], default=0.0
                     ),
                 )
+
+                # Save to conversation store after successful execution
+                if chat_id:
+                    assert self.conversation_store is not None
+                    # Add the current user message and AI response to conversation store
+                    await self.conversation_store.add_message_async(chat_id, current_user_message)
+                    await self.conversation_store.add_message_async(chat_id, tool_call_generation.message.to_assistant_message())
 
                 return self._build_agent_run_output(
                     generation=cast(Generation[T_Schema], tool_call_generation),

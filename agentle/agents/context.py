@@ -151,6 +151,29 @@ class Context(BaseModel):
     tags: MutableSequence[str] = Field(default_factory=list)
     """Optional tags for categorizing or filtering contexts."""
 
+    def replace_message_history(
+        self,
+        new_history: Sequence[DeveloperMessage | UserMessage | AssistantMessage],
+        keep_developer_messages: bool = False,
+    ) -> None:
+        """
+        Replace the message history with a new sequence of messages.
+
+        Args:
+            new_history: The new sequence of messages to set as the context's message history
+            reset_execution_state: Whether to reset the execution state to its initial values
+            keep_developer_messages: Whether to keep existing developer messages in the history
+        """
+        if keep_developer_messages:
+            new_history = [
+                m for m in new_history if not isinstance(m, DeveloperMessage)
+            ] + list(self.message_history)
+            self.message_history = new_history
+            return
+
+        self.message_history = list(new_history)
+        self.execution_state.last_updated_at = datetime.now()
+
     @property
     def last_message(self) -> DeveloperMessage | AssistantMessage | UserMessage:
         return self.message_history[-1]
