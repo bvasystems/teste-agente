@@ -1,6 +1,10 @@
 import pprint
 from typing import Any
 from uuid import uuid4
+
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+
 from agentle.agents.a2a.models.agent_skill import AgentSkill
 from agentle.agents.a2a.models.authentication import Authentication
 from agentle.agents.a2a.models.capabilities import Capabilities
@@ -27,13 +31,12 @@ from agentle.parsing.cache.in_memory_document_cache_store import (
     InMemoryDocumentCacheStore,
 )
 from agentle.parsing.parsers.pdf import PDFFileParser
-from pydantic import BaseModel, Field
-
 from agentle.stt.providers.google.google_speech_to_text_provider import (
     GoogleSpeechToTextProvider,
 )
 from agentle.vector_stores.qdrant_vector_store import QdrantVectorStore
 
+load_dotenv()
 
 class ExampleResponse(BaseModel):
     response: str | None = Field(default=None)

@@ -27,10 +27,12 @@ output = weather_agent.run("Hello. What is the weather in Tokyo?")
 
 from __future__ import annotations
 
+import base64
 import datetime
 import importlib.util
 import json
 import logging
+import ssl
 import time
 import uuid
 from collections.abc import (
@@ -49,7 +51,7 @@ from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING, Any, Literal, cast, override
 
-import jsonpickle
+import dill
 from async_lru import alru_cache
 from rsb.containers.maybe import Maybe
 from rsb.coroutines.run_sync import run_sync
@@ -138,6 +140,11 @@ logger = logging.getLogger(__name__)
 def is_module_available(module_name: str) -> bool:
     """Check if a module is available without importing it."""
     return importlib.util.find_spec(module_name) is not None
+
+
+@dill.register(ssl.SSLContext)
+def _save_sslcontext(pickler: Any, obj: ssl.SSLContext):  # type: ignore
+    return ssl.create_default_context, ()
 
 
 # Pre-check for common optional dependencies
@@ -530,11 +537,25 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         )
 
     def serialize(self) -> str:
-        return cast(str, jsonpickle.encode(self))
+        """
+        Serializes the agent instance to a string.
+
+        Returns:
+            str: The serialized agent instance.
+        """
+        pickle_bytes = dill.dumps(self)
+
+        # Encode to base64 and then decode to string
+        base64_bytes = base64.b64encode(pickle_bytes)
+        return base64_bytes.decode('utf-8')
 
     @classmethod
     def deserialize(cls, encoded: str) -> Agent[Any]:
-        return cast(Agent[Any], jsonpickle.decode(encoded))
+        base64_bytes = encoded.encode('utf-8')
+        pickle_bytes = base64.b64decode(base64_bytes)
+        
+        # Deserialize with dill
+        return dill.loads(pickle_bytes)
 
     @alru_cache(maxsize=128, typed=True)
     async def _all_tools(self) -> Sequence[Tool[Any]]:
@@ -1141,20 +1162,24 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
         # Create context with current input
         context: Context = self.input2context(input, instructions=instructions)
-        
+
         # CRITICAL: Store the current user message BEFORE replacing message history
         current_user_message = context.last_message
-        
+
         # Handle conversation store integration
         if chat_id:
             assert self.conversation_store is not None
-            
+
             # Get existing conversation history
-            conversation_history = await self.conversation_store.get_conversation_history_async(chat_id)
-            
+            conversation_history = (
+                await self.conversation_store.get_conversation_history_async(chat_id)
+            )
+
             # Replace message history with conversation history, keeping developer messages
             if conversation_history:
-                context.replace_message_history(conversation_history, keep_developer_messages=True)
+                context.replace_message_history(
+                    conversation_history, keep_developer_messages=True
+                )
                 # Add the current user message to the context
                 context.message_history.append(current_user_message)
             # If no conversation history, context already has the current message, so we're good
@@ -1294,8 +1319,12 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             if chat_id:
                 assert self.conversation_store is not None
                 # Add the current user message and AI response to conversation store
-                await self.conversation_store.add_message_async(chat_id, current_user_message)
-                await self.conversation_store.add_message_async(chat_id, generation.message.to_assistant_message())
+                await self.conversation_store.add_message_async(
+                    chat_id, current_user_message
+                )
+                await self.conversation_store.add_message_async(
+                    chat_id, generation.message.to_assistant_message()
+                )
 
             return AgentRunOutput(
                 generation=generation,
@@ -1578,8 +1607,12 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     if chat_id:
                         assert self.conversation_store is not None
                         # Add the current user message and AI response to conversation store
-                        await self.conversation_store.add_message_async(chat_id, current_user_message)
-                        await self.conversation_store.add_message_async(chat_id, generation.message.to_assistant_message())
+                        await self.conversation_store.add_message_async(
+                            chat_id, current_user_message
+                        )
+                        await self.conversation_store.add_message_async(
+                            chat_id, generation.message.to_assistant_message()
+                        )
 
                     return self._build_agent_run_output(
                         context=context,
@@ -1662,8 +1695,12 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 if chat_id:
                     assert self.conversation_store is not None
                     # Add the current user message and AI response to conversation store
-                    await self.conversation_store.add_message_async(chat_id, current_user_message)
-                    await self.conversation_store.add_message_async(chat_id, tool_call_generation.message.to_assistant_message())
+                    await self.conversation_store.add_message_async(
+                        chat_id, current_user_message
+                    )
+                    await self.conversation_store.add_message_async(
+                        chat_id, tool_call_generation.message.to_assistant_message()
+                    )
 
                 return self._build_agent_run_output(
                     generation=cast(Generation[T_Schema], tool_call_generation),
