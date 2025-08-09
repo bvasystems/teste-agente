@@ -57,6 +57,170 @@ class EndpointParameter(BaseModel):
         description="How to serialize objects/arrays (auto-detected if None)",
     )
 
+    @classmethod
+    def from_json_schema(
+        cls,
+        schema: dict[str, Any],
+        *,
+        name: str,
+        description: str | None = None,
+        location: ParameterLocation = ParameterLocation.QUERY,
+        required: bool = False,
+        default: Any = None,
+        serialization_style: ObjectSerializationStyle | None = None,
+        components: dict[str, Any] | None = None,
+    ) -> EndpointParameter:
+        """
+        Create an EndpointParameter from a JSON schema.
+
+        Args:
+            schema: JSON schema dictionary defining the parameter structure
+            name: Name of the parameter
+            description: Description of the parameter (falls back to schema description)
+            location: Where to place this parameter in the HTTP request
+            required: Whether this parameter is required
+            default: Default value for the parameter
+            serialization_style: How to serialize objects/arrays (auto-detected if None)
+            components: Components dictionary for resolving $ref (optional)
+
+        Returns:
+            EndpointParameter instance created from the JSON schema
+
+        Example:
+            ```python
+            # Simple string parameter
+            param = EndpointParameter.from_json_schema(
+                schema={"type": "string", "enum": ["red", "green", "blue"]},
+                name="color",
+                description="Color selection",
+                required=True
+            )
+
+            # Object parameter
+            param = EndpointParameter.from_json_schema(
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "age": {"type": "integer", "minimum": 0}
+                    },
+                    "required": ["name"]
+                },
+                name="user",
+                description="User information",
+                location=ParameterLocation.BODY
+            )
+
+            # Array parameter
+            param = EndpointParameter.from_json_schema(
+                schema={
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "maxItems": 10
+                },
+                name="tags",
+                description="List of tags"
+            )
+            ```
+        """
+
+        # Use schema description as fallback if no description provided
+        param_description = description or schema.get("description", "")
+
+        # Use schema default as fallback if no default provided
+        param_default = default if default is not None else schema.get("default")
+
+        # Convert JSON schema to internal schema representation
+        parameter_schema = cls._convert_json_schema(schema, components or {})
+
+        return cls(
+            name=name,
+            description=param_description,
+            parameter_schema=parameter_schema,
+            location=location,
+            required=required,
+            default=param_default,
+            serialization_style=serialization_style,
+        )
+
+    @classmethod
+    def _convert_json_schema(
+        cls,
+        schema: dict[str, Any],
+        components: dict[str, Any],
+    ) -> ObjectSchema | ArraySchema | PrimitiveSchema:
+        """
+        Convert a JSON schema to internal schema representation.
+
+        Args:
+            schema: JSON schema dictionary
+            components: Components dictionary for resolving $ref
+
+        Returns:
+            Internal schema representation
+        """
+        from agentle.agents.apis.array_schema import ArraySchema
+        from agentle.agents.apis.object_schema import ObjectSchema
+        from agentle.agents.apis.primitive_schema import PrimitiveSchema
+
+        # Handle $ref references
+        if "$ref" in schema:
+            ref_path = schema["$ref"].split("/")
+            if len(ref_path) >= 4 and ref_path[1] == "components":
+                component_type = ref_path[2]  # e.g., "schemas"
+                component_name = ref_path[3]  # e.g., "User"
+                ref_schema = components.get(component_type, {}).get(component_name, {})
+                return cls._convert_json_schema(ref_schema, components)
+            else:
+                raise ValueError(f"Unsupported $ref format: {schema['$ref']}")
+
+        schema_type = schema.get("type", "string")
+
+        if schema_type == "object":
+            # Handle object schemas
+            properties: dict[str, ObjectSchema | ArraySchema | PrimitiveSchema] = {}
+
+            for prop_name, prop_schema in schema.get("properties", {}).items():
+                properties[prop_name] = cls._convert_json_schema(
+                    prop_schema, components
+                )
+
+            return ObjectSchema(
+                properties=properties,
+                required=schema.get("required", []),
+                additional_properties=schema.get("additionalProperties", True),
+                example=schema.get("example"),
+            )
+
+        elif schema_type == "array":
+            # Handle array schemas
+            items_schema = schema.get("items", {"type": "string"})
+            items = cls._convert_json_schema(items_schema, components)
+
+            return ArraySchema(
+                items=items,
+                min_items=schema.get("minItems"),
+                max_items=schema.get("maxItems"),
+                example=schema.get("example"),
+            )
+
+        else:
+            # Handle primitive schemas (string, integer, number, boolean)
+            if schema_type not in ["string", "integer", "number", "boolean"]:
+                # Default to string for unknown types
+                schema_type = "string"
+
+            return PrimitiveSchema(
+                type=schema_type,  # type: ignore
+                format=schema.get("format"),
+                enum=schema.get("enum"),
+                minimum=schema.get("minimum"),
+                maximum=schema.get("maximum"),
+                pattern=schema.get("pattern"),
+                example=schema.get("example"),
+            )
+
     def model_post_init(self, __context: Any) -> None:
         """Initialize schema from param_type if schema not provided (backward compatibility)."""
         from agentle.agents.apis.object_schema import ObjectSchema
