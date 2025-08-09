@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.7.33
+feat(context): add replace_message_history method to Context class
+
+refactor(agent): improve conversation history handling with replace_message_history
+Add support for keeping developer messages when replacing history and ensure proper message persistence in conversation store.
+
+refactor(google-tool-adapter): enhance type parsing and schema generation
+Add comprehensive type parser for complex Python type annotations and improve JSON Schema conversion with better handling of unions, optionals, and nested structures.
+
+chore(examples): simplify open_memory.py by removing unused imports and server setup
+
 ## v0.7.32
 
 feat(agent): improve tool call tracking and message history handling
