@@ -2,21 +2,21 @@ import asyncio
 
 from agentle.generations.models.message_parts.text import TextPart
 from agentle.generations.models.messages.user_message import UserMessage
-from agentle.generations.providers.google.google_generation_provider import GoogleGenerationProvider
+from agentle.generations.providers.google.google_generation_provider import (
+    GoogleGenerationProvider,
+)
+from agentle.generations.tools.tool import Tool
+
+
+async def sum(a: float, b: float) -> float:
+    return a + b
 
 
 async def main():
     provider = GoogleGenerationProvider()
     stream = await provider.stream_async(
-        messages=[
-            UserMessage(
-                parts=[
-                    TextPart(
-                        text="hello! write a long poem about the yanomami community"
-                    )
-                ]
-            )
-        ]
+        messages=[UserMessage(parts=[TextPart(text="hello! what is 2+2?")])],
+        tools=[Tool.from_callable(sum)],
     )
 
     full_text = ""
@@ -29,10 +29,6 @@ async def main():
 
         print(f"Chunk {chunk_count}: {chunk_text!r}")
         print(f"Tokens so far: {generation.usage.completion_tokens}")
-
-        # # You can check if this is the final chunk
-        # if generation.is_final_chunk:
-        #     print("Final chunk received!")
 
     print(f"\nFull response: {full_text}")
     print(f"Total chunks: {chunk_count}")
