@@ -286,122 +286,137 @@ class WhatsAppBot(BaseModel):
     async def _handle_message_with_batching(
         self, message: WhatsAppMessage, session: WhatsAppSession
     ) -> None:
-        """Handle message with improved batching logic and state management."""
+        """Handle message with improved batching logic and atomic state management."""
         phone_number = message.from_number
 
-        logger.info(
-            f"[BATCHING] Starting batch handling for {phone_number}, "
-            + f"current session state: is_processing={session.is_processing}"
-        )
+        logger.info(f"[BATCHING] Starting batch handling for {phone_number}")
 
         try:
             # Get or create processing lock for this user
             if phone_number not in self._processing_locks:
-                logger.debug(
-                    f"[BATCHING] Creating new processing lock for {phone_number}"
-                )
                 self._processing_locks[phone_number] = asyncio.Lock()
 
             async with self._processing_locks[phone_number]:
-                logger.debug(f"[BATCHING] Acquired processing lock for {phone_number}")
+                # Re-fetch session to ensure we have latest state
+                current_session = await self.provider.get_session(phone_number)
+                if not current_session:
+                    logger.error(f"[BATCHING] Lost session for {phone_number}")
+                    return
 
                 # Convert message to storable format
                 message_data = await self._message_to_dict(message)
-                logger.debug(f"[BATCHING] Converted message to dict: {message_data}")
 
-                # Add message to pending queue
-                session.add_pending_message(message_data)
-                logger.info(
-                    f"[BATCHING] Added message to pending queue for {phone_number}. "
-                    + f"Pending messages count: {len(session.pending_messages)}"
+                # Atomic session update with validation
+                success = await self._atomic_session_update(
+                    phone_number, current_session, message_data
                 )
 
-                # Update session
-                await self.provider.update_session(session)
-                logger.debug(f"[BATCHING] Updated session for {phone_number}")
-
-                # If not currently processing, start batch processor
-                if not session.is_processing:
-                    logger.info(
-                        f"[BATCHING] Session not processing, starting batch processor for {phone_number}"
+                if not success:
+                    logger.error(
+                        f"[BATCHING] Failed to update session for {phone_number}"
                     )
+                    # Fall back to immediate processing
+                    await self._process_single_message(message, current_session)
+                    return
 
-                    # Start batch processing and get token
-                    processing_token = session.start_batch_processing(
-                        self.config.max_batch_timeout_seconds
+                # Re-fetch session after update to get latest processing state
+                updated_session = await self.provider.get_session(phone_number)
+                if not updated_session:
+                    logger.error(
+                        f"[BATCHING] Lost session after update for {phone_number}"
                     )
+                    return
 
-                    # Persist the session state immediately
-                    await self.provider.update_session(session)
-
-                    # Verify the session was persisted correctly
-                    verification_session = await self.provider.get_session(phone_number)
-                    if verification_session and verification_session.is_processing:
-                        logger.info(
-                            f"[BATCHING] Session state verified - is_processing={verification_session.is_processing} "
-                            + f"for {phone_number}"
-                        )
-                    else:
-                        logger.error(
-                            f"[BATCHING] CRITICAL ERROR: Session state not persisted correctly for {phone_number}!"
-                        )
-                        # Try to recover by updating again
-                        session.is_processing = True
-                        await self.provider.update_session(session)
-
-                    # Cancel existing batch processor if any
-                    if phone_number in self._batch_processors:
-                        logger.debug(
-                            f"[BATCHING] Cancelling existing batch processor for {phone_number}"
-                        )
-                        old_task = self._batch_processors[phone_number]
-                        old_task.cancel()
-                        try:
-                            await asyncio.wait_for(old_task, timeout=0.1)
-                        except (asyncio.TimeoutError, asyncio.CancelledError):
-                            pass
-
-                    # Start new batch processor with token
+                # Only start processor if we successfully initiated processing
+                if (
+                    updated_session.is_processing
+                    and updated_session.processing_token
+                    and phone_number not in self._batch_processors
+                ):
                     logger.info(
-                        f"[BATCHING] Creating new batch processor task for {phone_number} with token {processing_token}"
+                        f"[BATCHING] Starting new batch processor for {phone_number}"
                     )
                     self._batch_processors[phone_number] = asyncio.create_task(
-                        self._batch_processor(phone_number, processing_token)
+                        self._batch_processor(
+                            phone_number, updated_session.processing_token
+                        )
                     )
-
-                    # Verify the task was created and is running
-                    task = self._batch_processors[phone_number]
-                    if task.done():
-                        logger.error(
-                            f"[BATCHING] CRITICAL ERROR: Batch processor task completed immediately for {phone_number}!"
-                        )
-                    else:
-                        logger.info(
-                            f"[BATCHING] Batch processor task successfully started for {phone_number}"
-                        )
                 else:
                     logger.info(
-                        f"[BATCHING] Session already processing for {phone_number}, "
-                        + f"message added to existing batch. Current pending: {len(session.pending_messages)}"
+                        f"[BATCHING] Message added to existing batch for {phone_number}"
                     )
 
         except Exception as e:
             logger.error(
-                f"[BATCHING_ERROR] Error in message batching for {phone_number}: {e}",
-                exc_info=True,
+                f"[BATCHING_ERROR] Error in message batching for {phone_number}: {e}"
             )
-            # Fall back to immediate processing to prevent message loss
+            # Always fall back to immediate processing on error
             try:
-                logger.warning(
-                    f"[FALLBACK] Falling back to immediate processing for {phone_number}"
-                )
                 await self._process_single_message(message, session)
             except Exception as fallback_error:
                 logger.error(
-                    f"[FALLBACK_ERROR] Fallback processing also failed for {phone_number}: {fallback_error}",
-                    exc_info=True,
+                    f"[FALLBACK_ERROR] Fallback processing failed: {fallback_error}"
                 )
-                raise
+                await self._send_error_message(message.from_number, message.id)
+
+    async def _atomic_session_update(
+        self, phone_number: str, session: WhatsAppSession, message_data: dict[str, Any]
+    ) -> bool:
+        """Atomically update session with proper state transitions."""
+        try:
+            # Add message to pending queue
+            session.add_pending_message(message_data)
+
+            # If not currently processing, transition to processing state
+            if not session.is_processing:
+                processing_token = session.start_batch_processing(
+                    self.config.max_batch_timeout_seconds
+                )
+
+                # Validate the state transition worked
+                if not session.is_processing or not session.processing_token:
+                    logger.error(
+                        f"[ATOMIC_UPDATE] Failed to start processing for {phone_number}"
+                    )
+                    return False
+
+                logger.info(
+                    f"[ATOMIC_UPDATE] Started processing for {phone_number} with token {processing_token}"
+                )
+
+            # Persist the updated session
+            await self.provider.update_session(session)
+
+            # Verify the session was persisted correctly by re-reading
+            verification_session = await self.provider.get_session(phone_number)
+            if not verification_session:
+                logger.error(
+                    f"[ATOMIC_UPDATE] Session disappeared after update for {phone_number}"
+                )
+                return False
+
+            # Verify critical state is preserved
+            if verification_session.is_processing != session.is_processing:
+                logger.error(
+                    f"[ATOMIC_UPDATE] Processing state not persisted for {phone_number}"
+                )
+                return False
+
+            if len(verification_session.pending_messages) != len(
+                session.pending_messages
+            ):
+                logger.error(
+                    f"[ATOMIC_UPDATE] Pending messages not persisted for {phone_number}"
+                )
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"[ATOMIC_UPDATE] Failed atomic session update for {phone_number}: {e}"
+            )
+            return False
 
     async def _batch_processor(self, phone_number: str, processing_token: str) -> None:
         """
