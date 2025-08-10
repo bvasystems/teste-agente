@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import TYPE_CHECKING, cast, override
 
 from agentle.generations.models.generation.generation import Generation
@@ -63,7 +63,7 @@ if TYPE_CHECKING:
     from google.genai.client import (
         DebugConfig,
     )
-    from google.genai.types import Content, GenerateContentResponse, HttpOptions
+    from google.genai.types import Content, HttpOptions
 
     from agentle.generations.tracing.otel_client import OtelClient
 
@@ -162,6 +162,101 @@ class GoogleGenerationProvider(GenerationProvider):
             str: The organization identifier, which is "google" for this provider.
         """
         return "google"
+
+    async def stream_async[T = WithoutStructuredOutput](
+        self,
+        *,
+        model: str | ModelKind | None = None,
+        messages: Sequence[Message],
+        response_schema: type[T] | None = None,
+        generation_config: GenerationConfig | GenerationConfigDict | None = None,
+        tools: Sequence[Tool] | None = None,
+    ) -> AsyncIterator[Generation[T]]:
+        from google.genai import types
+
+        used_model = self._resolve_model(model)
+        _generation_config = self._normalize_generation_config(generation_config)
+
+        system_instruction: Content | None = None
+        first_message = messages[0]
+        if isinstance(first_message, DeveloperMessage):
+            system_instruction = self.message_adapter.adapt(first_message)
+
+        message_tools = [
+            part
+            for message in messages
+            for part in message.parts
+            if isinstance(part, Tool)
+        ]
+
+        final_tools = (
+            list(tools or []) + message_tools if tools or message_tools else None
+        )
+
+        disable_function_calling = self.function_calling_config.get("disable", True)
+        # if disable_function_calling is True, set maximum_remote_calls to None
+        maximum_remote_calls = None if disable_function_calling else 10
+        ignore_call_history = self.function_calling_config.get(
+            "ignore_call_history", False
+        )
+
+        _tools: types.ToolListUnion | None = (
+            [AgentleToolToGoogleToolAdapter().adapt(tool) for tool in final_tools]
+            if final_tools
+            else None
+        )
+
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=_generation_config.temperature,
+            top_p=_generation_config.top_p,
+            top_k=_generation_config.top_k,
+            candidate_count=_generation_config.n,
+            tools=_tools,
+            max_output_tokens=_generation_config.max_output_tokens,
+            response_schema=response_schema if bool(response_schema) else None,
+            response_mime_type="application/json" if bool(response_schema) else None,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                disable=disable_function_calling,
+                maximum_remote_calls=maximum_remote_calls,
+                ignore_call_history=ignore_call_history,
+            ),
+        )
+
+        user_messages = [msg for msg in messages if isinstance(msg, UserMessage)]
+        if user_messages and all(
+            isinstance(part, FilePart) for part in user_messages[-1].parts
+        ):
+            messages = list(messages) + [UserMessage(parts=[TextPart(text=".")])]
+
+        # Developer message is usuarlly the first message. if it's not, then there is no developer message
+        if isinstance(messages[0], DeveloperMessage):
+            messages = messages[1:]
+
+        contents = [self.message_adapter.adapt(msg) for msg in messages]
+
+        try:
+            async with asyncio.timeout(_generation_config.timeout_in_seconds):
+                generate_content_response_stream: AsyncIterator[
+                    types.GenerateContentResponse
+                ] = await self._client.aio.models.generate_content_stream(
+                    model=used_model,
+                    contents=cast(types.ContentListUnion, contents),
+                    config=config,
+                )
+        except asyncio.TimeoutError as e:
+            e.add_note(
+                f"Content generation timed out after {_generation_config.timeout_in_seconds}s"
+            )
+            raise
+
+        # Create the response
+        response = GenerateGenerateContentResponseToGenerationAdapter[T](
+            response_schema=response_schema,
+            model=used_model,
+        ).adapt(generate_content_response_stream)
+
+        return response
 
     @observe
     @override
@@ -279,8 +374,6 @@ class GoogleGenerationProvider(GenerationProvider):
         ).adapt(generate_content_response)
 
         return response
-
-    def _create_med_lm_generation(self) -> GenerateContentResponse: ...
 
     @override
     def map_model_kind_to_provider_model(
