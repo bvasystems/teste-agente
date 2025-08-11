@@ -21,6 +21,8 @@ def parse_streaming_json[T](potential_json: str | None, model: type[T]) -> T:
     if potential_json is None:
         return model()
 
+    #print(f"parsing: {potential_json}")
+
     def find_json_boundaries(text: str) -> tuple[int, int]:
         """Find the start and potential end of JSON in the text."""
 

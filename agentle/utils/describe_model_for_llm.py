@@ -31,6 +31,7 @@ def describe_model_for_llm(
         model_class: The Pydantic BaseModel class to describe
         include_examples: Whether to include example values in the description
         max_depth: Maximum recursion depth for nested models (prevents infinite recursion)
+        inline_nested: If True, describe nested objects inline rather than separately
         _current_depth: Internal parameter for tracking recursion depth
 
     Returns:
@@ -41,8 +42,8 @@ def describe_model_for_llm(
             name: str = Field(description="User's full name")
             age: int = Field(ge=0, le=150)
 
-        description = describe_model_for_llm(User)
-        # Returns a detailed description of the User model structure
+        description = describe_model_for_llm(User, inline_nested=True)
+        # Returns a detailed description with nested objects described inline
     """
 
     def format_type_description(
@@ -122,18 +123,18 @@ def describe_model_for_llm(
         # Handle nested BaseModel classes
         elif inspect.isclass(field_type) and issubclass(field_type, BaseModel):
             if for_inline and depth < max_depth:
-                return "object"
+                return f"object"
             else:
                 return f"{field_type.__name__} object"
 
         # Handle basic types
-        elif field_type is str:
+        elif field_type == str:
             return "string"
-        elif field_type is int:
+        elif field_type == int:
             return "integer"
-        elif field_type is float:
+        elif field_type == float:
             return "number"
-        elif field_type is bool:
+        elif field_type == bool:
             return "boolean"
         elif field_type == Any:
             return "any type"
@@ -207,13 +208,13 @@ def describe_model_for_llm(
                 return generate_example_value(non_none_args[0], FieldInfo(), depth)
 
         # Generate examples based on type
-        if field_type is str or origin is str:
+        if field_type == str or origin is str:
             return '"example_string"'
-        elif field_type is int or origin is int:
+        elif field_type == int or origin is int:
             return "42"
-        elif field_type is float or origin is float:
+        elif field_type == float or origin is float:
             return "3.14"
-        elif field_type is bool or origin is bool:
+        elif field_type == bool or origin is bool:
             return "true"
         elif origin in (list, List):
             inner_type = get_args(field_type)[0] if get_args(field_type) else str
@@ -223,7 +224,7 @@ def describe_model_for_llm(
             args = get_args(field_type)
             if len(args) >= 2:
                 key_type, value_type = args[0], args[1]
-                if key_type is str:
+                if key_type == str:
                     value_example = generate_example_value(
                         value_type, FieldInfo(), depth + 1
                     )
@@ -277,104 +278,179 @@ def describe_model_for_llm(
 
     for field_name, field_info in model_class.model_fields.items():
         field_type = field_info.annotation
-        type_desc = format_type_description(field_type, _current_depth + 1)
+
+        # Check if this field is a nested BaseModel
+        nested_model = None
+        if inspect.isclass(field_type) and issubclass(field_type, BaseModel):
+            nested_model = field_type
+        elif get_origin(field_type) is Union:
+            # Check if it's Optional[BaseModel]
+            args = get_args(field_type)
+            non_none_args = [arg for arg in args if arg is not type(None)]
+            if (
+                len(non_none_args) == 1
+                and inspect.isclass(non_none_args[0])
+                and issubclass(non_none_args[0], BaseModel)
+            ):
+                nested_model = non_none_args[0]
 
         # Build field description
         field_lines = []
-        field_lines.append(f"{indent}- **{field_name}** ({type_desc})")
 
-        # Add description if available
-        if field_info.description:
-            field_lines.append(f"{indent}  - Description: {field_info.description}")
+        if nested_model and inline_nested and _current_depth < max_depth:
+            # Inline nested object description
+            is_optional = get_origin(field_type) is Union and type(None) in get_args(
+                field_type
+            )
+            optional_text = "optional " if is_optional else ""
+            field_lines.append(
+                f"{indent}- **{field_name}** ({optional_text}object with the following structure):"
+            )
 
-        # Add constraints
-        constraints = format_constraints(field_info)
-        if constraints:
-            field_lines.append(f"{indent}  - Constraints: {', '.join(constraints)}")
+            if field_info.description:
+                field_lines.append(f"{indent}  - Description: {field_info.description}")
 
-        # Add required/optional status
-        is_required = field_info.default is ... and field_info.default_factory is None
-        field_lines.append(f"{indent}  - Required: {'Yes' if is_required else 'No'}")
-
-        # Add default value if not required
-        if not is_required:
-            if field_info.default is not None and field_info.default != ...:
-                default_val = (
-                    f'"{field_info.default}"'
-                    if isinstance(field_info.default, str)
-                    else str(field_info.default)
+            # Add nested object fields inline
+            for (
+                nested_field_name,
+                nested_field_info,
+            ) in nested_model.model_fields.items():
+                nested_type_desc = format_type_description(
+                    nested_field_info.annotation, _current_depth + 1, True
                 )
-                field_lines.append(f"{indent}  - Default: {default_val}")
-            elif field_info.default_factory is not None:
-                field_lines.append(
-                    f"{indent}  - Default: Generated by factory function"
+                nested_required = (
+                    nested_field_info.default is ...
+                    and nested_field_info.default_factory is None
                 )
-            else:
-                field_lines.append(f"{indent}  - Default: None")
+                required_text = " (required)" if nested_required else ""
 
-        # Add example if requested
-        if include_examples:
-            example = generate_example_value(field_type, field_info)
-            field_lines.append(f"{indent}  - Example: {example}")
+                nested_desc = f"{indent}    - **{nested_field_name}** ({nested_type_desc}){required_text}"
+                if nested_field_info.description:
+                    nested_desc += f": {nested_field_info.description}"
+
+                # Add constraints for nested fields
+                nested_constraints = format_constraints(nested_field_info)
+                if nested_constraints:
+                    nested_desc += f" [{', '.join(nested_constraints)}]"
+
+                field_lines.append(nested_desc)
+
+            # Add overall field info
+            is_required = (
+                field_info.default is ... and field_info.default_factory is None
+            )
+            field_lines.append(
+                f"{indent}  - Required: {'Yes' if is_required else 'No'}"
+            )
+
+            # Add example with full nested structure
+            if include_examples:
+                example = generate_example_value(field_type, field_info, _current_depth)
+                field_lines.append(f"{indent}  - Example: {example}")
+
+        else:
+            # Regular field description
+            type_desc = format_type_description(field_type, _current_depth + 1, False)
+            field_lines.append(f"{indent}- **{field_name}** ({type_desc})")
+
+            # Add description if available
+            if field_info.description:
+                field_lines.append(f"{indent}  - Description: {field_info.description}")
+
+            # Add constraints
+            constraints = format_constraints(field_info)
+            if constraints:
+                field_lines.append(f"{indent}  - Constraints: {', '.join(constraints)}")
+
+            # Add required/optional status
+            is_required = (
+                field_info.default is ... and field_info.default_factory is None
+            )
+            field_lines.append(
+                f"{indent}  - Required: {'Yes' if is_required else 'No'}"
+            )
+
+            # Add default value if not required
+            if not is_required:
+                if field_info.default is not None and field_info.default != ...:
+                    default_val = (
+                        f'"{field_info.default}"'
+                        if isinstance(field_info.default, str)
+                        else str(field_info.default)
+                    )
+                    field_lines.append(f"{indent}  - Default: {default_val}")
+                elif field_info.default_factory is not None:
+                    field_lines.append(
+                        f"{indent}  - Default: Generated by factory function"
+                    )
+                else:
+                    field_lines.append(f"{indent}  - Default: None")
+
+            # Add example if requested
+            if include_examples:
+                example = generate_example_value(field_type, field_info, _current_depth)
+                field_lines.append(f"{indent}  - Example: {example}")
 
         lines.extend(field_lines)
         lines.append("")
 
-    # Handle nested models recursively
-    nested_models = []
-    for field_name, field_info in model_class.model_fields.items():
-        field_type = field_info.annotation
+    # Handle nested models recursively (only if not inlined)
+    if not inline_nested:
+        nested_models = []
+        for field_name, field_info in model_class.model_fields.items():
+            field_type = field_info.annotation
 
-        # Check for nested BaseModel in the type
-        def find_nested_models(t):
-            origin = get_origin(t)
-            args = get_args(t)
+            # Check for nested BaseModel in the type
+            def find_nested_models(t):
+                origin = get_origin(t)
+                args = get_args(t)
 
-            if inspect.isclass(t) and issubclass(t, BaseModel):
-                return [t]
-            elif origin is Union:
-                models = []
-                for arg in args:
-                    models.extend(find_nested_models(arg))
-                return models
-            elif origin in (list, List, set, Set, frozenset, FrozenSet):
-                if args:
-                    return find_nested_models(args[0])
-            elif origin in (dict, Dict):
-                if len(args) >= 2:
-                    return find_nested_models(args[1])
-            elif origin in (tuple, Tuple):
-                models = []
-                for arg in args:
-                    if arg is not Ellipsis:
+                if inspect.isclass(t) and issubclass(t, BaseModel):
+                    return [t]
+                elif origin is Union:
+                    models = []
+                    for arg in args:
                         models.extend(find_nested_models(arg))
-                return models
-            return []
+                    return models
+                elif origin in (list, List, set, Set, frozenset, FrozenSet):
+                    if args:
+                        return find_nested_models(args[0])
+                elif origin in (dict, Dict):
+                    if len(args) >= 2:
+                        return find_nested_models(args[1])
+                elif origin in (tuple, Tuple):
+                    models = []
+                    for arg in args:
+                        if arg is not Ellipsis:
+                            models.extend(find_nested_models(arg))
+                    return models
+                return []
 
-        nested_models.extend(find_nested_models(field_type))
+            nested_models.extend(find_nested_models(field_type))
 
-    # Add nested model descriptions
-    if nested_models and _current_depth < max_depth:
-        lines.append(f"{indent}**Nested Model Definitions:**")
-        lines.append("")
-
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_nested = []
-        for model in nested_models:
-            if model not in seen:
-                seen.add(model)
-                unique_nested.append(model)
-
-        for nested_model in unique_nested:
-            nested_desc = describe_model_for_llm(
-                nested_model,
-                include_examples=include_examples,
-                max_depth=max_depth,
-                _current_depth=_current_depth + 1,
-            )
-            lines.append(nested_desc)
+        # Add nested model descriptions
+        if nested_models and _current_depth < max_depth:
+            lines.append(f"{indent}**Nested Model Definitions:**")
             lines.append("")
+
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_nested = []
+            for model in nested_models:
+                if model not in seen:
+                    seen.add(model)
+                    unique_nested.append(model)
+
+            for nested_model in unique_nested:
+                nested_desc = describe_model_for_llm(
+                    nested_model,
+                    include_examples=include_examples,
+                    max_depth=max_depth,
+                    inline_nested=inline_nested,
+                    _current_depth=_current_depth + 1,
+                )
+                lines.append(nested_desc)
+                lines.append("")
 
     return "\n".join(lines)
 
@@ -431,9 +507,21 @@ if __name__ == "__main__":
             default=True, description="Whether the user account is active"
         )
 
-    # Generate description
-    description = describe_model_for_llm(User, include_examples=True)
-    print(description)
+    # Generate description with inline nested objects (recommended for LLMs)
+    description_inline = describe_model_for_llm(
+        User, include_examples=True, inline_nested=True
+    )
+    print("=== INLINE NESTED OBJECTS (RECOMMENDED) ===")
+    print(description_inline)
+
+    print("\n" + "=" * 80 + "\n")
+
+    # Generate description with separate nested object definitions
+    description_separate = describe_model_for_llm(
+        User, include_examples=True, inline_nested=False
+    )
+    print("=== SEPARATE NESTED DEFINITIONS ===")
+    print(description_separate)
 
     print("\n" + "=" * 80 + "\n")
 
@@ -441,9 +529,10 @@ if __name__ == "__main__":
     prompt = f"""
 Please generate a JSON object that matches this exact structure:
 
-{description}
+{description_inline}
 
-Generate a realistic example with a software engineer named John Doe.
+Generate a realistic example with a software engineer named John Doe from Boston.
+Make sure the JSON is valid and includes all required fields.
 """
 
     print("Example LLM Prompt:")

@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Mapping, Sequence
+from textwrap import dedent
 from typing import TYPE_CHECKING, cast, override
 
 from agentle.generations.models.generation.generation import Generation
@@ -57,13 +58,14 @@ from agentle.generations.providers.google.function_calling_config import (
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
 from agentle.generations.tracing import observe
+from agentle.utils.describe_model_for_llm import describe_model_for_llm
 
 if TYPE_CHECKING:
     from google.auth.credentials import Credentials
     from google.genai.client import (
         DebugConfig,
     )
-    from google.genai.types import Content, HttpOptions
+    from google.genai.types import HttpOptions
 
     from agentle.generations.tracing.otel_client import OtelClient
 
@@ -174,13 +176,39 @@ class GoogleGenerationProvider(GenerationProvider):
     ) -> AsyncIterator[Generation[T]]:
         from google.genai import types
 
+        if self._normalize_generation_config(generation_config).n > 1:
+            raise ValueError("streaming does not support n > 1.")
+
         used_model = self._resolve_model(model)
         _generation_config = self._normalize_generation_config(generation_config)
 
-        system_instruction: Content | None = None
+        system_instruction: str | None = None
         first_message = messages[0]
         if isinstance(first_message, DeveloperMessage):
-            system_instruction = self.message_adapter.adapt(first_message)
+            system_instruction = first_message.text
+
+        if response_schema:
+            model_description = describe_model_for_llm(response_schema)  # type: ignore[reportArgumentType]
+            json_instruction = "Your Output must be a valid JSON string. Do not include any other text. You must provide an asnwer following the following json structure:"
+            conditional_prefix = (
+                "If, and only if, not calling any tools, " if tools else ""
+            )
+
+            instruction_text = (
+                f"{conditional_prefix}{json_instruction}\n{model_description}"
+            )
+
+            system_instruction = (
+                dedent(f"""\
+                You are a helpful assistant. {instruction_text}
+                """)
+                if not system_instruction
+                else system_instruction
+                + dedent(f"""\
+                \n\n
+                {instruction_text}
+                """)
+            )
 
         message_tools = [
             part
@@ -215,7 +243,6 @@ class GoogleGenerationProvider(GenerationProvider):
             tools=_tools,
             max_output_tokens=_generation_config.max_output_tokens,
             response_schema=response_schema if bool(response_schema) else None,
-            response_mime_type="application/json" if bool(response_schema) else None,
             automatic_function_calling=types.AutomaticFunctionCallingConfig(
                 disable=disable_function_calling,
                 maximum_remote_calls=maximum_remote_calls,
@@ -252,8 +279,7 @@ class GoogleGenerationProvider(GenerationProvider):
 
         # Create the response
         response = GenerateGenerateContentResponseToGenerationAdapter[T](
-            response_schema=response_schema,
-            model=used_model,
+            response_schema=response_schema, model=used_model
         ).adapt(generate_content_response_stream)
 
         return response
@@ -294,10 +320,10 @@ class GoogleGenerationProvider(GenerationProvider):
         used_model = self._resolve_model(model)
         _generation_config = self._normalize_generation_config(generation_config)
 
-        system_instruction: Content | None = None
+        system_instruction: str | None = None
         first_message = messages[0]
         if isinstance(first_message, DeveloperMessage):
-            system_instruction = self.message_adapter.adapt(first_message)
+            system_instruction = first_message.text
 
         message_tools = [
             part

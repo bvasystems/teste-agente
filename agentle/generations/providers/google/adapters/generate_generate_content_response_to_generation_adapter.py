@@ -1,19 +1,26 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 import datetime
 import uuid
+from collections.abc import AsyncIterator
 from logging import Logger
 from typing import TYPE_CHECKING, Literal, cast, overload
 
+from pydantic import BaseModel
 from rsb.adapters.adapter import Adapter
 
 from agentle.generations.models.generation.choice import Choice
 from agentle.generations.models.generation.generation import Generation
 from agentle.generations.models.generation.usage import Usage
+from agentle.generations.models.message_parts.part import Part
 from agentle.generations.providers.google.adapters.google_content_to_generated_assistant_message_adapter import (
     GoogleContentToGeneratedAssistantMessageAdapter,
 )
+from agentle.generations.providers.google.adapters.google_part_to_part_adapter import (
+    GooglePartToPartAdapter,
+)
+from agentle.utils.make_fields_optional import make_fields_optional
+from agentle.utils.parse_streaming_json import parse_streaming_json
 
 if TYPE_CHECKING:
     from google.genai.types import (
@@ -40,6 +47,7 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
     google_content_to_message_adapter: (
         GoogleContentToGeneratedAssistantMessageAdapter[T] | None
     )
+    is_stream: bool
 
     def __init__(
         self,
@@ -127,7 +135,37 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
         final_usage: Usage | None = None
         final_parsed: T | None = None
 
+        _response_schema = self.response_schema
+
+        _all_parts: list[Part] = []
+        _optional_model = make_fields_optional(cast(type[BaseModel], _response_schema))
+
         async for chunk in response_stream:
+            if _response_schema:
+                candidates = chunk.candidates
+                if candidates is None:
+                    continue
+
+                content = candidates[0].content
+                if content is None:
+                    continue
+
+                _part_adapter = GooglePartToPartAdapter()
+                _content_parts = content.parts
+                if _content_parts is None:
+                    continue
+
+                _parts = [_part_adapter.adapt(part) for part in _content_parts]
+
+                _all_parts.extend(_parts)
+
+                optional_model = parse_streaming_json(
+                    "".join([str(p.text) for p in _all_parts]),
+                    model=_optional_model,
+                )
+
+                chunk.parsed = optional_model
+
             # Extract parsed data (usually only available in final chunk)
             if hasattr(chunk, "parsed") and chunk.parsed is not None:
                 final_parsed = cast(T | None, chunk.parsed)
@@ -140,7 +178,9 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
             if chunk.candidates:
                 choices = self._build_choices(
                     chunk.candidates,
-                    generate_content_parsed_response=final_parsed,
+                    generate_content_parsed_response=final_parsed
+                    if self.response_schema
+                    else None,
                     is_streaming=True,
                 )
 

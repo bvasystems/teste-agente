@@ -6,29 +6,47 @@ from agentle.generations.providers.google.google_generation_provider import (
     GoogleGenerationProvider,
 )
 from agentle.generations.tools.tool import Tool
+from pydantic import BaseModel
+
+
+class Response(BaseModel):
+    reasoning: str
+    response: str
 
 
 async def sum(a: float, b: float) -> float:
     return a + b
 
 
+tool = Tool.from_callable(sum)
+tools = [tool]
+
+
 async def main():
     provider = GoogleGenerationProvider()
     stream = await provider.stream_async(
-        messages=[UserMessage(parts=[TextPart(text="hello! what is 2+2?")])],
-        tools=[Tool.from_callable(sum)],
+        messages=[
+            UserMessage(
+                parts=[
+                    TextPart(text="what is 2+2")
+                ]
+            )
+        ],
+        response_schema=Response,
+        tools=tools,
     )
 
     full_text = ""
     chunk_count = 0
 
     async for generation in stream:
+        print(f"\nParsed: {generation}\n\n\n")
         chunk_count += 1
-        chunk_text = generation.text
-        full_text += chunk_text
+        # chunk_text = generation.text
+        # full_text += chunk_text
 
-        print(f"Chunk {chunk_count}: {chunk_text!r}")
-        print(f"Tokens so far: {generation.usage.completion_tokens}")
+        # print(f"Chunk {chunk_count}: {chunk_text!r}")
+        # print(f"Tokens so far: {generation.usage.completion_tokens}")
 
     print(f"\nFull response: {full_text}")
     print(f"Total chunks: {chunk_count}")
