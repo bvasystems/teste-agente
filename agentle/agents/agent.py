@@ -1021,7 +1021,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         *,
         trace_params: TraceParams | None = None,
         chat_id: str | None = None,
-        stream: bool = False,
+        stream: Literal[False] = False,
     ) -> AgentRunOutput[T_Schema]: ...
 
     @overload

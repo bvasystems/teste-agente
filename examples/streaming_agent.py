@@ -1,7 +1,5 @@
 import asyncio
-from typing import AsyncIterator, cast
-from agentle.agents.agent import Agent, WithoutStructuredOutput
-from agentle.agents.agent_run_output import AgentRunOutput
+from agentle.agents.agent import Agent
 
 from pydantic import BaseModel
 
@@ -21,9 +19,7 @@ async def main():
     print("Streaming poem generation...")
     print("=" * 50)
     
-    stream_result = await agent.run_async("write a poem about america", stream=True)
-    stream_iterator = cast(AsyncIterator[AgentRunOutput[WithoutStructuredOutput]], stream_result)
-    async for chunk in stream_iterator:
+    async for chunk in await agent.run_async("write a poem about america", stream=True):
         # Print each chunk as it arrives
         if chunk.generation and chunk.generation.choices:
             for choice in chunk.generation.choices:
