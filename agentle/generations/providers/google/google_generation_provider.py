@@ -282,7 +282,9 @@ class GoogleGenerationProvider(GenerationProvider):
             response_schema=response_schema, model=used_model
         ).adapt(generate_content_response_stream)
 
-        return response
+        # Yield from the async iterator to make this an async generator
+        async for generation in response:
+            yield generation
 
     @observe
     @override
