@@ -37,6 +37,7 @@ import time
 import uuid
 from collections.abc import (
     AsyncGenerator,
+    AsyncIterator,
     Awaitable,
     Callable,
     Generator,
@@ -49,7 +50,7 @@ from contextlib import asynccontextmanager, contextmanager
 from io import BytesIO, StringIO
 from pathlib import Path
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any, Literal, cast, override
+from typing import TYPE_CHECKING, Any, Literal, cast, overload, override
 
 import dill
 from aiocache import cached
@@ -100,13 +101,12 @@ from agentle.generations.models.messages.user_message import UserMessage
 from agentle.generations.providers.base.generation_provider import (
     GenerationProvider,
 )
+from agentle.generations.providers.base.supports_streaming import SupportsStreaming
 from agentle.generations.providers.google.google_generation_provider import (
     GoogleGenerationProvider,
 )
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
-
-
 from agentle.generations.tools.tool_execution_result import ToolExecutionResult
 from agentle.mcp.servers.mcp_server_protocol import MCPServerProtocol
 from agentle.parsing.cache.document_cache_store import DocumentCacheStore
@@ -912,49 +912,6 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             for server in self.mcp_servers:
                 await server.cleanup_async()
 
-    def run(
-        self,
-        input: AgentInput | Any,
-        *,
-        timeout: float | None = None,
-        trace_params: TraceParams | None = None,
-        chat_id: str | None = None,
-    ) -> AgentRunOutput[T_Schema]:
-        """
-        Runs the agent synchronously with the provided input.
-
-        This method is a synchronous wrapper for run_async, allowing
-        easy use in synchronous contexts.
-
-        Args:
-            input: The input for the agent, which can be of various types.
-            timeout: Optional time limit in seconds for execution.
-            trace_params: Optional trace parameters for observability purposes.
-
-        Returns:
-            AgentRunOutput[T_Schema]: The result of the agent execution.
-
-        Example:
-            ```python
-            # Input as string
-            result = agent.run("What is the weather in London?")
-
-            # Input as UserMessage object
-            from agentle.generations.models.messages.user_message import UserMessage
-            from agentle.generations.models.message_parts.text import TextPart
-
-            message = UserMessage(parts=[TextPart(text="What is the weather in London?")])
-            result = agent.run(message)
-            ```
-        """
-        return run_sync(
-            self.run_async,
-            timeout=timeout,
-            input=input,
-            trace_params=trace_params,
-            chat_id=chat_id,
-        )
-
     async def resume_async(
         self, resumption_token: str, approval_data: dict[str, Any] | None = None
     ) -> AgentRunOutput[T_Schema]:
@@ -1005,7 +962,115 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             approval_data=approval_data,
         )
 
+    @overload
     async def run_async(
+        self,
+        input: AgentInput | Any,
+        *,
+        streaming: Literal[False] = False,
+        trace_params: TraceParams | None = None,
+        chat_id: str | None = None,
+    ) -> AgentRunOutput[T_Schema]: ...
+
+    @overload
+    async def run_async(
+        self,
+        input: AgentInput | Any,
+        *,
+        streaming: Literal[True],
+        trace_params: TraceParams | None = None,
+        chat_id: str | None = None,
+    ) -> AsyncIterator[AgentRunOutput[T_Schema]]: ...
+
+    def run(
+        self,
+        input: AgentInput | Any,
+        *,
+        timeout: float | None = None,
+        trace_params: TraceParams | None = None,
+        chat_id: str | None = None,
+    ) -> AgentRunOutput[T_Schema]:
+        """
+        Runs the agent synchronously with the provided input.
+
+        This method is a synchronous wrapper for run_async, allowing
+        easy use in synchronous contexts.
+
+        Args:
+            input: The input for the agent, which can be of various types.
+            timeout: Optional time limit in seconds for execution.
+            trace_params: Optional trace parameters for observability purposes.
+
+        Returns:
+            AgentRunOutput[T_Schema]: The result of the agent execution.
+
+        Example:
+            ```python
+            # Input as string
+            result = agent.run("What is the weather in London?")
+
+            # Input as UserMessage object
+            from agentle.generations.models.messages.user_message import UserMessage
+            from agentle.generations.models.message_parts.text import TextPart
+
+            message = UserMessage(parts=[TextPart(text="What is the weather in London?")])
+            result = agent.run(message)
+            ```
+        """
+        return run_sync(
+            self.run_async,
+            timeout=timeout,
+            input=input,
+            trace_params=trace_params,
+            chat_id=chat_id,
+        )
+
+    async def run_async(
+        self,
+        input: AgentInput | Any,
+        *,
+        streaming: bool = False,
+        trace_params: TraceParams | None = None,
+        chat_id: str | None = None,
+    ) -> AgentRunOutput[T_Schema] | AsyncIterator[AgentRunOutput[T_Schema]]:
+        """
+        Runs the agent asynchronously with optional streaming support.
+
+        Args:
+            input: The input for the agent, which can be of various types.
+            streaming: Whether to stream the response in real-time chunks.
+            trace_params: Optional trace parameters for observability purposes.
+            chat_id: Optional chat ID for conversation persistence.
+
+        Returns:
+            AgentRunOutput[T_Schema] or AsyncIterator[AgentRunOutput[T_Schema]]:
+                Single result when streaming=False, async iterator when streaming=True.
+
+        Example:
+            ```python
+            # Non-streaming
+            result = await agent.run_async("What's the weather?")
+            print(result.text)
+
+            # Streaming
+            async for chunk in agent.run_async("What's the weather?", streaming=True):
+                print(chunk.text, end="", flush=True)
+            ```
+        """
+        if streaming:
+            return self._run_async_streaming(
+                input=input,
+                trace_params=trace_params,
+                chat_id=chat_id,
+            )
+        else:
+            return await self._run_async_non_streaming(
+                input=input,
+                trace_params=trace_params,
+                chat_id=chat_id,
+            )
+
+    async def _run_async_non_streaming(
         self,
         input: AgentInput | Any,
         *,
@@ -1013,26 +1078,8 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         chat_id: str | None = None,
     ) -> AgentRunOutput[T_Schema]:
         """
-        Runs the agent asynchronously with the provided input and collects comprehensive performance metrics.
-
-        This main method processes user input, interacts with the
-        generation provider, and optionally calls tools until reaching a final response.
-        It now includes detailed performance monitoring to help identify optimization opportunities.
-
-        The method supports both simple agents (without tools) and agents with
-        tools that can perform iterative calls to solve complex tasks.
-
-        Args:
-            input: The input for the agent, which can be of various types.
-            trace_params: Optional trace parameters for observability purposes.
-            chat_id: Optional chat ID for conversation persistence.
-
-        Returns:
-            AgentRunOutput[T_Schema]: The result of the agent execution with performance metrics,
-                                    possibly with a structured response according to the defined schema.
-
-        Raises:
-            MaxToolCallsExceededError: If the maximum number of tool calls is exceeded.
+        Original non-streaming implementation.
+        This is the existing run_async method renamed for clarity.
         """
         import time
 
@@ -1368,21 +1415,11 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
         # # Agent has tools. We must iterate until generate the final answer.
 
-        # all_tools: MutableSequence[Tool[Any]] = [
-        #     Tool.from_mcp_tool(mcp_tool=tool, server=server)
-        #     for server, tool in mcp_tools
-        # ] + [
-        #     Tool.from_callable(tool)
-        #     if callable(tool) and not isinstance(tool, Tool)
-        #     else tool
-        #     for tool in self.tools
-        # ]
-
-        # _logger.bind_optional(
-        #     lambda log: log.debug("Using %d tools in total", len(all_tools))
-        # )
-
         all_tools: Sequence[Tool] = cast(Sequence[Tool], await self._all_tools())
+
+        _logger.bind_optional(
+            lambda log: log.debug("Using %d tools in total", len(all_tools))
+        )
 
         available_tools: MutableMapping[str, Tool[Any]] = {
             tool.name: tool for tool in all_tools
@@ -2115,6 +2152,1084 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         context.metadata["execution_summary_on_failure"] = execution_summary
 
         raise MaxToolCallsExceededError(enhanced_error_message)
+
+    async def _run_async_streaming(
+        self,
+        input: AgentInput | Any,
+        *,
+        trace_params: TraceParams | None = None,
+        chat_id: str | None = None,
+    ) -> AsyncIterator[AgentRunOutput[T_Schema]]:
+        """
+        Streaming implementation of agent execution.
+
+        Yields AgentRunOutput chunks as the agent processes the input,
+        allowing for real-time interaction.
+        """
+        import time
+
+        # Start overall timing
+        execution_start_time = time.perf_counter()
+
+        # Initialize metrics tracking
+        step_metrics: list[StepMetric] = []
+        generation_time_total = 0.0
+        tool_execution_time_total = 0.0
+        iteration_count = 0
+        tool_calls_count = 0
+        total_tokens_processed = 0
+        cache_hits = 0
+        cache_misses = 0
+
+        _logger = Maybe(logger if self.debug else None)
+
+        if chat_id is not None and self.conversation_store is None:
+            raise ValueError(
+                "Chat ID was provided but no conversation store was "
+                + "provided in the Agent's constructor."
+            )
+
+        # Phase 1: Input Processing (same as non-streaming)
+        input_processing_start = time.perf_counter()
+        _logger.bind_optional(
+            lambda log: log.info(
+                "Starting streaming agent run with input type: %s",
+                str(type(input)),
+            )
+        )
+
+        generation_provider: GenerationProvider = self.generation_provider
+        static_knowledge_prompt: str | None = None
+        input_processing_time = (time.perf_counter() - input_processing_start) * 1000
+
+        # Phase 2: Static Knowledge Processing (same as non-streaming)
+        static_knowledge_start = time.perf_counter()
+
+        # Process static knowledge if any exists
+        if self.static_knowledge:
+            _logger.bind_optional(lambda log: log.debug("Processing static knowledge"))
+            knowledge_contents: MutableSequence[str] = []
+
+            # Get or create cache store
+            document_cache_store = (
+                self.document_cache_store or InMemoryDocumentCacheStore()
+            )
+
+            for knowledge_item in self.static_knowledge:
+                # Convert string to StaticKnowledge with NO_CACHE
+                if isinstance(knowledge_item, str):
+                    knowledge_item = StaticKnowledge(
+                        content=knowledge_item, cache=NO_CACHE, parse_timeout=30
+                    )
+
+                # Process the knowledge item based on its content type
+                content_to_parse = knowledge_item.content
+                parsed_content = None
+                parser = self.document_parser or file_parser_default_factory(
+                    visual_description_provider=generation_provider
+                    if self.file_visual_description_provider is None
+                    else self.file_visual_description_provider,
+                    audio_description_provider=generation_provider
+                    if self.file_audio_description_provider is None
+                    else self.file_audio_description_provider,
+                    parse_timeout=knowledge_item.parse_timeout,
+                )
+
+                # Check if caching is enabled
+                if knowledge_item.cache is not NO_CACHE:
+                    _logger.bind_optional(
+                        lambda log: log.debug("Using cache store for knowledge item")
+                    )
+
+                    # Generate cache key
+                    cache_key = document_cache_store.get_cache_key(
+                        content_to_parse, parser.__class__.__name__
+                    )
+
+                    # Try to get from cache first
+                    parsed_content = await document_cache_store.get_async(cache_key)
+
+                    if parsed_content is None:
+                        # Not in cache, parse and store
+                        cache_misses += 1
+                        _logger.bind_optional(
+                            lambda log: log.debug("Cache miss, parsing and storing")
+                        )
+                        if knowledge_item.is_url():
+                            parsed_content = await parser.parse_async(content_to_parse)
+                        elif knowledge_item.is_file_path():
+                            parsed_content = await parser.parse_async(content_to_parse)
+                        else:  # Raw text - don't cache raw text
+                            parsed_content = None
+
+                        # Store in cache if we parsed something
+                        if parsed_content is not None:
+                            await document_cache_store.set_async(
+                                cache_key, parsed_content, ttl=knowledge_item.cache
+                            )
+                    else:
+                        cache_hits += 1
+                        _logger.bind_optional(
+                            lambda log: log.debug("Cache hit for knowledge item")
+                        )
+
+                # If no cached content (either cache not enabled or cache miss), parse directly
+                if parsed_content is None:
+                    if knowledge_item.is_url():
+                        _logger.bind_optional(
+                            lambda log: log.debug("Parsing URL: %s", content_to_parse)
+                        )
+                        parsed_content = await parser.parse_async(content_to_parse)
+                        knowledge_contents.append(
+                            f"## URL: {content_to_parse}\n\n{parsed_content.sections[0].text}"
+                        )
+                    elif knowledge_item.is_file_path():
+                        _logger.bind_optional(
+                            lambda log: log.debug("Parsing file: %s", content_to_parse)
+                        )
+                        parsed_content = await parser.parse_async(content_to_parse)
+                        knowledge_contents.append(
+                            f"## Document: {parsed_content.name}\n\n{parsed_content.sections[0].text}"
+                        )
+                    else:  # Raw text
+                        _logger.bind_optional(
+                            lambda log: log.debug("Using raw text knowledge")
+                        )
+                        knowledge_contents.append(
+                            f"## Information:\n\n{content_to_parse}"
+                        )
+                else:
+                    # Use the cached content
+                    source_label = (
+                        "URL"
+                        if knowledge_item.is_url()
+                        else "Document"
+                        if knowledge_item.is_file_path()
+                        else "Information"
+                    )
+                    knowledge_contents.append(
+                        f"## {source_label}: {content_to_parse}\n\n{parsed_content.sections[0].text}"
+                    )
+
+            if knowledge_contents:
+                static_knowledge_prompt = "\n\n# KNOWLEDGE BASE\n\n" + "\n\n".join(
+                    knowledge_contents
+                )
+
+        static_knowledge_time = (time.perf_counter() - static_knowledge_start) * 1000
+
+        instructions = self.instructions2str(self.instructions)
+        if static_knowledge_prompt:
+            instructions += "\n\n" + static_knowledge_prompt
+
+        # Create context with current input
+        context: Context = self.input2context(input, instructions=instructions)
+        current_user_message = context.last_message
+
+        # Handle conversation store integration (same as non-streaming)
+        if chat_id:
+            assert self.conversation_store is not None
+
+            # Get existing conversation history
+            conversation_history = (
+                await self.conversation_store.get_conversation_history_async(chat_id)
+            )
+
+            # Replace message history with conversation history, keeping developer messages
+            if conversation_history:
+                context.replace_message_history(
+                    conversation_history, keep_developer_messages=True
+                )
+                # Add the current user message to the context
+                context.message_history.append(current_user_message)
+
+        # Start execution tracking
+        context.start_execution()
+
+        # Phase 3: MCP Tools Preparation (same as non-streaming)
+        mcp_tools_start = time.perf_counter()
+
+        mcp_tools: MutableSequence[tuple[MCPServerProtocol, MCPTool]] = []
+        if bool(self.mcp_servers):
+            _logger.bind_optional(
+                lambda log: log.debug("Getting tools from MCP servers")
+            )
+            for server in self.mcp_servers:
+                tools = await server.list_tools_async()
+                mcp_tools.extend((server, tool) for tool in tools)
+            _logger.bind_optional(
+                lambda log: log.debug("Got %d tools from MCP servers", len(mcp_tools))
+            )
+
+        mcp_tools_time = (time.perf_counter() - mcp_tools_start) * 1000
+
+        agent_has_tools = self.has_tools() or len(mcp_tools) > 0
+
+        # Check if provider supports streaming
+        supports_streaming = isinstance(generation_provider, SupportsStreaming)
+
+        if not agent_has_tools:
+            # No tools available, generate direct response with streaming if supported
+            _logger.bind_optional(
+                lambda log: log.debug(
+                    "No tools available, generating direct response with streaming=%s",
+                    supports_streaming,
+                )
+            )
+
+            step_start_time = time.perf_counter()
+            step = Step(
+                step_type="generation",
+                iteration=1,
+                tool_execution_suggestions=[],
+                generation_text="Generating response...",
+                token_usage=None,
+            )
+
+            generation_start = time.perf_counter()
+
+            if supports_streaming:
+                # Stream the generation
+                accumulated_text = ""
+                final_generation: Generation[T_Schema] | None = None
+
+                async for generation_chunk in generation_provider.stream_async(
+                    model=self.resolved_model,
+                    messages=context.message_history,
+                    response_schema=self.response_schema,
+                    generation_config=self.agent_config.generation_config
+                    if trace_params is None
+                    else self.agent_config.generation_config.clone(
+                        new_trace_params=trace_params
+                    ),
+                ):
+                    accumulated_text += generation_chunk.text
+                    final_generation = generation_chunk
+
+                    # Update step and context with chunk
+                    step.generation_text = accumulated_text
+                    step.token_usage = generation_chunk.usage
+
+                    # Yield intermediate result
+                    yield AgentRunOutput(
+                        generation=generation_chunk,
+                        context=context.clone(new_context_id=False),
+                        parsed=generation_chunk.parsed,
+                        is_streaming_chunk=True,
+                        is_final_chunk=False,
+                        performance_metrics=PerformanceMetrics(
+                            total_execution_time_ms=(
+                                time.perf_counter() - execution_start_time
+                            )
+                            * 1000,
+                            input_processing_time_ms=input_processing_time,
+                            static_knowledge_processing_time_ms=static_knowledge_time,
+                            mcp_tools_preparation_time_ms=mcp_tools_time,
+                            generation_time_ms=generation_time_total,
+                            tool_execution_time_ms=tool_execution_time_total,
+                            final_response_processing_time_ms=0.0,
+                            iteration_count=1,
+                            tool_calls_count=0,
+                            total_tokens_processed=generation_chunk.usage.total_tokens,
+                            cache_hit_rate=(
+                                cache_hits / (cache_hits + cache_misses) * 100
+                            )
+                            if (cache_hits + cache_misses) > 0
+                            else 0.0,
+                            step_metrics=step_metrics,
+                            average_generation_time_ms=generation_time_total,
+                            average_tool_execution_time_ms=0.0,
+                            longest_step_duration_ms=0.0,
+                            shortest_step_duration_ms=0.0,
+                        ),
+                    )
+
+                if final_generation is None:
+                    raise ValueError("No generation received from streaming provider")
+
+                generation = final_generation
+            else:
+                # Fallback to non-streaming
+                generation = await generation_provider.generate_async(
+                    model=self.resolved_model,
+                    messages=context.message_history,
+                    response_schema=self.response_schema,
+                    generation_config=self.agent_config.generation_config
+                    if trace_params is None
+                    else self.agent_config.generation_config.clone(
+                        new_trace_params=trace_params
+                    ),
+                )
+
+            # Complete the step and yield final result
+            context.message_history.append(generation.message.to_assistant_message())
+            generation_time_single = (time.perf_counter() - generation_start) * 1000
+            generation_time_total += generation_time_single
+
+            step.generation_text = generation.text
+            step.token_usage = generation.usage
+            step_duration = (time.perf_counter() - step_start_time) * 1000
+            step.mark_completed(duration_ms=step_duration)
+
+            step_metrics.append(
+                StepMetric(
+                    step_id=step.step_id,
+                    step_type="generation",
+                    duration_ms=step_duration,
+                    iteration=1,
+                    tool_calls_count=0,
+                    generation_tokens=generation.usage.total_tokens,
+                    cache_hits=0,
+                    cache_misses=0,
+                )
+            )
+
+            context.add_step(step)
+            context.update_token_usage(generation.usage)
+            context.complete_execution()
+
+            total_tokens_processed = generation.usage.total_tokens
+            total_execution_time = (time.perf_counter() - execution_start_time) * 1000
+
+            performance_metrics = PerformanceMetrics(
+                total_execution_time_ms=total_execution_time,
+                input_processing_time_ms=input_processing_time,
+                static_knowledge_processing_time_ms=static_knowledge_time,
+                mcp_tools_preparation_time_ms=mcp_tools_time,
+                generation_time_ms=generation_time_total,
+                tool_execution_time_ms=0.0,
+                final_response_processing_time_ms=0.0,
+                iteration_count=1,
+                tool_calls_count=0,
+                total_tokens_processed=total_tokens_processed,
+                cache_hit_rate=(cache_hits / (cache_hits + cache_misses) * 100)
+                if (cache_hits + cache_misses) > 0
+                else 0.0,
+                step_metrics=step_metrics,
+                average_generation_time_ms=generation_time_total,
+                average_tool_execution_time_ms=0.0,
+                longest_step_duration_ms=step_duration,
+                shortest_step_duration_ms=step_duration,
+            )
+
+            # Save to conversation store
+            if chat_id:
+                assert self.conversation_store is not None
+                await self.conversation_store.add_message_async(
+                    chat_id, current_user_message
+                )
+                await self.conversation_store.add_message_async(
+                    chat_id, generation.message.to_assistant_message()
+                )
+
+            # Yield final result
+            yield AgentRunOutput(
+                generation=generation,
+                context=context,
+                parsed=generation.parsed,
+                is_streaming_chunk=False,
+                is_final_chunk=True,
+                performance_metrics=performance_metrics,
+            )
+            return
+
+        # Agent has tools - implement streaming tool execution loop
+        all_tools: Sequence[Tool] = cast(Sequence[Tool], await self._all_tools())
+        available_tools: MutableMapping[str, Tool[Any]] = {
+            tool.name: tool for tool in all_tools
+        }
+
+        state = RunState[T_Schema].init_state()
+        all_tool_suggestions: MutableSequence[ToolExecutionSuggestion] = []
+        all_tool_results: dict[str, tuple[ToolExecutionSuggestion, Any]] = {}
+        tool_call_patterns: dict[str, int] = {}
+        tool_budget: dict[str, int] = {}
+
+        while state.iteration < self.agent_config.maxIterations:
+            current_iteration = state.iteration + 1
+            iteration_count = current_iteration
+
+            _logger.bind_optional(
+                lambda log: log.info(
+                    "Starting streaming iteration %d of %d",
+                    current_iteration,
+                    self.agent_config.maxIterations,
+                )
+            )
+
+            # Build message history for this iteration
+            message_history = list(context.message_history)
+
+            # If we have tool results from ANY previous iterations, we need to add them
+            if all_tool_results:
+                _logger.bind_optional(
+                    lambda log: log.debug(
+                        "Processing %d total tool results across all iterations",
+                        len(all_tool_results),
+                    )
+                )
+
+                # Find the last assistant message with tool suggestions
+                last_assistant_index = -1
+                for i in range(len(message_history) - 1, -1, -1):
+                    if isinstance(message_history[i], AssistantMessage):
+                        last_assistant_index = i
+                        break
+
+                if last_assistant_index >= 0:
+                    # Clone the assistant message and ensure it has ALL tool suggestions
+                    original_assistant = message_history[last_assistant_index]
+                    cloned_assistant = AssistantMessage(
+                        parts=list(original_assistant.parts)
+                    )
+
+                    # Add any missing tool suggestions to the assistant message
+                    existing_suggestion_ids = {
+                        part.id
+                        for part in cloned_assistant.parts
+                        if isinstance(part, ToolExecutionSuggestion)
+                    }
+
+                    for suggestion in all_tool_suggestions:
+                        if suggestion.id not in existing_suggestion_ids:
+                            cloned_assistant.parts.append(suggestion)
+
+                    message_history[last_assistant_index] = cloned_assistant
+
+                    # Now find or create the user message after the assistant message
+                    next_user_index = -1
+                    for i in range(last_assistant_index + 1, len(message_history)):
+                        if isinstance(message_history[i], UserMessage):
+                            next_user_index = i
+                            break
+
+                    if next_user_index == -1:
+                        # Create a new user message
+                        new_user_message = UserMessage(parts=[])
+                        message_history.append(new_user_message)
+                        next_user_index = len(message_history) - 1
+
+                    # Clone the user message and add ALL tool results
+                    original_user = message_history[next_user_index]
+                    cloned_user = UserMessage(parts=list(original_user.parts))
+
+                    # Remove any existing tool results to avoid duplicates
+                    cloned_user.parts = [
+                        part
+                        for part in cloned_user.parts
+                        if not isinstance(part, ToolExecutionResult)
+                    ]
+
+                    # Add ALL tool results that correspond to suggestions in the assistant message
+                    for suggestion in cloned_assistant.parts:
+                        if isinstance(suggestion, ToolExecutionSuggestion):
+                            if suggestion.id in all_tool_results:
+                                _, result = all_tool_results[suggestion.id]
+                                tool_execution_result = ToolExecutionResult(
+                                    suggestion=suggestion,
+                                    result=result,
+                                    execution_time_ms=None,
+                                    success=True,
+                                    error_message=None,
+                                )
+                                cloned_user.parts.insert(0, tool_execution_result)
+
+                    message_history[next_user_index] = cloned_user
+
+            # Generate tool call response
+            _logger.bind_optional(
+                lambda log: log.debug(
+                    "Generating tool call response with streaming=%s",
+                    supports_streaming,
+                )
+            )
+
+            generation_start = time.perf_counter()
+
+            if supports_streaming:
+                # Stream the tool call generation
+                accumulated_text = ""
+                final_tool_generation: Generation[T_Schema] | None = None
+
+                async for gen_chunk in generation_provider.stream_async(
+                    model=self.resolved_model,
+                    messages=message_history,
+                    generation_config=self.agent_config.generation_config,
+                    tools=all_tools,
+                ):
+                    accumulated_text += gen_chunk.text
+                    final_tool_generation = gen_chunk
+
+                    # Yield intermediate tool generation result
+                    yield AgentRunOutput(
+                        generation=gen_chunk,
+                        context=context.clone(new_context_id=False),
+                        parsed=gen_chunk.parsed,
+                        is_streaming_chunk=True,
+                        is_final_chunk=False,
+                        performance_metrics=PerformanceMetrics(
+                            total_execution_time_ms=(
+                                time.perf_counter() - execution_start_time
+                            )
+                            * 1000,
+                            input_processing_time_ms=input_processing_time,
+                            static_knowledge_processing_time_ms=static_knowledge_time,
+                            mcp_tools_preparation_time_ms=mcp_tools_time,
+                            generation_time_ms=generation_time_total,
+                            tool_execution_time_ms=tool_execution_time_total,
+                            final_response_processing_time_ms=0.0,
+                            iteration_count=iteration_count,
+                            tool_calls_count=tool_calls_count,
+                            total_tokens_processed=total_tokens_processed
+                            + gen_chunk.usage.total_tokens,
+                            cache_hit_rate=(
+                                cache_hits / (cache_hits + cache_misses) * 100
+                            )
+                            if (cache_hits + cache_misses) > 0
+                            else 0.0,
+                            step_metrics=step_metrics,
+                            average_generation_time_ms=generation_time_total
+                            / max(1, iteration_count),
+                            average_tool_execution_time_ms=tool_execution_time_total
+                            / max(1, tool_calls_count),
+                            longest_step_duration_ms=max(
+                                [s.duration_ms for s in step_metrics], default=0.0
+                            ),
+                            shortest_step_duration_ms=min(
+                                [s.duration_ms for s in step_metrics], default=0.0
+                            ),
+                        ),
+                    )
+
+                if final_tool_generation is None:
+                    raise ValueError("No generation received from streaming provider")
+
+                tool_call_generation = final_tool_generation
+            else:
+                # Fallback to non-streaming for tool calls
+                tool_call_generation = await generation_provider.generate_async(
+                    model=self.resolved_model,
+                    messages=message_history,
+                    generation_config=self.agent_config.generation_config,
+                    tools=all_tools,
+                )
+
+            # Add this generation to context
+            context.message_history.append(
+                tool_call_generation.message.to_assistant_message()
+            )
+
+            generation_time_single = (time.perf_counter() - generation_start) * 1000
+            generation_time_total += generation_time_single
+            context.update_token_usage(tool_call_generation.usage)
+            total_tokens_processed += tool_call_generation.usage.total_tokens
+
+            # Check if agent called any tools
+            if tool_call_generation.tool_calls_amount() == 0:
+                # No more tools, generate final response
+                _logger.bind_optional(
+                    lambda log: log.info(
+                        "No more tool calls, generating final response with streaming=%s",
+                        supports_streaming,
+                    )
+                )
+
+                final_step_start_time = time.perf_counter()
+                final_step = Step(
+                    step_type="generation",
+                    iteration=current_iteration,
+                    tool_execution_suggestions=[],
+                    generation_text=tool_call_generation.text
+                    or "Generating final response...",
+                    token_usage=tool_call_generation.usage,
+                )
+
+                # Generate final response
+                if self.response_schema is not None or not tool_call_generation.text:
+                    _logger.bind_optional(
+                        lambda log: log.debug("Generating structured final response")
+                    )
+
+                    generation_start = time.perf_counter()
+
+                    if supports_streaming:
+                        # Stream final generation
+                        accumulated_text = ""
+                        final_generation = None
+
+                        async for gen_chunk in generation_provider.stream_async(
+                            model=self.resolved_model,
+                            messages=context.message_history,
+                            response_schema=self.response_schema,
+                            generation_config=self.agent_config.generation_config,
+                        ):
+                            accumulated_text += gen_chunk.text
+                            final_generation = gen_chunk
+
+                            # Append tool calls to generation
+                            if all_tool_suggestions:
+                                gen_chunk.append_tool_calls(all_tool_suggestions)
+
+                            # Yield intermediate final generation
+                            yield AgentRunOutput(
+                                generation=gen_chunk,
+                                context=context.clone(new_context_id=False),
+                                parsed=gen_chunk.parsed,
+                                is_streaming_chunk=True,
+                                is_final_chunk=False,
+                                performance_metrics=PerformanceMetrics(
+                                    total_execution_time_ms=(
+                                        time.perf_counter() - execution_start_time
+                                    )
+                                    * 1000,
+                                    input_processing_time_ms=input_processing_time,
+                                    static_knowledge_processing_time_ms=static_knowledge_time,
+                                    mcp_tools_preparation_time_ms=mcp_tools_time,
+                                    generation_time_ms=generation_time_total,
+                                    tool_execution_time_ms=tool_execution_time_total,
+                                    final_response_processing_time_ms=0.0,
+                                    iteration_count=iteration_count,
+                                    tool_calls_count=tool_calls_count,
+                                    total_tokens_processed=total_tokens_processed
+                                    + gen_chunk.usage.total_tokens,
+                                    cache_hit_rate=(
+                                        cache_hits / (cache_hits + cache_misses) * 100
+                                    )
+                                    if (cache_hits + cache_misses) > 0
+                                    else 0.0,
+                                    step_metrics=step_metrics,
+                                    average_generation_time_ms=generation_time_total
+                                    / max(1, iteration_count),
+                                    average_tool_execution_time_ms=tool_execution_time_total
+                                    / max(1, tool_calls_count),
+                                    longest_step_duration_ms=max(
+                                        [s.duration_ms for s in step_metrics],
+                                        default=0.0,
+                                    ),
+                                    shortest_step_duration_ms=min(
+                                        [s.duration_ms for s in step_metrics],
+                                        default=0.0,
+                                    ),
+                                ),
+                            )
+
+                        if final_generation is None:
+                            raise ValueError("No final generation received")
+
+                        generation = final_generation
+                    else:
+                        # Non-streaming final generation
+                        generation = await generation_provider.generate_async(
+                            model=self.resolved_model,
+                            messages=context.message_history,
+                            response_schema=self.response_schema,
+                            generation_config=self.agent_config.generation_config,
+                        )
+
+                    # Append tool calls to final generation
+                    if all_tool_suggestions:
+                        generation.append_tool_calls(all_tool_suggestions)
+
+                    context.message_history.append(
+                        generation.message.to_assistant_message()
+                    )
+                    final_step.generation_text = generation.text
+                    final_step.token_usage = generation.usage
+                    context.update_token_usage(generation.usage)
+                    total_tokens_processed += generation.usage.total_tokens
+                else:
+                    # Use existing text response
+                    generation = cast(Generation[T_Schema], tool_call_generation)
+                    if all_tool_suggestions:
+                        generation.append_tool_calls(all_tool_suggestions)
+
+                # Complete execution
+                final_step_duration = (
+                    time.perf_counter() - final_step_start_time
+                ) * 1000
+                final_step.mark_completed(duration_ms=final_step_duration)
+                context.add_step(final_step)
+                context.complete_execution()
+
+                # Create final performance metrics
+                total_execution_time = (
+                    time.perf_counter() - execution_start_time
+                ) * 1000
+                performance_metrics = PerformanceMetrics(
+                    total_execution_time_ms=total_execution_time,
+                    input_processing_time_ms=input_processing_time,
+                    static_knowledge_processing_time_ms=static_knowledge_time,
+                    mcp_tools_preparation_time_ms=mcp_tools_time,
+                    generation_time_ms=generation_time_total,
+                    tool_execution_time_ms=tool_execution_time_total,
+                    final_response_processing_time_ms=10.0,
+                    iteration_count=iteration_count,
+                    tool_calls_count=tool_calls_count,
+                    total_tokens_processed=total_tokens_processed,
+                    cache_hit_rate=(cache_hits / (cache_hits + cache_misses) * 100)
+                    if (cache_hits + cache_misses) > 0
+                    else 0.0,
+                    step_metrics=step_metrics,
+                    average_generation_time_ms=generation_time_total
+                    / max(1, iteration_count),
+                    average_tool_execution_time_ms=tool_execution_time_total
+                    / max(1, tool_calls_count),
+                    longest_step_duration_ms=max(
+                        [s.duration_ms for s in step_metrics], default=0.0
+                    ),
+                    shortest_step_duration_ms=min(
+                        [s.duration_ms for s in step_metrics], default=0.0
+                    ),
+                )
+
+                # Save to conversation store
+                if chat_id:
+                    assert self.conversation_store is not None
+                    await self.conversation_store.add_message_async(
+                        chat_id, current_user_message
+                    )
+                    await self.conversation_store.add_message_async(
+                        chat_id, generation.message.to_assistant_message()
+                    )
+
+                # Yield final result
+                yield AgentRunOutput(
+                    generation=generation,
+                    context=context,
+                    parsed=generation.parsed,
+                    is_streaming_chunk=False,
+                    is_final_chunk=True,
+                    performance_metrics=performance_metrics,
+                )
+                return
+
+            # Execute tools and yield results
+            # Add these tool suggestions to our tracking
+            for suggestion in tool_call_generation.tool_calls:
+                all_tool_suggestions.append(suggestion)
+
+            # Create a step to track this iteration's tool executions
+            step_start_time = time.perf_counter()
+            step = Step(
+                step_type="tool_execution",
+                iteration=current_iteration,
+                tool_execution_suggestions=list(tool_call_generation.tool_calls),
+                generation_text=tool_call_generation.text,
+                token_usage=tool_call_generation.usage,
+            )
+
+            # Track skipped tools for logging
+            skipped_tools: MutableSequence[str] = []
+            step_tool_execution_time = 0.0
+            step_tool_calls = 0
+
+            for tool_execution_suggestion in tool_call_generation.tool_calls:
+                pattern_key = self._get_tool_call_pattern_key(
+                    tool_execution_suggestion.tool_name,
+                    dict(tool_execution_suggestion.args),
+                )
+
+                # Check if this exact pattern was already called
+                pattern_count = tool_call_patterns.get(pattern_key, 0)
+
+                _logger.bind_optional(
+                    lambda log: log.debug(
+                        f"Tool pattern '{pattern_key}' has been called {pattern_count} times. "
+                        + f"Max allowed: {self.agent_config.maxIdenticalToolCalls}"
+                    )
+                )
+
+                if pattern_count >= self.agent_config.maxIdenticalToolCalls:
+                    _logger.bind_optional(
+                        lambda log: log.warning(
+                            "Blocking redundant tool call: %s with args: %s (already called %d times)",
+                            tool_execution_suggestion.tool_name,
+                            tool_execution_suggestion.args,
+                            pattern_count,
+                        )
+                    )
+
+                    # Find the previous result from all_tool_results
+                    previous_result = None
+                    for prev_suggestion, prev_result in all_tool_results.values():
+                        if (
+                            prev_suggestion.tool_name
+                            == tool_execution_suggestion.tool_name
+                            and prev_suggestion.args == tool_execution_suggestion.args
+                        ):
+                            previous_result = prev_result
+                            break
+
+                    if previous_result is not None:
+                        # Reuse the previous result
+                        all_tool_results[tool_execution_suggestion.id] = (
+                            tool_execution_suggestion,
+                            previous_result,
+                        )
+
+                        step.add_tool_execution_result(
+                            suggestion=tool_execution_suggestion,
+                            result=f"[DUPLICATE BLOCKED - Using previous result] {previous_result}",
+                            execution_time_ms=0,
+                            success=True,
+                        )
+                    else:
+                        # This shouldn't happen, but handle it gracefully
+                        error_msg = (
+                            "Duplicate tool call blocked but no previous result found"
+                        )
+                        step.add_tool_execution_result(
+                            suggestion=tool_execution_suggestion,
+                            result=error_msg,
+                            execution_time_ms=0,
+                            success=False,
+                            error_message=error_msg,
+                        )
+
+                    skipped_tools.append(
+                        f"{tool_execution_suggestion.tool_name} (duplicate)"
+                    )
+                    continue
+
+                # Check budget
+                tool_name = tool_execution_suggestion.tool_name
+                current_tool_calls = tool_budget.get(tool_name, 0)
+                if current_tool_calls >= self.agent_config.maxCallPerTool:
+                    _logger.bind_optional(
+                        lambda log: log.warning(
+                            "Tool budget exceeded for: %s (already called %d times)",
+                            tool_name,
+                            current_tool_calls,
+                        )
+                    )
+
+                    error_msg = f"Tool '{tool_name}' budget exceeded ({self.agent_config.maxCallPerTool} calls max)"
+                    step.add_tool_execution_result(
+                        suggestion=tool_execution_suggestion,
+                        result=error_msg,
+                        execution_time_ms=0,
+                        success=False,
+                        error_message=error_msg,
+                    )
+
+                    skipped_tools.append(f"{tool_name} (budget exceeded)")
+                    continue
+
+                _logger.bind_optional(
+                    lambda log: log.debug(
+                        "Executing tool: %s with args: %s",
+                        tool_execution_suggestion.tool_name,
+                        tool_execution_suggestion.args,
+                    )
+                )
+
+                selected_tool = available_tools[tool_execution_suggestion.tool_name]
+
+                # Time the tool execution
+                tool_start_time = time.perf_counter()
+                try:
+                    tool_result = await selected_tool.call_async(
+                        context=context, **tool_execution_suggestion.args
+                    )
+                    tool_execution_time = (
+                        time.perf_counter() - tool_start_time
+                    ) * 1000  # Convert to milliseconds
+
+                    step_tool_execution_time += tool_execution_time
+                    step_tool_calls += 1
+                    tool_calls_count += 1
+                    tool_execution_time_total += tool_execution_time
+
+                    _logger.bind_optional(
+                        lambda log: log.debug("Tool execution result: %s", tool_result)
+                    )
+
+                    # Update tracking structures
+                    all_tool_results[tool_execution_suggestion.id] = (
+                        tool_execution_suggestion,
+                        tool_result,
+                    )
+
+                    # Update pattern tracking
+                    tool_call_patterns[pattern_key] = pattern_count + 1
+
+                    # Update budget
+                    tool_budget[tool_name] = current_tool_calls + 1
+
+                    # Add the tool execution result to the step
+                    step.add_tool_execution_result(
+                        suggestion=tool_execution_suggestion,
+                        result=tool_result,
+                        execution_time_ms=tool_execution_time,
+                        success=True,
+                    )
+
+                    # Yield tool execution result
+                    yield AgentRunOutput(
+                        generation=None,
+                        context=context.clone(new_context_id=False),
+                        parsed=cast(T_Schema, None),
+                        is_streaming_chunk=True,
+                        is_final_chunk=False,
+                        performance_metrics=PerformanceMetrics(
+                            total_execution_time_ms=(
+                                time.perf_counter() - execution_start_time
+                            )
+                            * 1000,
+                            input_processing_time_ms=input_processing_time,
+                            static_knowledge_processing_time_ms=static_knowledge_time,
+                            mcp_tools_preparation_time_ms=mcp_tools_time,
+                            generation_time_ms=generation_time_total,
+                            tool_execution_time_ms=tool_execution_time_total,
+                            final_response_processing_time_ms=0.0,
+                            iteration_count=iteration_count,
+                            tool_calls_count=tool_calls_count,
+                            total_tokens_processed=total_tokens_processed,
+                            cache_hit_rate=(
+                                cache_hits / (cache_hits + cache_misses) * 100
+                            )
+                            if (cache_hits + cache_misses) > 0
+                            else 0.0,
+                            step_metrics=step_metrics,
+                            average_generation_time_ms=generation_time_total
+                            / max(1, iteration_count),
+                            average_tool_execution_time_ms=tool_execution_time_total
+                            / max(1, tool_calls_count),
+                            longest_step_duration_ms=max(
+                                [s.duration_ms for s in step_metrics], default=0.0
+                            ),
+                            shortest_step_duration_ms=min(
+                                [s.duration_ms for s in step_metrics], default=0.0
+                            ),
+                        ),
+                    )
+
+                except ToolSuspensionError as suspension_error:
+                    # Handle tool suspension for HITL workflows
+                    suspension_reason = suspension_error.reason
+                    _logger.bind_optional(
+                        lambda log: log.info(
+                            "Tool execution suspended: %s", suspension_reason
+                        )
+                    )
+
+                    # Get the suspension manager (injected or default)
+                    suspension_mgr = (
+                        self.suspension_manager or get_default_suspension_manager()
+                    )
+
+                    # Save suspension state with tracking info
+                    await self._save_suspension_state(
+                        context=context,
+                        suspension_type="tool_execution",
+                        tool_suggestion=tool_execution_suggestion,
+                        current_iteration=current_iteration,
+                        all_tools=all_tools,
+                        called_tools=all_tool_results,
+                        current_step=step.model_dump()
+                        if hasattr(step, "model_dump")
+                        else None,
+                    )
+
+                    # Suspend the execution
+                    resumption_token = await suspension_mgr.suspend_execution(
+                        context=context,
+                        reason=suspension_error.reason,
+                        approval_data=suspension_error.approval_data,
+                        timeout_hours=suspension_error.timeout_seconds // 3600
+                        if suspension_error.timeout_seconds
+                        else 24,
+                    )
+
+                    # Calculate partial metrics before suspension
+                    total_execution_time = (
+                        time.perf_counter() - execution_start_time
+                    ) * 1000
+
+                    # Create performance metrics for suspended execution
+                    performance_metrics = PerformanceMetrics(
+                        total_execution_time_ms=total_execution_time,
+                        input_processing_time_ms=input_processing_time,
+                        static_knowledge_processing_time_ms=static_knowledge_time,
+                        mcp_tools_preparation_time_ms=mcp_tools_time,
+                        generation_time_ms=generation_time_total,
+                        tool_execution_time_ms=tool_execution_time_total,
+                        final_response_processing_time_ms=0.0,  # Not completed yet
+                        iteration_count=iteration_count,
+                        tool_calls_count=tool_calls_count,
+                        total_tokens_processed=total_tokens_processed,
+                        cache_hit_rate=(cache_hits / (cache_hits + cache_misses) * 100)
+                        if (cache_hits + cache_misses) > 0
+                        else 0.0,
+                        step_metrics=step_metrics,
+                        average_generation_time_ms=generation_time_total
+                        / max(1, iteration_count),
+                        average_tool_execution_time_ms=tool_execution_time_total
+                        / max(1, tool_calls_count),
+                        longest_step_duration_ms=max(
+                            [s.duration_ms for s in step_metrics], default=0.0
+                        ),
+                        shortest_step_duration_ms=min(
+                            [s.duration_ms for s in step_metrics], default=0.0
+                        ),
+                    )
+
+                    # Return suspended result immediately
+                    yield AgentRunOutput(
+                        generation=None,
+                        context=context,
+                        parsed=cast(T_Schema, None),
+                        is_suspended=True,
+                        suspension_reason=suspension_error.reason,
+                        resumption_token=resumption_token,
+                        performance_metrics=performance_metrics,
+                        is_streaming_chunk=False,
+                        is_final_chunk=True,
+                    )
+                    return
+
+            # Log skipped tools if any
+            if skipped_tools:
+                _logger.bind_optional(
+                    lambda log: log.info(
+                        "Skipped %d redundant tool calls: %s",
+                        len(skipped_tools),
+                        ", ".join(skipped_tools),
+                    )
+                )
+
+            # Complete the step and add it to context
+            step_duration = (
+                time.perf_counter() - step_start_time
+            ) * 1000  # Convert to milliseconds
+            step.mark_completed(duration_ms=step_duration)
+            context.add_step(step)
+
+            # Track step metrics
+            step_metrics.append(
+                StepMetric(
+                    step_id=step.step_id,
+                    step_type="tool_execution",
+                    duration_ms=step_duration,
+                    iteration=current_iteration,
+                    tool_calls_count=step_tool_calls,
+                    generation_tokens=tool_call_generation.usage.total_tokens,
+                    cache_hits=0,
+                    cache_misses=0,
+                )
+            )
+
+            state.update(
+                last_response=tool_call_generation.text,
+                tool_calls_amount=tool_call_generation.tool_calls_amount(),
+                iteration=state.iteration + 1,
+                token_usage=tool_call_generation.usage,
+            )
+
+        # Max iterations reached
+        error_message = f"Max tool calls exceeded after {self.agent_config.maxIterations} iterations"
+        context.fail_execution(error_message)
+        raise MaxToolCallsExceededError(error_message)
 
     def to_api(self, *extra_routes: type[Controller]) -> Application:
         from agentle.agents.asgi.blacksheep.agent_to_blacksheep_application_adapter import (
