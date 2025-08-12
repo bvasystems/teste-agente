@@ -4,7 +4,7 @@ Module defining the AssistantMessage class representing messages from assistants
 
 from __future__ import annotations
 
-from collections.abc import MutableSequence, Sequence
+from collections.abc import Sequence
 from typing import Any, Literal, cast
 
 from rsb.models.base_model import BaseModel
@@ -32,13 +32,13 @@ class AssistantMessage(BaseModel):
         description="Discriminator field to identify this as an assistant message. Always set to 'assistant'.",
     )
 
-    parts: MutableSequence[
+    parts: Sequence[
         TextPart | FilePart | ToolExecutionSuggestion | ToolExecutionResult | Tool[Any]
     ] = Field(
         description="The sequence of message parts that make up this assistant message.",
     )
 
-    def insert_at_end(
+    def append_part(
         self,
         parts: TextPart
         | FilePart
@@ -53,10 +53,12 @@ class AssistantMessage(BaseModel):
             | ToolExecutionResult
         ],
     ) -> None:
+        _self_parts = list(self.parts)
         if isinstance(parts, Sequence):
-            self.parts.extend(parts)
+            _self_parts.extend(parts)
             return
-        self.parts.append(parts)
+        _self_parts.append(parts)
+        self.parts = _self_parts
 
     @property
     def tool_calls(self) -> Sequence[ToolExecutionSuggestion]:

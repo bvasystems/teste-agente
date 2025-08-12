@@ -4,7 +4,7 @@ Module defining the UserMessage class representing messages from users.
 
 from __future__ import annotations
 
-from collections.abc import MutableSequence, Sequence
+from collections.abc import Sequence
 from typing import Any, Literal
 
 from rsb.models.base_model import BaseModel
@@ -32,35 +32,39 @@ class UserMessage(BaseModel):
         description="Discriminator field to identify this as a user message. Always set to 'user'.",
     )
 
-    parts: MutableSequence[
+    parts: Sequence[
         TextPart | FilePart | Tool[Any] | ToolExecutionSuggestion | ToolExecutionResult
     ] = Field(
         description="The sequence of message parts that make up this user message.",
     )
 
-    def insert_at_beggining(
+    def insert_part(
         self,
         parts: TextPart
         | FilePart
         | Tool[Any]
         | ToolExecutionSuggestion
         | ToolExecutionResult
-        | Sequence[
+        | list[
             TextPart
             | FilePart
             | Tool[Any]
             | ToolExecutionSuggestion
             | ToolExecutionResult
         ],
+        /,
+        index: int = 0,
     ) -> None:
-        if isinstance(parts, Sequence):
+        _self_parts = list(self.parts)
+        if isinstance(parts, list):
             for part in parts:
-                self.parts.insert(0, part)
+                _self_parts.insert(index, part)  # type: ignore[reportArgumentType]
             return
 
-        self.parts.insert(0, parts)
+        _self_parts.insert(index, parts)  # type: ignore[reportArgumentType]
+        self.parts = _self_parts
 
-    def insert_at_end(
+    def append_part(
         self,
         parts: TextPart
         | FilePart
@@ -74,11 +78,15 @@ class UserMessage(BaseModel):
             | ToolExecutionSuggestion
             | ToolExecutionResult
         ],
+        /,
     ) -> None:
+        _self_parts = list(self.parts)
         if isinstance(parts, Sequence):
-            self.parts.extend(parts)
+            _self_parts.extend(parts)  # type: ignore[reportArgumentType]
             return
-        self.parts.append(parts)
+
+        _self_parts.append(parts)  # type: ignore[reportArgumentType]
+        self.parts = _self_parts
 
     @property
     def text(self) -> str:
@@ -87,7 +95,7 @@ class UserMessage(BaseModel):
     @classmethod
     def create_named(
         cls,
-        parts: MutableSequence[
+        parts: list[
             TextPart
             | FilePart
             | Tool[Any]

@@ -1602,11 +1602,8 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
         state = RunState[T_Schema].init_state()
 
-        # CRITICAL: Track ALL tool suggestions and results across ALL iterations
-        all_tool_suggestions: MutableSequence[ToolExecutionSuggestion] = []
+        # FIXED: Track tool suggestions and results for deduplication only
         all_tool_results: dict[str, tuple[ToolExecutionSuggestion, Any]] = {}
-
-        # Initialize tracking systems before the while loop
         tool_call_patterns: dict[str, int] = {}
         tool_budget: dict[str, int] = {}
 
@@ -1617,20 +1614,13 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             )
 
             async def _stream_with_tools() -> AsyncIterator[AgentRunOutput[T_Schema]]:
-                nonlocal \
-                    state, \
-                    all_tool_suggestions, \
-                    all_tool_results, \
-                    tool_call_patterns, \
-                    tool_budget
+                nonlocal state, all_tool_results, tool_call_patterns, tool_budget
                 nonlocal \
                     generation_time_total, \
                     tool_execution_time_total, \
                     iteration_count, \
                     tool_calls_count, \
                     total_tokens_processed
-
-                total_tokens_processed = total_tokens_processed
 
                 while state.iteration < self.agent_config.maxIterations:
                     current_iteration = state.iteration + 1
@@ -1644,88 +1634,8 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         )
                     )
 
-                    # Build message history for this iteration
-                    message_history = list(context.message_history)
-
-                    # If we have tool results from ANY previous iterations, we need to add them
-                    if all_tool_results:
-                        _logger.bind_optional(
-                            lambda log: log.debug(
-                                "Processing %d total tool results across all iterations",
-                                len(all_tool_results),
-                            )
-                        )
-
-                        # Find the last assistant message with tool suggestions
-                        last_assistant_index = -1
-                        for i in range(len(message_history) - 1, -1, -1):
-                            if isinstance(message_history[i], AssistantMessage):
-                                last_assistant_index = i
-                                break
-
-                        if last_assistant_index >= 0:
-                            # Clone the assistant message and ensure it has ALL tool suggestions
-                            original_assistant = message_history[last_assistant_index]
-                            cloned_assistant = AssistantMessage(
-                                parts=list(original_assistant.parts)
-                            )
-
-                            # Add any missing tool suggestions to the assistant message
-                            existing_suggestion_ids = {
-                                part.id
-                                for part in cloned_assistant.parts
-                                if isinstance(part, ToolExecutionSuggestion)
-                            }
-
-                            for suggestion in all_tool_suggestions:
-                                if suggestion.id not in existing_suggestion_ids:
-                                    cloned_assistant.parts.append(suggestion)
-
-                            message_history[last_assistant_index] = cloned_assistant
-
-                            # Now find or create the user message after the assistant message
-                            next_user_index = -1
-                            for i in range(
-                                last_assistant_index + 1, len(message_history)
-                            ):
-                                if isinstance(message_history[i], UserMessage):
-                                    next_user_index = i
-                                    break
-
-                            if next_user_index == -1:
-                                # Create a new user message
-                                new_user_message = UserMessage(parts=[])
-                                message_history.append(new_user_message)
-                                next_user_index = len(message_history) - 1
-
-                            # Clone the user message and add ALL tool results
-                            original_user = message_history[next_user_index]
-                            cloned_user = UserMessage(parts=list(original_user.parts))
-
-                            # Remove any existing tool results to avoid duplicates
-                            cloned_user.parts = [
-                                part
-                                for part in cloned_user.parts
-                                if not isinstance(part, ToolExecutionResult)
-                            ]
-
-                            # Add ALL tool results that correspond to suggestions in the assistant message
-                            for suggestion in cloned_assistant.parts:
-                                if isinstance(suggestion, ToolExecutionSuggestion):
-                                    if suggestion.id in all_tool_results:
-                                        _, result = all_tool_results[suggestion.id]
-                                        tool_execution_result = ToolExecutionResult(
-                                            suggestion=suggestion,
-                                            result=result,
-                                            execution_time_ms=None,
-                                            success=True,
-                                            error_message=None,
-                                        )
-                                        cloned_user.parts.insert(
-                                            0, tool_execution_result
-                                        )
-
-                            message_history[next_user_index] = cloned_user
+                    # FIXED: Use context message history directly
+                    message_history = context.message_history
 
                     _logger.bind_optional(
                         lambda log: log.debug("Streaming tool call generation")
@@ -1758,7 +1668,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         Generation[WithoutStructuredOutput], final_tool_generation
                     )
 
-                    # Add this generation to context
+                    # FIXED: Add this generation to context immediately
                     context.message_history.append(
                         final_tool_generation.message.to_assistant_message()
                     )
@@ -1822,7 +1732,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                                 generation_chunk
                             ) in generation_provider.stream_async(
                                 model=self.resolved_model,
-                                messages=message_history,
+                                messages=context.message_history,  # Use clean context
                                 response_schema=self.response_schema,
                                 generation_config=self.agent_config.generation_config,
                             ):
@@ -1838,12 +1748,6 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                                 if generation_chunk.usage:
                                     total_tokens_processed += (
                                         generation_chunk.usage.completion_tokens
-                                    )
-
-                                # CRITICAL: Append ALL tool calls to the generation
-                                if all_tool_suggestions:
-                                    generation_chunk.append_tool_calls(
-                                        all_tool_suggestions
                                     )
 
                                 # Create partial performance metrics
@@ -2019,12 +1923,6 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                             )
                         )
 
-                        # CRITICAL: Append ALL tool calls to the final generation
-                        if all_tool_suggestions:
-                            final_tool_generation.append_tool_calls(
-                                all_tool_suggestions
-                            )
-
                         # Complete the final step and add to context
                         final_step_duration = (
                             time.perf_counter() - final_step_start_time
@@ -2115,21 +2013,21 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         )
                         return
 
-                    # Agent called tools. Process them (no streaming for tool execution)
+                    # FIXED: Process tools for this iteration only
                     _logger.bind_optional(
                         lambda log: log.info(
                             "Processing %d tool calls",
                             len(
-                                final_tool_generation.tool_calls
-                                if final_tool_generation
-                                else []
+                                cast(
+                                    Generation[WithoutStructuredOutput],
+                                    final_tool_generation,
+                                ).tool_calls
                             ),
                         )
                     )
 
-                    # Add these tool suggestions to our tracking
-                    for suggestion in final_tool_generation.tool_calls:
-                        all_tool_suggestions.append(suggestion)
+                    # FIXED: Create tool results for this iteration
+                    tool_results_for_this_iteration: list[ToolExecutionResult] = []
 
                     # Create a step to track this iteration's tool executions
                     step_start_time = time.perf_counter()
@@ -2190,11 +2088,15 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                                     break
 
                             if previous_result is not None:
-                                # Reuse the previous result
-                                all_tool_results[tool_execution_suggestion.id] = (
-                                    tool_execution_suggestion,
-                                    previous_result,
+                                # FIXED: Create tool result for this iteration
+                                tool_result = ToolExecutionResult(
+                                    suggestion=tool_execution_suggestion,
+                                    result=f"[DUPLICATE BLOCKED - Using previous result] {previous_result}",
+                                    execution_time_ms=0.0,
+                                    success=True,
+                                    error_message=None,
                                 )
+                                tool_results_for_this_iteration.append(tool_result)
 
                                 step.add_tool_execution_result(
                                     suggestion=tool_execution_suggestion,
@@ -2205,6 +2107,15 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                             else:
                                 # This shouldn't happen, but handle it gracefully
                                 error_msg = "Duplicate tool call blocked but no previous result found"
+                                tool_result = ToolExecutionResult(
+                                    suggestion=tool_execution_suggestion,
+                                    result=error_msg,
+                                    execution_time_ms=0.0,
+                                    success=False,
+                                    error_message=error_msg,
+                                )
+                                tool_results_for_this_iteration.append(tool_result)
+
                                 step.add_tool_execution_result(
                                     suggestion=tool_execution_suggestion,
                                     result=error_msg,
@@ -2231,6 +2142,15 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                             )
 
                             error_msg = f"Tool '{tool_name}' budget exceeded ({self.agent_config.maxCallPerTool} calls max)"
+                            tool_result = ToolExecutionResult(
+                                suggestion=tool_execution_suggestion,
+                                result=error_msg,
+                                execution_time_ms=0.0,
+                                success=False,
+                                error_message=error_msg,
+                            )
+                            tool_results_for_this_iteration.append(tool_result)
+
                             step.add_tool_execution_result(
                                 suggestion=tool_execution_suggestion,
                                 result=error_msg,
@@ -2286,6 +2206,18 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
                             # Update budget
                             tool_budget[tool_name] = current_tool_calls + 1
+
+                            # FIXED: Create tool result for this iteration
+                            tool_execution_result = ToolExecutionResult(
+                                suggestion=tool_execution_suggestion,
+                                result=tool_result,
+                                execution_time_ms=tool_execution_time,
+                                success=True,
+                                error_message=None,
+                            )
+                            tool_results_for_this_iteration.append(
+                                tool_execution_result
+                            )
 
                             # Add the tool execution result to the step
                             step.add_tool_execution_result(
@@ -2387,6 +2319,13 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                                 performance_metrics=performance_metrics,
                             )
                             return
+
+                    # FIXED: Add tool results to context as a clean user message
+                    if tool_results_for_this_iteration:
+                        user_message_with_results = UserMessage(
+                            parts=tool_results_for_this_iteration
+                        )
+                        context.message_history.append(user_message_with_results)
 
                     # Log skipped tools if any
                     if skipped_tools:
@@ -2516,7 +2455,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
             return _stream_with_tools()
 
-        # Non-streaming path with tools (existing code)
+        # FIXED: Non-streaming path with tools - simplified message history management
         while state.iteration < self.agent_config.maxIterations:
             current_iteration = state.iteration + 1
             iteration_count = current_iteration
@@ -2528,84 +2467,8 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 )
             )
 
-            # Build message history for this iteration
-            message_history = list(context.message_history)
-
-            # If we have tool results from ANY previous iterations, we need to add them
-            if all_tool_results:
-                _logger.bind_optional(
-                    lambda log: log.debug(
-                        "Processing %d total tool results across all iterations",
-                        len(all_tool_results),
-                    )
-                )
-
-                # Find the last assistant message with tool suggestions
-                last_assistant_index = -1
-                for i in range(len(message_history) - 1, -1, -1):
-                    if isinstance(message_history[i], AssistantMessage):
-                        last_assistant_index = i
-                        break
-
-                if last_assistant_index >= 0:
-                    # Clone the assistant message and ensure it has ALL tool suggestions
-                    original_assistant = message_history[last_assistant_index]
-                    cloned_assistant = AssistantMessage(
-                        parts=list(original_assistant.parts)
-                    )
-
-                    # Add any missing tool suggestions to the assistant message
-                    existing_suggestion_ids = {
-                        part.id
-                        for part in cloned_assistant.parts
-                        if isinstance(part, ToolExecutionSuggestion)
-                    }
-
-                    for suggestion in all_tool_suggestions:
-                        if suggestion.id not in existing_suggestion_ids:
-                            cloned_assistant.parts.append(suggestion)
-
-                    message_history[last_assistant_index] = cloned_assistant
-
-                    # Now find or create the user message after the assistant message
-                    next_user_index = -1
-                    for i in range(last_assistant_index + 1, len(message_history)):
-                        if isinstance(message_history[i], UserMessage):
-                            next_user_index = i
-                            break
-
-                    if next_user_index == -1:
-                        # Create a new user message
-                        new_user_message = UserMessage(parts=[])
-                        message_history.append(new_user_message)
-                        next_user_index = len(message_history) - 1
-
-                    # Clone the user message and add ALL tool results
-                    original_user = message_history[next_user_index]
-                    cloned_user = UserMessage(parts=list(original_user.parts))
-
-                    # Remove any existing tool results to avoid duplicates
-                    cloned_user.parts = [
-                        part
-                        for part in cloned_user.parts
-                        if not isinstance(part, ToolExecutionResult)
-                    ]
-
-                    # Add ALL tool results that correspond to suggestions in the assistant message
-                    for suggestion in cloned_assistant.parts:
-                        if isinstance(suggestion, ToolExecutionSuggestion):
-                            if suggestion.id in all_tool_results:
-                                _, result = all_tool_results[suggestion.id]
-                                tool_execution_result = ToolExecutionResult(
-                                    suggestion=suggestion,
-                                    result=result,
-                                    execution_time_ms=None,
-                                    success=True,
-                                    error_message=None,
-                                )
-                                cloned_user.parts.insert(0, tool_execution_result)
-
-                    message_history[next_user_index] = cloned_user
+            # FIXED: Use context message history directly - no complex reconstruction
+            message_history = context.message_history
 
             _logger.bind_optional(
                 lambda log: log.debug("Generating tool call response")
@@ -2619,7 +2482,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 tools=all_tools,
             )
 
-            # Add this generation to context
+            # FIXED: Add the generation to context immediately after generation
             context.message_history.append(
                 tool_call_generation.message.to_assistant_message()
             )
@@ -2667,14 +2530,10 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     generation_start = time.perf_counter()
                     generation = await generation_provider.generate_async(
                         model=self.resolved_model,
-                        messages=message_history,
+                        messages=context.message_history,  # Use clean context
                         response_schema=self.response_schema,
                         generation_config=self.agent_config.generation_config,
                     )
-
-                    # CRITICAL: Append ALL tool calls to the final generation
-                    if all_tool_suggestions:
-                        generation.append_tool_calls(all_tool_suggestions)
 
                     context.message_history.append(
                         generation.message.to_assistant_message()
@@ -2777,10 +2636,6 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     lambda log: log.debug("Using existing text response")
                 )
 
-                # CRITICAL: Append ALL tool calls to the final generation
-                if all_tool_suggestions:
-                    tool_call_generation.append_tool_calls(all_tool_suggestions)
-
                 # Complete the final step and add to context
                 final_step_duration = (
                     time.perf_counter() - final_step_start_time
@@ -2858,16 +2713,15 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     performance_metrics=performance_metrics,
                 )
 
-            # Agent called tools. Process them with deduplication and budgeting.
+            # FIXED: Process tools and create clean tool results for this iteration
             _logger.bind_optional(
                 lambda log: log.info(
                     "Processing %d tool calls", len(tool_call_generation.tool_calls)
                 )
             )
 
-            # Add these tool suggestions to our tracking
-            for suggestion in tool_call_generation.tool_calls:
-                all_tool_suggestions.append(suggestion)
+            # FIXED: Create tool results for this iteration only
+            tool_results_for_this_iteration: list[ToolExecutionResult] = []
 
             # Create a step to track this iteration's tool executions
             step_start_time = time.perf_counter()
@@ -2922,11 +2776,15 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                             break
 
                     if previous_result is not None:
-                        # Reuse the previous result
-                        all_tool_results[tool_execution_suggestion.id] = (
-                            tool_execution_suggestion,
-                            previous_result,
+                        # FIXED: Create tool result for this iteration
+                        tool_result = ToolExecutionResult(
+                            suggestion=tool_execution_suggestion,
+                            result=f"[DUPLICATE BLOCKED - Using previous result] {previous_result}",
+                            execution_time_ms=0.0,
+                            success=True,
+                            error_message=None,
                         )
+                        tool_results_for_this_iteration.append(tool_result)
 
                         step.add_tool_execution_result(
                             suggestion=tool_execution_suggestion,
@@ -2939,6 +2797,15 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         error_msg = (
                             "Duplicate tool call blocked but no previous result found"
                         )
+                        tool_result = ToolExecutionResult(
+                            suggestion=tool_execution_suggestion,
+                            result=error_msg,
+                            execution_time_ms=0.0,
+                            success=False,
+                            error_message=error_msg,
+                        )
+                        tool_results_for_this_iteration.append(tool_result)
+
                         step.add_tool_execution_result(
                             suggestion=tool_execution_suggestion,
                             result=error_msg,
@@ -2965,6 +2832,15 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     )
 
                     error_msg = f"Tool '{tool_name}' budget exceeded ({self.agent_config.maxCallPerTool} calls max)"
+                    tool_result = ToolExecutionResult(
+                        suggestion=tool_execution_suggestion,
+                        result=error_msg,
+                        execution_time_ms=0.0,
+                        success=False,
+                        error_message=error_msg,
+                    )
+                    tool_results_for_this_iteration.append(tool_result)
+
                     step.add_tool_execution_result(
                         suggestion=tool_execution_suggestion,
                         result=error_msg,
@@ -3016,6 +2892,16 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
                     # Update budget
                     tool_budget[tool_name] = current_tool_calls + 1
+
+                    # FIXED: Create tool result for this iteration
+                    tool_execution_result = ToolExecutionResult(
+                        suggestion=tool_execution_suggestion,
+                        result=tool_result,
+                        execution_time_ms=tool_execution_time,
+                        success=True,
+                        error_message=None,
+                    )
+                    tool_results_for_this_iteration.append(tool_execution_result)
 
                     # Add the tool execution result to the step
                     step.add_tool_execution_result(
@@ -3109,6 +2995,13 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         resumption_token=resumption_token,
                         performance_metrics=performance_metrics,
                     )
+
+            # FIXED: Add tool results to context as a clean user message
+            if tool_results_for_this_iteration:
+                user_message_with_results = UserMessage(
+                    parts=tool_results_for_this_iteration
+                )
+                context.message_history.append(user_message_with_results)
 
             # Log skipped tools if any
             if skipped_tools:
