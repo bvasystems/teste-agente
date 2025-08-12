@@ -1,3 +1,4 @@
+import asyncio
 from agentle.agents.agent import Agent
 
 from pydantic import BaseModel
@@ -21,5 +22,11 @@ agent = Agent()
 print("Streaming poem generation...")
 print("=" * 50)
 
-for chunk in agent.run("write a poem about america", stream=True):
-    print(chunk.text)
+
+async def main():
+    async for chunk in await agent.run_async("write a poem about america", stream=True):
+        print(chunk.text)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
