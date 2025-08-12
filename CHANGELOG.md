@@ -1,6 +1,11 @@
 # Changelog
 
-# v0.7.36
+## v0.7.37
+feat(streaming): accumulate text chunks for streaming responses
+
+Add _build_choices_with_accumulated_text method to properly accumulate text parts during streaming responses. This ensures complete text is available for each chunk rather than just the latest portion.
+
+## v0.7.36
 fix(agents): ensure tool results immediately follow tool calls
 
 Fix message history sequence by moving tool results to immediately follow their corresponding tool calls. Add synthetic results for missing calls and clean up orphaned messages. This ensures proper message ordering required for agent execution.
