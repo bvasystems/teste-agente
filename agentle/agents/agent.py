@@ -32,7 +32,9 @@ import datetime
 import importlib.util
 import json
 import logging
+import queue
 import ssl
+import threading
 import time
 import uuid
 from collections.abc import (
@@ -41,6 +43,7 @@ from collections.abc import (
     Awaitable,
     Callable,
     Generator,
+    Iterator,
     Mapping,
     MutableMapping,
     MutableSequence,
@@ -964,6 +967,28 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             approval_data=approval_data,
         )
 
+    @overload
+    def run(
+        self,
+        input: AgentInput | Any,
+        *,
+        timeout: float | None = None,
+        trace_params: TraceParams | None = None,
+        chat_id: str | None = None,
+        stream: Literal[False] = False,
+    ) -> AgentRunOutput[T_Schema]: ...
+
+    @overload
+    def run(
+        self,
+        input: AgentInput | Any,
+        *,
+        timeout: float | None = None,
+        trace_params: TraceParams | None = None,
+        chat_id: str | None = None,
+        stream: Literal[True],
+    ) -> Iterator[AgentRunOutput[T_Schema]]: ...
+
     def run(
         self,
         input: AgentInput | Any,
@@ -972,25 +997,33 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         trace_params: TraceParams | None = None,
         chat_id: str | None = None,
         stream: bool = False,
-    ) -> AgentRunOutput[T_Schema] | AsyncIterator[AgentRunOutput[T_Schema]]:
+    ) -> AgentRunOutput[T_Schema] | Iterator[AgentRunOutput[T_Schema]]:
         """
         Runs the agent synchronously with the provided input.
 
         This method is a synchronous wrapper for run_async, allowing
-        easy use in synchronous contexts.
+        easy use in synchronous contexts. When streaming is enabled,
+        it returns an iterator that yields chunks synchronously.
 
         Args:
             input: The input for the agent, which can be of various types.
             timeout: Optional time limit in seconds for execution.
             trace_params: Optional trace parameters for observability purposes.
+            chat_id: Optional chat ID for conversation persistence.
+            stream: Whether to stream responses. If True, returns an iterator.
 
         Returns:
-            AgentRunOutput[T_Schema]: The result of the agent execution.
+            AgentRunOutput[T_Schema] | Iterator[AgentRunOutput[T_Schema]]:
+                Single result or iterator of streaming chunks.
 
         Example:
             ```python
-            # Input as string
+            # Non-streaming
             result = agent.run("What is the weather in London?")
+
+            # Streaming
+            for chunk in agent.run("What is the weather in London?", stream=True):
+                print(chunk.generation.text)
 
             # Input as UserMessage object
             from agentle.generations.models.messages.user_message import UserMessage
@@ -1001,10 +1034,56 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             ```
         """
         if stream:
-            raise ValueError(
-                "Streaming is not supported in the synchronous version "
-                + "of the run function. Use the asynchronous version instead."
-            )
+            # Create a sync iterator that bridges the async iterator
+            def _sync_stream_iterator() -> Iterator[AgentRunOutput[T_Schema]]:
+                # Queue to store chunks as they arrive
+
+                chunk_queue: queue.Queue[AgentRunOutput[T_Schema] | None] = (
+                    queue.Queue()
+                )
+                exception_holder: list[Exception] = []
+
+                # Background thread to consume async iterator
+                async def _consume_async_iterator():
+                    try:
+                        async for chunk in await self.run_async(
+                            input=input,
+                            trace_params=trace_params,
+                            chat_id=chat_id,
+                            stream=True,
+                        ):
+                            chunk_queue.put(chunk)
+                        chunk_queue.put(None)  # Signal end
+                    except Exception as e:
+                        exception_holder.append(e)
+                        chunk_queue.put(None)  # Signal end
+
+                # Start the async consumption in background
+                def run_async_consumer():
+                    run_sync(_consume_async_iterator, timeout=timeout)
+
+                consumer_thread = threading.Thread(target=run_async_consumer)
+                consumer_thread.start()
+
+                # Yield chunks as they become available
+                try:
+                    while True:
+                        if exception_holder:
+                            raise exception_holder[0]
+
+                        try:
+                            chunk = chunk_queue.get(timeout=timeout or 30)
+                            if chunk is None:  # End signal
+                                break
+                            yield chunk
+                        except queue.Empty:
+                            if exception_holder:
+                                raise exception_holder[0]
+                            raise TimeoutError("Timeout waiting for next chunk")
+                finally:
+                    consumer_thread.join(timeout=1)
+
+            return _sync_stream_iterator()
 
         return run_sync(
             self.run_async,
