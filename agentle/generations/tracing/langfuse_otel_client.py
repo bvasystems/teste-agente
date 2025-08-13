@@ -226,14 +226,14 @@ class LangfuseOtelClient(OtelClient):
                 if total_cost > 0 or input_cost > 0 or output_cost > 0:
                     # Try the format that Langfuse V3 documentation suggests
                     langfuse_cost = {
-                        "total_cost": total_cost,
+                        "total": total_cost,
                     }
 
                     # Also include breakdown if available
                     if input_cost > 0:
-                        langfuse_cost["input_cost"] = input_cost
+                        langfuse_cost["input"] = input_cost
                     if output_cost > 0:
-                        langfuse_cost["output_cost"] = output_cost
+                        langfuse_cost["output"] = output_cost
 
                     update_params["cost_details"] = langfuse_cost
 
