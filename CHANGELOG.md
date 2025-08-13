@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.7.38
+fix(agent): remove redundant message appends and inline tool generation messages
+
+Prevent duplicate message appends by removing separate append operations and directly including tool generation messages in the context when streaming. This maintains message history consistency and avoids potential race conditions.
+
 ## v0.7.37
 feat(streaming): accumulate text chunks for streaming responses
 
