@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.40
+refactor(generations): simplify choice building logic in google adapter
+
+Unify streaming and non-streaming choice building into a single method
+Remove redundant code and improve handling of accumulated text
+Ensure consistent behavior for all input cases
+
+
+
 ## v0.7.39
 fix(generation): handle empty choices in get_tool_calls
 
