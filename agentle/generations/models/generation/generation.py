@@ -382,6 +382,10 @@ class Generation[T](BaseModel):
             Sequence[ToolExecutionSuggestion]: The tool execution suggestions
                 from the specified choice
         """
+        if len(self.choices) == 0:
+            logger.warning("WARNING: choices is empty.")
+            return []
+
         return self.choices[choice].message.tool_calls
 
     @classmethod

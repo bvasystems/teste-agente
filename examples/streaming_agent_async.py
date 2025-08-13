@@ -17,14 +17,14 @@ async def sum(a: float, b: float) -> float:
     return a + b
 
 
-agent = Agent()
+agent = Agent(tools=[sum])
 
 print("Streaming poem generation...")
 print("=" * 50)
 
 
 async def main():
-    async for chunk in await agent.run_async("write a poem about america", stream=True):
+    async for chunk in await agent.run_async("what is 2+2?", stream=True):
         print(chunk.text)
 
 
