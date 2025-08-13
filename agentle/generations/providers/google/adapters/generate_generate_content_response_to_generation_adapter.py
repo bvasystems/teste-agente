@@ -4,7 +4,7 @@ import datetime
 import uuid
 from collections.abc import AsyncIterator
 from logging import Logger
-from typing import TYPE_CHECKING, Literal, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from pydantic import BaseModel
 from rsb.adapters.adapter import Adapter
@@ -51,7 +51,6 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
     google_content_to_message_adapter: (
         GoogleContentToGeneratedAssistantMessageAdapter[T] | None
     )
-    is_stream: bool
 
     def __init__(
         self,
@@ -112,7 +111,7 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
             raise ValueError("The provided candidates by Google are NONE.")
 
         choices: list[Choice[T]] = self._build_choices(
-            candidates,
+            candidates=candidates,
             generate_content_parsed_response=parsed,
         )
 
@@ -126,33 +125,6 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
             choices=choices,
             usage=usage,
         )
-
-    # Add this method to your GenerateGenerateContentResponseToGenerationAdapter class
-
-    def _build_choices_with_accumulated_text(
-        self,
-        accumulated_text: str,
-        generate_content_parsed_response: T | None,
-    ) -> list[Choice[T]]:
-        """Build Choice objects with accumulated text instead of just chunk text."""
-
-        choices: list[Choice[T]] = []
-
-        # Create a choice with the accumulated text
-        # We only need one choice since we're accumulating all the text
-        if accumulated_text:
-            accumulated_text_part = TextPart(text=accumulated_text)
-
-            message = GeneratedAssistantMessage[T](
-                parts=[accumulated_text_part],
-                parsed=generate_content_parsed_response
-                if generate_content_parsed_response
-                else cast(T, None),
-            )
-
-            choices.append(Choice[T](index=0, message=message))
-
-        return choices
 
     async def _adapt_streaming(
         self, response_stream: AsyncIterator["GenerateContentResponse"]
@@ -229,9 +201,12 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
                 # Create accumulated text up to this point
                 full_accumulated_text = "".join(accumulated_text_parts)
 
-                # Build choices with accumulated text
-                choices = self._build_choices_with_accumulated_text(
-                    accumulated_text=full_accumulated_text,
+                # Build choices from candidates, optionally with accumulated text
+                choices = self._build_choices(
+                    candidates=chunk.candidates,
+                    accumulated_text=full_accumulated_text
+                    if full_accumulated_text
+                    else None,
                     generate_content_parsed_response=final_parsed
                     if self.response_schema
                     else None,
@@ -253,36 +228,100 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
 
     def _build_choices(
         self,
-        candidates: list["Candidate"],
-        generate_content_parsed_response: T | None,
-        is_streaming: bool = False,
+        candidates: list["Candidate"] | None = None,
+        accumulated_text: str | None = None,
+        generate_content_parsed_response: T | None = None,
     ) -> list[Choice[T]]:
-        """Build Choice objects from Google candidate responses."""
+        """
+        Build Choice objects from candidates, optionally replacing text with accumulated text.
+
+        This unified method handles both streaming and non-streaming scenarios:
+        - Always processes candidates if available (to extract tool calls, etc.)
+        - For streaming: replaces text parts with accumulated_text if provided
+        - Always ensures at least one choice is created, even if only tool calls are present
+
+        Args:
+            candidates: List of Google candidate responses
+            accumulated_text: Accumulated text content (for streaming text replacement)
+            generate_content_parsed_response: Parsed structured output
+
+        Returns:
+            List of Choice objects
+        """
         from google.genai import types
 
-        content_to_message_adapter = (
-            self.google_content_to_message_adapter
-            or GoogleContentToGeneratedAssistantMessageAdapter(
-                generate_content_response_parsed=generate_content_parsed_response,
-            )
-        )
-
         choices: list[Choice[T]] = []
-        index = 0
 
-        for candidate in candidates:
-            candidate_content: types.Content | None = candidate.content
-            if candidate_content is None:
-                continue
-
-            choices.append(
-                Choice[T](
-                    index=index,
-                    message=content_to_message_adapter.adapt(candidate_content),
+        # Case 1: Process candidates (both streaming and non-streaming)
+        if candidates is not None:
+            content_to_message_adapter = (
+                self.google_content_to_message_adapter
+                or GoogleContentToGeneratedAssistantMessageAdapter(
+                    generate_content_response_parsed=generate_content_parsed_response,
                 )
             )
-            index += 1
 
+            index = 0
+            for candidate in candidates:
+                candidate_content: types.Content | None = candidate.content
+                if candidate_content is None:
+                    continue
+
+                # Get the adapted message from the candidate
+                adapted_message = content_to_message_adapter.adapt(candidate_content)
+
+                # If we have accumulated_text, replace text parts but keep other parts (like tool calls)
+                if accumulated_text is not None:
+                    # Separate text parts from non-text parts (tool execution suggestions, etc.)
+                    non_text_parts = [
+                        part
+                        for part in adapted_message.parts
+                        if not isinstance(part, TextPart)
+                    ]
+
+                    # Create new parts list with accumulated text + non-text parts
+                    new_parts: list[Any] = []
+                    if (
+                        accumulated_text
+                    ):  # Only add text part if there's accumulated text
+                        new_parts.append(TextPart(text=accumulated_text))
+                    new_parts.extend(non_text_parts)
+
+                    # Create new message with updated parts
+                    message = GeneratedAssistantMessage[T](
+                        parts=new_parts,
+                        parsed=adapted_message.parsed,
+                    )
+                else:
+                    # Use the adapted message as-is
+                    message = adapted_message
+
+                choices.append(Choice[T](index=index, message=message))
+                index += 1
+
+            return choices
+
+        # Case 2: No candidates but have accumulated text - create choice with just text
+        if accumulated_text is not None:
+            message = GeneratedAssistantMessage[T](
+                parts=[TextPart(text=accumulated_text)],
+                parsed=generate_content_parsed_response
+                if generate_content_parsed_response
+                else cast(T, None),
+            )
+            choices.append(Choice[T](index=0, message=message))
+            return choices
+
+        # Case 3: No candidates and no accumulated text - create empty choice
+        # This ensures we always have at least one choice even if there's no content yet
+        message = GeneratedAssistantMessage[T](
+            parts=[],
+            parsed=generate_content_parsed_response
+            if generate_content_parsed_response
+            else cast(T, None),
+        )
+
+        choices.append(Choice[T](index=0, message=message))
         return choices
 
     def _extract_usage(
