@@ -101,6 +101,9 @@ from agentle.generations.models.message_parts.tool_execution_suggestion import (
 )
 from agentle.generations.models.messages.assistant_message import AssistantMessage
 from agentle.generations.models.messages.developer_message import DeveloperMessage
+from agentle.generations.models.messages.generated_assistant_message import (
+    GeneratedAssistantMessage,
+)
 from agentle.generations.models.messages.user_message import UserMessage
 from agentle.generations.providers.base.generation_provider import (
     GenerationProvider,
@@ -1806,14 +1809,18 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                             final_generation: Generation[T_Schema] | None = None
                             chunk_count = 0
 
+                            __append_message: GeneratedAssistantMessage[None]
+                            try:
+                                __append_message = final_tool_generation.get_message(0)
+                            except Exception:
+                                __append_message = GeneratedAssistantMessage.empty()
+
                             async for (
                                 generation_chunk
                             ) in generation_provider.stream_async(
                                 model=self.resolved_model,
                                 messages=list(context.message_history)
-                                + [
-                                    final_tool_generation.message.to_assistant_message()
-                                ],
+                                + [__append_message.to_assistant_message()],
                                 response_schema=self.response_schema,
                                 generation_config=self.agent_config.generation_config,
                             ):
