@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.40
+fix(mcp): update protocol version and fix json-rpc compliance
+
+- Update protocol version to "2025-06-18"
+- Fix notification method name to "notifications/initialized"
+- Add proper endpoint path handling with trailing slash
+- Improve error handling and logging
+- Ensure proper parameter handling for requests
+
 ## v0.7.39
 fix(generation): handle empty choices in get_tool_calls
 
