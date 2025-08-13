@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.7.39
+fix(generation): handle empty choices in get_tool_calls
+
+Add check for empty choices array to prevent index error and return empty list with warning
+
 ## v0.7.38
 fix(agent): remove redundant message appends and inline tool generation messages
 
