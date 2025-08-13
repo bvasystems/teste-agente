@@ -18,16 +18,13 @@ async def sum(a: float, b: float) -> float:
     return a + b
 
 
-tool = Tool.from_callable(sum)
-tools = [tool]
-
-
 async def main():
     provider = GoogleGenerationProvider()
     stream = provider.stream_async(
         messages=[
             UserMessage(parts=[TextPart(text="escreva um poema sobre a america")])
         ],
+        tools=[Tool.from_callable(sum)],
     )
 
     full_text = ""
