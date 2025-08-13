@@ -31,7 +31,7 @@ async def main():
     chunk_count = 0
 
     async for generation in stream:
-        print(f"\nParsed: {generation}\n\n\n")
+        print(f"\n{generation}\n\n\n")
         chunk_count += 1
         # chunk_text = generation.text
         # full_text += chunk_text
