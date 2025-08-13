@@ -1,14 +1,14 @@
 """
 Production-ready fixes for StreamableHTTPMCPServer using aiohttp
 
-This version is a refactor of the original httpx-based implementation.
+This version fixes the JSON-RPC 2.0 compliance issues and protocol version problems.
 
-Key changes:
-1. Replaced httpx.AsyncClient with aiohttp.ClientSession for connection pooling.
-2. Adapted exception handling to aiohttp-specific errors (e.g., aiohttp.ClientError).
-3. Updated response handling to use await on methods like .json() and .text().
-4. Maintained all original functionality, retry logic, and session management.
-5. FIXED: JSON-RPC 2.0 compliance - only include params when they exist and are not empty.
+Key fixes:
+1. Updated protocol version to "2025-06-18"
+2. Fixed notification method name to "notifications/initialized"
+3. Ensured proper endpoint handling to avoid redirects
+4. Improved parameter handling for requests
+5. Better error handling and logging
 """
 
 from __future__ import annotations
@@ -43,14 +43,15 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
     Production-ready Streamable HTTP implementation of MCP server client using aiohttp.
 
     This version uses aiohttp.ClientSession for improved performance and follows
-    the library's best practices.
+    the MCP 2025-06-18 protocol specification.
     """
 
     # Configuration fields
     server_name: str = Field(..., description="Human-readable name for the MCP server")
     server_url: str = Field(..., description="Base URL for the HTTP MCP server")
     mcp_endpoint: str | Callable[..., str] = Field(
-        default="/mcp", description="The endpoint path for MCP requests"
+        default="/mcp/",
+        description="The endpoint path for MCP requests (should end with /)",
     )
     headers: MutableMapping[str, str] = Field(
         default_factory=dict, description="Custom HTTP headers"
@@ -95,6 +96,18 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
         return (
             self._client is not None and not self._client.closed and self._initialized
         )
+
+    def _get_endpoint_path(self) -> str:
+        """Get the endpoint path, ensuring it's properly formatted."""
+        endpoint = (
+            self.mcp_endpoint() if callable(self.mcp_endpoint) else self.mcp_endpoint
+        )
+        # Ensure endpoint starts with / and ends with /
+        if not endpoint.startswith("/"):
+            endpoint = "/" + endpoint
+        if not endpoint.endswith("/"):
+            endpoint = endpoint + "/"
+        return endpoint
 
     def _create_client(self) -> aiohttp.ClientSession:
         """Create a new aiohttp client session with connection pooling."""
@@ -177,6 +190,9 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
             ) as response:
                 if response.status >= 500:
                     raise ConnectionError(f"Server error: {response.status}")
+                # Accept 404 for health check as it might not be implemented
+                elif response.status == 404:
+                    self._logger.debug("Health endpoint not found, continuing anyway")
         except aiohttp.ClientConnectorError as e:
             raise ConnectionError(f"Cannot connect to server: {e}")
         except asyncio.TimeoutError as e:
@@ -186,14 +202,20 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
         """Initialize MCP protocol with retry logic."""
         self._logger.info("Initializing MCP protocol")
 
+        # FIXED: Updated to 2025-06-18 protocol version
         initialize_request: Dict[str, Any] = {
             "jsonrpc": "2.0",
             "id": str(self._jsonrpc_id_counter),
             "method": "initialize",
             "params": {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": "2025-06-18",  # FIXED: Updated protocol version
                 "clientInfo": {"name": "agentle-mcp-client", "version": "0.1.0"},
-                "capabilities": {"resources": {}, "tools": {}, "prompts": {}},
+                "capabilities": {
+                    "resources": {},
+                    "tools": {},
+                    "prompts": {},
+                    "logging": {},
+                },
             },
         }
         self._jsonrpc_id_counter += 1
@@ -205,10 +227,12 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
                 if "error" in response:
                     raise ConnectionError(f"Failed to initialize: {response['error']}")
 
-                # FIXED: Remove empty params from initialized notification
+                self._logger.debug(f"Initialize response: {response}")
+
+                # FIXED: Correct notification method name
                 notification: Dict[str, Any] = {
                     "jsonrpc": "2.0",
-                    "method": "initialized",
+                    "method": "notifications/initialized",  # FIXED: Proper method name
                 }
                 await self._send_notification_internal(notification)
 
@@ -255,18 +279,18 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
 
         try:
             headers: Dict[str, str] = {"Mcp-Session-Id": self._session_id}
-            endpoint = (
-                self.mcp_endpoint()
-                if callable(self.mcp_endpoint)
-                else self.mcp_endpoint
-            )
+            endpoint = self._get_endpoint_path()
             timeout = ClientTimeout(total=5.0)
 
             async with self._client.delete(
                 endpoint, headers=headers, timeout=timeout, allow_redirects=True
             ) as response:
-                response.raise_for_status()
-                self._logger.debug(f"Session terminated: {self._session_id}")
+                if response.status < 400:  # Accept any success status
+                    self._logger.debug(f"Session terminated: {self._session_id}")
+                else:
+                    self._logger.warning(
+                        f"Session termination returned {response.status}"
+                    )
 
             await self.session_manager.delete_session(self._server_key)
 
@@ -298,9 +322,9 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
 
-        endpoint = (
-            self.mcp_endpoint() if callable(self.mcp_endpoint) else self.mcp_endpoint
-        )
+        endpoint = self._get_endpoint_path()
+
+        self._logger.debug(f"Sending request to {endpoint}: {request}")
 
         try:
             async with self._client.post(
@@ -320,6 +344,7 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
 
                 elif response.status != 200:
                     error_text = await response.text()
+                    self._logger.error(f"HTTP {response.status} response: {error_text}")
                     raise ConnectionError(f"HTTP {response.status}: {error_text}")
 
                 content_type = response.headers.get("Content-Type", "")
@@ -336,6 +361,7 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
 
                 elif "application/json" in content_type:
                     data = await response.json()
+                    self._logger.debug(f"Received response: {data}")
                     if "error" in data:
                         raise ValueError(f"JSON-RPC error: {data['error']}")
                     return data
@@ -343,6 +369,7 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
                 else:
                     raise ValueError(f"Unexpected content type: {content_type}")
         except aiohttp.ClientError as e:
+            self._logger.error(f"AIOHTTP Client Error: {e}")
             raise ConnectionError(f"AIOHTTP Client Error: {e}")
 
     async def _send_notification_internal(self, notification: Dict[str, Any]) -> None:
@@ -354,16 +381,22 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
 
-        endpoint = (
-            self.mcp_endpoint() if callable(self.mcp_endpoint) else self.mcp_endpoint
-        )
+        endpoint = self._get_endpoint_path()
+
+        self._logger.debug(f"Sending notification to {endpoint}: {notification}")
+
         try:
             async with self._client.post(
                 endpoint, json=notification, headers=headers, allow_redirects=True
             ) as response:
-                response.raise_for_status()
+                if response.status != 202:  # Accept 202 Accepted for notifications
+                    self._logger.warning(
+                        f"Notification returned status {response.status}"
+                    )
+                # Don't raise error for notifications, they're fire-and-forget
         except aiohttp.ClientError as e:
-            raise ConnectionError(f"Failed to send notification: {e}")
+            self._logger.warning(f"Failed to send notification: {e}")
+            # Don't raise error for notifications
 
     async def _send_request(
         self, method: str, params: Optional[Dict[str, Any]] = None
@@ -378,7 +411,7 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
         request_id = str(self._jsonrpc_id_counter)
         self._jsonrpc_id_counter += 1
 
-        # FIXED: Build request - only include params if they exist and are not empty
+        # Build request - only include params if they exist and are not empty
         request: Dict[str, Any] = {
             "jsonrpc": "2.0",
             "id": request_id,
@@ -477,6 +510,7 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
         from mcp.types import Tool
 
         try:
+            # FIXED: Don't pass empty params for tools/list
             response = await self._send_request("tools/list")
             if "result" not in response or "tools" not in response["result"]:
                 raise ValueError("Invalid response format")
@@ -529,9 +563,11 @@ class StreamableHTTPMCPServer(MCPServerProtocol):
         from mcp.types import CallToolResult
 
         try:
-            response = await self._send_request(
-                "tools/call", {"name": tool_name, "arguments": arguments or {}}
-            )
+            params: dict[str, Any] = {"name": tool_name}
+            if arguments:
+                params["arguments"] = arguments
+
+            response = await self._send_request("tools/call", params)
             if "result" not in response:
                 raise ValueError("Invalid response format")
             return CallToolResult.model_validate(response["result"])
