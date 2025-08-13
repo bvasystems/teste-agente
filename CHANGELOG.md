@@ -1,18 +1,19 @@
 # Changelog
 
-## v0.7.40
+## v0.7.39
+fix(generation): handle empty choices in get_tool_calls
+
+Add check for empty choices array to prevent index error and return empty list with warning
+
 refactor(generations): simplify choice building logic in google adapter
 
 Unify streaming and non-streaming choice building into a single method
 Remove redundant code and improve handling of accumulated text
 Ensure consistent behavior for all input cases
 
+fix(langfuse_otel_client): update cost field names to match langfuse v3 spec
 
-
-## v0.7.39
-fix(generation): handle empty choices in get_tool_calls
-
-Add check for empty choices array to prevent index error and return empty list with warning
+Change field names from 'total_cost', 'input_cost', 'output_cost' to 'total', 'input', 'output' to align with Langfuse V3 API requirements
 
 ## v0.7.38
 fix(agent): remove redundant message appends and inline tool generation messages
