@@ -299,7 +299,7 @@ class VectorStore(abc.ABC):
     @abc.abstractmethod
     async def list_collections_async(self) -> Sequence[Collection]: ...
 
-    def as_search_tool(self) -> Tool[[str, int], str]:
+    def as_search_tool(self) -> Tool[..., str]:
         async def retrieval_augmented_generation_search(
             query: str, top_k: int = 5
         ) -> str:

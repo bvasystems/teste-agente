@@ -2258,7 +2258,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         tool_start_time = time.perf_counter()
                         try:
                             tool_result = await selected_tool.call_async(
-                                context=context, **tool_execution_suggestion.args
+                                **tool_execution_suggestion.args
                             )
                             tool_execution_time = (
                                 time.perf_counter() - tool_start_time
@@ -2942,7 +2942,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 tool_start_time = time.perf_counter()
                 try:
                     tool_result = await selected_tool.call_async(
-                        context=context, **tool_execution_suggestion.args
+                        **tool_execution_suggestion.args
                     )
                     tool_execution_time = (
                         time.perf_counter() - tool_start_time
@@ -3503,7 +3503,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         # Execute the tool
         tool_start_time = time.time()
         try:
-            tool_result = await selected_tool.call_async(context=context, **tool_args)
+            tool_result = await selected_tool.call_async(**tool_args)
             tool_execution_time = (time.time() - tool_start_time) * 1000
 
             _logger.bind_optional(
@@ -3845,7 +3845,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 tool_start_time = time.time()
                 try:
                     tool_result = await selected_tool.call_async(
-                        context=context, **tool_execution_suggestion.args
+                        **tool_execution_suggestion.args
                     )
                     tool_execution_time = (time.time() - tool_start_time) * 1000
 

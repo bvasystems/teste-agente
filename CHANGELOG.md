@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.7.41
+refactor(tools): improve type safety with ParamSpec and TypeVar
+
+Update Tool class to use ParamSpec for parameter types and TypeVar for return types, enabling better type safety and callback support. Simplify documentation and remove redundant examples while preserving core functionality.
+
+The changes include:
+- Using ParamSpec to capture function parameter types
+- Adding TypeVar for return type preservation
+- Improving before_call/after_call callback typing
+- Updating call and call_async methods to use proper type signatures
+- Simplifying documentation to focus on type-safe usage
+
+refactor(tools): simplify tool call interface by removing context param
+
 ## v0.7.40
 fix(mcp): update protocol version and fix json-rpc compliance
 
