@@ -95,7 +95,7 @@ class UserMessage(BaseModel):
     @classmethod
     def create_named(
         cls,
-        parts: list[
+        parts: Sequence[
             TextPart
             | FilePart
             | Tool[Any]
