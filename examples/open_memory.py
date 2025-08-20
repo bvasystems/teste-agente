@@ -2,21 +2,30 @@
 # cd openmemory
 # docker compose up -d
 
-
-from dotenv import load_dotenv
+import logging
+import os
 
 from agentle.agents.agent import Agent
 from agentle.agents.conversations.local_conversation_store import LocalConversationStore
 from agentle.generations.models.message_parts.text import TextPart
 from agentle.generations.models.messages.assistant_message import AssistantMessage
 from agentle.generations.models.messages.user_message import UserMessage
+from agentle.mcp.servers.stdio_mcp_server import StdioMCPServer
 
-load_dotenv()
+logging.basicConfig(level=logging.DEBUG)
 
+open_memory_server = StdioMCPServer(
+    server_name="Open Memory",
+    command="npx -y openmemory",
+    server_env={
+        "OPENMEMORY_API_KEY": os.getenv("OPENMEMORY_API_KEY") or "",
+        "CLIENT_NAME": os.getenv("CLIENT_NAME") or "",
+    },
+)
 
-conversation_store = LocalConversationStore()
-
-agent = Agent(conversation_store=conversation_store)
+agent = Agent(
+    mcp_servers=[open_memory_server], conversation_store=LocalConversationStore()
+)
 
 print("🤖 OpenMemory Agent started! Type 'quit' to exit.")
 print("-" * 50)
@@ -65,4 +74,5 @@ with agent.start_mcp_servers():
             print("\n👋 Goodbye!")
             break
         except Exception as e:
-            raise e
+            print(f"❌ Error: {e}")
+            print("Please make sure OpenMemory is running and accessible.")
