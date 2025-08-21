@@ -82,7 +82,7 @@ class TypeParser:
         Returns:
             Dictionary with type information including base_type, is_optional, etc.
         """
-        result = {
+        result: dict[str, Any] = {
             "base_type": "object",
             "is_optional": False,
             "is_list": False,
@@ -376,7 +376,7 @@ class AgentleToolToGoogleToolAdapter(Adapter[Tool[Any], "types.Tool"]):
             # We have to default to a more general type
             self._logger.info(
                 f"Union type for '{param_name}' converted to OBJECT type. "
-                f"Original union types: {parsed_type['union_types']}"
+                + f"Original union types: {parsed_type['union_types']}"
             )
 
         return schema
@@ -408,13 +408,15 @@ class AgentleToolToGoogleToolAdapter(Adapter[Tool[Any], "types.Tool"]):
             return schema
 
         # Get the type - handle both single type and array of types
-        schema_type = schema_dict.get("type", "object")
+        schema_type: Any = schema_dict.get("type", "object")
+
+        parsed_type: dict[str, Any] = {}
 
         # Handle array of types (JSON Schema allows type: ["string", "null"])
         if isinstance(schema_type, list):
             # Check if nullable
             is_nullable = "null" in schema_type
-            non_null_types = [t for t in schema_type if t != "null"]
+            non_null_types: list[str] = [t for t in schema_type if t != "null"]
 
             if non_null_types:
                 schema_type = non_null_types[0]  # Use the first non-null type
@@ -535,13 +537,6 @@ class AgentleToolToGoogleToolAdapter(Adapter[Tool[Any], "types.Tool"]):
                 schema.minimum = float(schema_dict["minimum"])
             if "maximum" in schema_dict:
                 schema.maximum = float(schema_dict["maximum"])
-            if "exclusiveMinimum" in schema_dict:
-                # Google might not support exclusive bounds
-                schema.exclusive_minimum = float(schema_dict["exclusiveMinimum"])
-            if "exclusiveMaximum" in schema_dict:
-                schema.exclusive_maximum = float(schema_dict["exclusiveMaximum"])
-            if "multipleOf" in schema_dict:
-                schema.multiple_of = float(schema_dict["multipleOf"])
 
         # Handle enums for any type
         if "enum" in schema_dict:
@@ -556,7 +551,7 @@ class AgentleToolToGoogleToolAdapter(Adapter[Tool[Any], "types.Tool"]):
         return schema
 
     def _convert_agentle_params_to_json_schema(
-        self, agentle_params: Mapping[str, Any]
+        self, agentle_params: dict[str, Any]
     ) -> dict[str, Any]:
         """
         Convert Agentle's flat parameter format to proper JSON Schema format.
@@ -613,7 +608,7 @@ class AgentleToolToGoogleToolAdapter(Adapter[Tool[Any], "types.Tool"]):
                 continue
 
             # Extract the parameter info
-            param_type_str = param_info.get("type", "string")
+            param_type_str: str = cast(dict[str, Any], param_info).get("type", "string")
             is_required = param_info.get("required", False)
 
             # Parse the type
@@ -704,10 +699,10 @@ class AgentleToolToGoogleToolAdapter(Adapter[Tool[Any], "types.Tool"]):
                         required_params = parameters_schema.required or []
                         self._logger.debug(
                             f"  - {param_name}: type={param_schema.type}, "
-                            f"description='{param_schema.description}', "
-                            f"default={param_schema.default}, "
-                            f"required={param_name in required_params}, "
-                            f"nullable={getattr(param_schema, 'nullable', False)}"
+                            + f"description='{param_schema.description}', "
+                            + f"default={param_schema.default}, "
+                            + f"required={param_name in required_params}, "
+                            + f"nullable={getattr(param_schema, 'nullable', False)}"
                         )
                     self._logger.debug(
                         f"Required parameters: {parameters_schema.required or []}"
