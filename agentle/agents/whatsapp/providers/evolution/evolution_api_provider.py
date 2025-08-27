@@ -3,6 +3,8 @@
 Evolution API implementation for WhatsApp with enhanced resilience.
 """
 
+from __future__ import annotations
+
 import logging
 import re
 import time
@@ -205,6 +207,36 @@ class EvolutionAPIProvider(WhatsAppProvider):
 
         logger.info(
             f"Evolution API provider initialized successfully for instance '{config.instance_name}'"
+        )
+
+    def clone(
+        self,
+        config: EvolutionAPIConfig | None = None,
+        session_manager: SessionManager[WhatsAppSession] | None = None,
+        session_ttl_seconds: int = 3600,
+        enable_circuit_breaker: bool = True,
+        enable_rate_limiting: bool = True,
+        max_retries: int = 3,
+        base_retry_delay: float = 1.0,
+        connection_pool_size: int = 100,
+    ) -> EvolutionAPIProvider:
+        return EvolutionAPIProvider(
+            config=self.config.clone(
+                new_base_url=config.base_url,
+                new_instance_name=config.instance_name,
+                new_api_key=config.api_key,
+                new_webhook_url=config.webhook_url,
+                new_timeout=config.timeout,
+            )
+            if config
+            else self.config,
+            session_manager=session_manager,
+            session_ttl_seconds=session_ttl_seconds,
+            enable_circuit_breaker=enable_circuit_breaker,
+            enable_rate_limiting=enable_rate_limiting,
+            max_retries=max_retries,
+            base_retry_delay=base_retry_delay,
+            connection_pool_size=connection_pool_size,
         )
 
     @override
