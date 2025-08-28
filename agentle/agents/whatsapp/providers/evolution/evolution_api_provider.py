@@ -209,6 +209,10 @@ class EvolutionAPIProvider(WhatsAppProvider):
             f"Evolution API provider initialized successfully for instance '{config.instance_name}'"
         )
 
+    def change_instance(self, instance_name: str) -> None:
+        """Change the instance of the Evolution API provider."""
+        self.config.instance_name = instance_name
+
     def clone(
         self,
         config: EvolutionAPIConfig | None = None,

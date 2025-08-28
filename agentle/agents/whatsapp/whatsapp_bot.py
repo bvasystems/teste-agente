@@ -32,6 +32,9 @@ from agentle.agents.whatsapp.models.whatsapp_webhook_payload import (
     WhatsAppWebhookPayload,
 )
 from agentle.agents.whatsapp.providers.base.whatsapp_provider import WhatsAppProvider
+from agentle.agents.whatsapp.providers.evolution.evolution_api_provider import (
+    EvolutionAPIProvider,
+)
 from agentle.generations.models.message_parts.file import FilePart
 from agentle.generations.models.message_parts.text import TextPart
 from agentle.generations.models.message_parts.tool_execution_suggestion import (
@@ -101,6 +104,12 @@ class WhatsAppBot(BaseModel):
     def stop(self) -> None:
         """Stop the WhatsApp bot."""
         run_sync(self.stop_async)
+
+    def change_instance(self, instance_name: str) -> None:
+        """Change the instance of the WhatsApp bot."""
+        provider = self.provider
+        if isinstance(provider, EvolutionAPIProvider):
+            provider.change_instance(instance_name)
 
     async def start_async(self) -> None:
         """Start the WhatsApp bot with proper initialization."""
@@ -188,7 +197,9 @@ class WhatsAppBot(BaseModel):
                 f"Cleaned up {len(abandoned_processors)} abandoned batch processors"
             )
 
-    async def handle_message(self, message: WhatsAppMessage) -> GeneratedAssistantMessage[Any] | None:
+    async def handle_message(
+        self, message: WhatsAppMessage
+    ) -> GeneratedAssistantMessage[Any] | None:
         """
         Handle incoming WhatsApp message with enhanced error handling and batching.
 
@@ -245,7 +256,7 @@ class WhatsAppBot(BaseModel):
                 await cast(
                     ConversationStore, self.agent.conversation_store
                 ).get_conversation_history_length(message.from_number)
-                == 0 # TODO(arthur): fix potential duplicate of first message
+                == 0  # TODO(arthur): fix potential duplicate of first message
                 and self.config.welcome_message
             ):
                 logger.info(
@@ -348,7 +359,7 @@ class WhatsAppBot(BaseModel):
                     logger.info(
                         f"[BATCHING] Message added to existing batch for {phone_number}"
                     )
-                
+
                 # Return None for batched messages since they're processed asynchronously
                 return None
 
@@ -671,7 +682,7 @@ class WhatsAppBot(BaseModel):
                 f"[BATCH_PROCESSING] Successfully processed batch for {phone_number}. "
                 + f"Total messages processed: {session.message_count}"
             )
-            
+
             return response
 
         except Exception as e:
@@ -733,7 +744,7 @@ class WhatsAppBot(BaseModel):
                 f"[SINGLE_MESSAGE] Successfully processed single message for {message.from_number}. "
                 + f"Total messages processed: {session.message_count}"
             )
-            
+
             return response
 
         except Exception as e:
@@ -857,13 +868,15 @@ class WhatsAppBot(BaseModel):
         # Simply return the user message - Agent will handle conversation history via chat_id
         return user_message
 
-    async def handle_webhook(self, payload: WhatsAppWebhookPayload) -> GeneratedAssistantMessage[Any] | None:
+    async def handle_webhook(
+        self, payload: WhatsAppWebhookPayload
+    ) -> GeneratedAssistantMessage[Any] | None:
         """
         Handle incoming webhook from WhatsApp.
 
         Args:
             payload: Raw webhook payload
-            
+
         Returns:
             The generated response string if a message was processed, None otherwise
         """
@@ -873,7 +886,7 @@ class WhatsAppBot(BaseModel):
             await self.provider.validate_webhook(payload)
 
             response = None
-            
+
             # Handle Evolution API events
             if payload.event == "messages.upsert":
                 logger.debug("[WEBHOOK] Handling messages.upsert event")
@@ -893,7 +906,7 @@ class WhatsAppBot(BaseModel):
             for handler in self._webhook_handlers:
                 logger.debug("[WEBHOOK] Calling custom webhook handler")
                 await handler(payload)
-                
+
             return response
 
         except Exception as e:
@@ -1073,9 +1086,10 @@ class WhatsAppBot(BaseModel):
             logger.warning("[AGENT_PROCESSING] No generation found in result")
             # Return an empty GeneratedAssistantMessage when no generation is found
             from agentle.generations.models.message_parts.text import TextPart
+
             return GeneratedAssistantMessage[Any](
                 parts=[TextPart(text="I processed your message but have no response.")],
-                parsed=None
+                parsed=None,
             )
 
         except Exception as e:
@@ -1085,12 +1099,19 @@ class WhatsAppBot(BaseModel):
             raise
 
     async def _send_response(
-        self, to: str, response: GeneratedAssistantMessage[Any] | str, reply_to: str | None = None
+        self,
+        to: str,
+        response: GeneratedAssistantMessage[Any] | str,
+        reply_to: str | None = None,
     ) -> None:
         """Send response message(s) to user with quote support."""
         # Extract text from GeneratedAssistantMessage if needed
-        response_text = response.text if isinstance(response, GeneratedAssistantMessage) else response
-        
+        response_text = (
+            response.text
+            if isinstance(response, GeneratedAssistantMessage)
+            else response
+        )
+
         logger.info(
             f"[SEND_RESPONSE] Sending response to {to} (length: {len(response_text)}, reply_to: {reply_to})"
         )
@@ -1221,7 +1242,9 @@ class WhatsAppBot(BaseModel):
 
         return final_messages
 
-    async def _handle_message_upsert(self, payload: WhatsAppWebhookPayload) -> GeneratedAssistantMessage[Any] | None:
+    async def _handle_message_upsert(
+        self, payload: WhatsAppWebhookPayload
+    ) -> GeneratedAssistantMessage[Any] | None:
         """Handle new message event."""
         logger.debug("[MESSAGE_UPSERT] Processing message upsert event")
 
@@ -1439,7 +1462,9 @@ class WhatsAppBot(BaseModel):
 
         return None
 
-    async def _handle_meta_webhook(self, payload: WhatsAppWebhookPayload) -> GeneratedAssistantMessage[Any] | None:
+    async def _handle_meta_webhook(
+        self, payload: WhatsAppWebhookPayload
+    ) -> GeneratedAssistantMessage[Any] | None:
         """Handle Meta WhatsApp Business API webhooks."""
         logger.debug("[META_WEBHOOK] Processing Meta webhook")
 
@@ -1449,7 +1474,7 @@ class WhatsAppBot(BaseModel):
                 return None
 
             response = None
-            
+
             for entry_item in payload.entry:
                 changes = entry_item.get("changes", [])
                 for change in changes:
@@ -1476,7 +1501,7 @@ class WhatsAppBot(BaseModel):
                                 )
                                 # Return the response from the last processed message
                                 response = await self.handle_message(message)
-                                
+
             return response
 
         except Exception as e:
