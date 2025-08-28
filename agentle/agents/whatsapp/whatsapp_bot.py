@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
-from collections.abc import Callable, MutableMapping, MutableSequence, Sequence
+from collections.abc import Awaitable, Callable, MutableMapping, MutableSequence, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional, cast
+from dataclasses import dataclass
 
 from rsb.coroutines.run_sync import run_sync
 from rsb.models.base_model import BaseModel
@@ -62,6 +64,13 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class CallbackWithContext:
+    """Container for callback function with optional context."""
+    callback: Callable[[str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None], None] | Callable[[str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None], Awaitable[None]]
+    context: dict[str, Any] | None = None
+
+
 class WhatsAppBot(BaseModel):
     """
     WhatsApp bot that wraps an Agentle agent with enhanced message batching and spam protection.
@@ -86,6 +95,9 @@ class WhatsAppBot(BaseModel):
         default_factory=dict
     )
     _cleanup_task: Optional[asyncio.Task[Any]] = PrivateAttr(default=None)
+    _response_callbacks: MutableSequence[CallbackWithContext] = PrivateAttr(
+        default_factory=list
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -683,6 +695,9 @@ class WhatsAppBot(BaseModel):
                 + f"Total messages processed: {session.message_count}"
             )
 
+            # Call response callbacks
+            await self._call_response_callbacks(phone_number, response)
+
             return response
 
         except Exception as e:
@@ -694,6 +709,8 @@ class WhatsAppBot(BaseModel):
             # Ensure session state is cleaned up even on error
             session.finish_batch_processing(processing_token)
             await self.provider.update_session(session)
+            # Call response callbacks with None response on error
+            await self._call_response_callbacks(phone_number, None)
             raise
 
     async def _process_single_message(
@@ -745,6 +762,9 @@ class WhatsAppBot(BaseModel):
                 + f"Total messages processed: {session.message_count}"
             )
 
+            # Call response callbacks
+            await self._call_response_callbacks(message.from_number, response)
+
             return response
 
         except Exception as e:
@@ -752,6 +772,8 @@ class WhatsAppBot(BaseModel):
                 f"[SINGLE_MESSAGE_ERROR] Error processing single message: {e}",
                 exc_info=True,
             )
+            # Call response callbacks with None response on error
+            await self._call_response_callbacks(message.from_number, None)
             raise
 
     async def _message_to_dict(self, message: WhatsAppMessage) -> dict[str, Any]:
@@ -869,18 +891,39 @@ class WhatsAppBot(BaseModel):
         return user_message
 
     async def handle_webhook(
-        self, payload: WhatsAppWebhookPayload
+        self, 
+        payload: WhatsAppWebhookPayload,
+        callback: Callable[[str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None], None] | Callable[[str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None], Awaitable[None]] | None = None,
+        callback_context: dict[str, Any] | None = None
     ) -> GeneratedAssistantMessage[Any] | None:
         """
         Handle incoming webhook from WhatsApp.
 
         Args:
             payload: Raw webhook payload
+            callback: Optional callback function to be called when a response is generated.
+                     Receives phone_number, response (or None if processing fails), and context.
+            callback_context: Optional context dictionary to pass to the callback.
 
         Returns:
             The generated response string if a message was processed, None otherwise
         """
         logger.info(f"[WEBHOOK] Received webhook event: {payload.event}")
+
+        # Temporarily register callback if provided
+        temp_callback = None
+        if callback:
+            temp_callback = CallbackWithContext(callback=callback, context=callback_context)
+            # Check if this exact callback is already registered to avoid duplicates
+            callback_exists = any(
+                existing.callback == callback and existing.context == callback_context
+                for existing in self._response_callbacks
+            )
+            if not callback_exists:
+                self._response_callbacks.append(temp_callback)
+            else:
+                # Don't add duplicate, but still track for cleanup
+                temp_callback = None
 
         try:
             await self.provider.validate_webhook(payload)
@@ -912,6 +955,10 @@ class WhatsAppBot(BaseModel):
         except Exception as e:
             logger.error(f"[WEBHOOK_ERROR] Error handling webhook: {e}", exc_info=True)
             return None
+        finally:
+            # Remove temporary callback if it was added (not a duplicate)
+            if temp_callback and temp_callback in self._response_callbacks:
+                self._response_callbacks.remove(temp_callback)
 
     def to_blacksheep_app(
         self,
@@ -1003,6 +1050,80 @@ class WhatsAppBot(BaseModel):
     def add_webhook_handler(self, handler: Callable[..., Any]) -> None:
         """Add custom webhook handler."""
         self._webhook_handlers.append(handler)
+
+    def add_response_callback(
+        self, 
+        callback: Callable[[str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None], None] | Callable[[str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None], Awaitable[None]],
+        context: dict[str, Any] | None = None,
+        allow_duplicates: bool = False
+    ) -> None:
+        """Add callback to be called when a response is generated.
+        
+        Args:
+            callback: Function that receives (phone_number, response, context) when a message is processed.
+                     Response can be None if processing failed or was skipped.
+            context: Optional dictionary with additional context to pass to the callback.
+            allow_duplicates: If False, prevents adding the same callback+context combination multiple times.
+        """
+        callback_with_context = CallbackWithContext(callback=callback, context=context)
+        
+        if not allow_duplicates:
+            # Check if this exact callback+context combination already exists
+            callback_exists = any(
+                existing.callback == callback and existing.context == context
+                for existing in self._response_callbacks
+            )
+            if callback_exists:
+                logger.warning(f"[CALLBACK] Duplicate callback registration prevented for {callback.__name__}")
+                return
+        
+        self._response_callbacks.append(callback_with_context)
+
+    def remove_response_callback(
+        self, 
+        callback: Callable[[str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None], None],
+        context: dict[str, Any] | None = None
+    ) -> bool:
+        """Remove a specific callback from the registered callbacks.
+        
+        Args:
+            callback: The callback function to remove.
+            context: The context that was used when adding the callback.
+            
+        Returns:
+            True if the callback was found and removed, False otherwise.
+        """
+        for i, existing in enumerate(self._response_callbacks):
+            if existing.callback == callback and existing.context == context:
+                self._response_callbacks.pop(i)
+                return True
+        return False
+
+    def clear_response_callbacks(self) -> int:
+        """Remove all registered response callbacks.
+        
+        Returns:
+            Number of callbacks that were removed.
+        """
+        count = len(self._response_callbacks)
+        self._response_callbacks.clear()
+        return count
+
+    async def _call_response_callbacks(
+        self, phone_number: str, response: GeneratedAssistantMessage[Any] | None
+    ) -> None:
+        """Call all registered response callbacks."""
+        for callback_with_context in self._response_callbacks:
+            try:
+                if inspect.iscoroutinefunction(callback_with_context.callback):
+                    await callback_with_context.callback(phone_number, response, callback_with_context.context)
+                else:
+                    callback_with_context.callback(phone_number, response, callback_with_context.context)
+            except Exception as e:
+                logger.error(
+                    f"[CALLBACK_ERROR] Error calling response callback for {phone_number}: {e}",
+                    exc_info=True,
+                )
 
     async def _convert_message_to_input(
         self, message: WhatsAppMessage, session: WhatsAppSession
