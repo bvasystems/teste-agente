@@ -633,79 +633,80 @@ class EvolutionAPIProvider(WhatsAppProvider):
 
     async def initialize(self) -> None:
         """Initialize the Evolution API connection with enhanced validation."""
-        logger.info(
-            f"Initializing Evolution API connection for instance '{self.config.instance_name}'"
-        )
+        return
+        # logger.info(
+        #     f"Initializing Evolution API connection for instance '{self.config.instance_name}'"
+        # )
 
-        try:
-            # Check instance status
-            url = self._build_url("instance/fetchInstances", use_message_prefix=False)
-            logger.debug(f"Fetching instances from {url}")
-            response_data = await self._make_request_with_resilience("GET", url)
+        # try:
+        #     # Check instance status
+        #     url = self._build_url("instance/fetchInstances", use_message_prefix=False)
+        #     logger.debug(f"Fetching instances from {url}")
+        #     response_data = await self._make_request_with_resilience("GET", url)
 
-            # Look for our instance in the response
-            instances = (
-                response_data if isinstance(response_data, list) else [response_data]
-            )
-            instance_found = False
-            available_instances: list[str] = []
+        #     # Look for our instance in the response
+        #     instances = (
+        #         response_data if isinstance(response_data, list) else [response_data]
+        #     )
+        #     instance_found = False
+        #     available_instances: list[str] = []
 
-            logger.debug("Processing %d instances from API response", len(instances))
+        #     logger.debug("Processing %d instances from API response", len(instances))
 
-            for instance_data in instances:
-                if isinstance(instance_data, dict):
-                    instance_name = instance_data.get("name")
+        #     for instance_data in instances:
+        #         if isinstance(instance_data, dict):
+        #             instance_name = instance_data.get("name")
 
-                    if instance_name and isinstance(instance_name, str):
-                        available_instances.append(instance_name)
-                        logger.debug(f"Found instance: {instance_name}")
+        #             if instance_name and isinstance(instance_name, str):
+        #                 available_instances.append(instance_name)
+        #                 logger.debug(f"Found instance: {instance_name}")
 
-                        if instance_name == self.config.instance_name:
-                            instance_found = True
-                            logger.info(
-                                f"Target instance '{self.config.instance_name}' found and accessible"
-                            )
+        #                 if instance_name == self.config.instance_name:
+        #                     instance_found = True
+        #                     logger.info(
+        #                         f"Target instance '{self.config.instance_name}' found and accessible"
+        #                     )
 
-                            # Log additional instance details if available
-                            if "connectionStatus" in instance_data:
-                                logger.info(
-                                    f"Instance connection status: {instance_data['connectionStatus']}"
-                                )
-                            if "profilePictureUrl" in instance_data:
-                                logger.debug("Instance has profile picture configured")
+        #                     # Log additional instance details if available
+        #                     if "connectionStatus" in instance_data:
+        #                         logger.info(
+        #                             f"Instance connection status: {instance_data['connectionStatus']}"
+        #                         )
+        #                     if "profilePictureUrl" in instance_data:
+        #                         logger.debug("Instance has profile picture configured")
 
-            if not instance_found:
-                error_msg = (
-                    f"Instance '{self.config.instance_name}' not found. "
-                    f"Available instances: {available_instances}"
-                )
-                logger.error(
-                    error_msg,
-                    extra={
-                        "target_instance": self.config.instance_name,
-                        "available_instances": available_instances,
-                        "total_instances": len(available_instances),
-                    },
-                )
-                raise EvolutionAPIError(error_msg, is_retriable=False)
+        #     if not instance_found:
+        #         error_msg = (
+        #             f"Instance '{self.config.instance_name}' not found. "
+        #             f"Available instances: {available_instances}"
+        #         )
+        #         logger.error(
+        #             error_msg,
+        #             extra={
+        #                 "target_instance": self.config.instance_name,
+        #                 "available_instances": available_instances,
+        #                 "total_instances": len(available_instances),
+        #             },
+        #         )
+        #         raise EvolutionAPIError(error_msg, is_retriable=False)
 
-            logger.info(
-                f"Evolution API provider initialized successfully for instance: {self.config.instance_name}"
-            )
+        #     logger.info(
+        #         f"Evolution API provider initialized successfully for instance: {self.config.instance_name}"
+        #     )
 
-        except EvolutionAPIError:
-            logger.error("Failed to initialize Evolution API provider due to API error")
-            raise
-        except Exception as e:
-            logger.error(
-                f"Failed to initialize Evolution API provider: {type(e).__name__}: {e}",
-                extra={
-                    "instance_name": self.config.instance_name,
-                    "base_url": self.config.base_url,
-                    "error_type": type(e).__name__,
-                },
-            )
-            raise EvolutionAPIError(f"Initialization failed: {e}", is_retriable=True)
+        # except EvolutionAPIError:
+        #     logger.error("Failed to initialize Evolution API provider due to API error")
+        #     raise
+        # except Exception as e:
+        #     logger.error(
+        #         f"Failed to initialize Evolution API provider: {type(e).__name__}: {e}",
+        #         extra={
+        #             "instance_name": self.config.instance_name,
+        #             "base_url": self.config.base_url,
+        #             "error_type": type(e).__name__,
+        #         },
+        #     )
+        #     raise EvolutionAPIError(f"Initialization failed: {e}", is_retriable=True)
 
     async def shutdown(self) -> None:
         """Shutdown the Evolution API connection and clean up resources."""

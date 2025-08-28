@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, override
 
 from rsb.models.base_model import BaseModel
 from rsb.models.field import Field
@@ -22,3 +22,12 @@ class WhatsAppMessage(BaseModel):
     group_id: str | None = None
     quoted_message_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @override
+    def model_post_init(self, context: Any, /) -> None:
+        """Post-initialize the model."""
+        if "@" in self.from_number:
+            self.from_number = self.from_number.split("@")[0]
+
+        if "@" in self.to_number:
+            self.to_number = self.to_number.split("@")[0]
