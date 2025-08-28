@@ -553,6 +553,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             "instructions": self.instructions,
             "endpoints": self.endpoints,
             "apis": self.apis,
+            "conversation_store": self.conversation_store,
             # "tools": self.tools,
         }
 
@@ -587,6 +588,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         endpoints=obj.get("endpoints") or [],
                         apis=obj.get("apis") or [],
                         tools=obj.get("tools") or [],
+                        conversation_store=obj.get("conversation_store") or None,
                     )
                 case _:
                     raise NotImplementedError("Not implemented yet.")
