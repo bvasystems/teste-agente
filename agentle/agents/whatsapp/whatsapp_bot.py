@@ -1453,7 +1453,7 @@ class WhatsAppBot(BaseModel):
         response: GeneratedAssistantMessage[Any] | str,
         reply_to: str | None = None,
     ) -> None:
-        """Send response message(s) to user with quote support."""
+        """Send response message(s) to user with quote support and line break splitting."""
         # Extract text from GeneratedAssistantMessage if needed
         response_text = (
             response.text
@@ -1465,14 +1465,24 @@ class WhatsAppBot(BaseModel):
             f"[SEND_RESPONSE] Sending response to {to} (length: {len(response_text)}, reply_to: {reply_to})"
         )
 
-        # Split long messages
-        messages = self._split_message(response_text)
+        # Split messages by line breaks and length
+        messages = self._split_message_by_line_breaks(response_text)
         logger.debug(f"[SEND_RESPONSE] Split response into {len(messages)} parts")
 
         for i, msg in enumerate(messages):
             logger.debug(
                 f"[SEND_RESPONSE] Sending message part {i + 1}/{len(messages)} to {to}"
             )
+
+            # Show typing indicator before each message if configured
+            if self.config.typing_indicator:
+                logger.debug(
+                    f"[SEND_RESPONSE] Sending typing indicator to {to} for message {i + 1}"
+                )
+                await self.provider.send_typing_indicator(
+                    to, self.config.typing_duration
+                )
+
             # Only quote the first message if quote_messages is enabled
             quoted_id = reply_to if i == 0 else None
 
@@ -1489,13 +1499,121 @@ class WhatsAppBot(BaseModel):
                 )
                 raise
 
-            # Small delay between messages
+            # Delay between messages (respecting typing duration + small buffer)
             if i < len(messages) - 1:
-                await asyncio.sleep(0.5)
+                # Use typing duration if typing indicator is enabled, otherwise use a small delay
+                delay = (
+                    self.config.typing_duration + 0.5
+                    if self.config.typing_indicator
+                    else 1.0
+                )
+                logger.debug(
+                    f"[SEND_RESPONSE] Waiting {delay}s before sending next message part"
+                )
+                await asyncio.sleep(delay)
 
         logger.info(
             f"[SEND_RESPONSE] Successfully sent all {len(messages)} message parts to {to}"
         )
+
+    def _split_message_by_line_breaks(self, text: str) -> Sequence[str]:
+        """Split message by line breaks first, then by length if needed."""
+        if not text.strip():
+            return [""]
+
+        # First split by double line breaks (paragraphs)
+        paragraphs = text.split("\n\n")
+        messages: MutableSequence[str] = []
+
+        for paragraph in paragraphs:
+            # Then split each paragraph by single line breaks
+            lines = paragraph.split("\n")
+
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+
+                # Check if this line fits within message length limits
+                if len(line) <= self.config.max_message_length:
+                    messages.append(line)
+                else:
+                    # Split long lines by length
+                    split_lines = self._split_long_line(line)
+                    messages.extend(split_lines)
+
+        # Filter out empty messages
+        final_messages = [msg for msg in messages if msg.strip()]
+
+        # If no messages were created, return a placeholder
+        if not final_messages:
+            final_messages = [""]
+
+        logger.debug(
+            f"[SPLIT_MESSAGE] Split '{text[:100]}...' into {len(final_messages)} messages"
+        )
+        return final_messages
+
+    def _split_long_line(self, line: str) -> Sequence[str]:
+        """Split a single long line into chunks that fit within message length limits."""
+        if len(line) <= self.config.max_message_length:
+            return [line]
+
+        chunks: MutableSequence[str] = []
+
+        # Try to split by sentences first (by periods, exclamation marks, question marks)
+        sentence_endings = [". ", "! ", "? "]
+        sentences: MutableSequence[str] = []
+        current_sentence = ""
+
+        i = 0
+        while i < len(line):
+            current_sentence += line[i]
+
+            # Check if we hit a sentence ending
+            for ending in sentence_endings:
+                if line[i : i + len(ending)] == ending:
+                    sentences.append(current_sentence)
+                    current_sentence = ""
+                    i += len(ending) - 1
+                    break
+
+            i += 1
+
+        # Add remaining text as last sentence
+        if current_sentence:
+            sentences.append(current_sentence)
+
+        # If we couldn't split by sentences effectively, fall back to word splitting
+        if len(sentences) <= 1:
+            sentences = line.split(" ")
+
+        # Group sentences/words into chunks that fit
+        current_chunk = ""
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+
+            test_chunk = current_chunk + (" " if current_chunk else "") + sentence
+
+            if len(test_chunk) <= self.config.max_message_length:
+                current_chunk = test_chunk
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                    current_chunk = sentence
+                else:
+                    # Single sentence/word is too long, hard split it
+                    for i in range(0, len(sentence), self.config.max_message_length):
+                        chunk = sentence[i : i + self.config.max_message_length]
+                        chunks.append(chunk)
+                    current_chunk = ""
+
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        return chunks
 
     async def _send_error_message(self, to: str, reply_to: str | None = None) -> None:
         """Send error message to user."""
