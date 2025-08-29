@@ -1273,12 +1273,10 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         _logger.bind_optional(
                             lambda log: log.debug("Cache miss, parsing and storing")
                         )
-                        if knowledge_item.is_url():
+
+                        parsed_content = None
+                        if knowledge_item.is_url() or knowledge_item.is_file_path():
                             parsed_content = await parser.parse_async(content_to_parse)
-                        elif knowledge_item.is_file_path():
-                            parsed_content = await parser.parse_async(content_to_parse)
-                        else:  # Raw text - don't cache raw text
-                            parsed_content = None
 
                         # Store in cache if we parsed something
                         if parsed_content is not None:
