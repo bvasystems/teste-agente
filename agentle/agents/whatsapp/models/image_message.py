@@ -25,16 +25,16 @@ class ImageMessage(TypedDict):
     """
 
     url: str
-    mimetype: str
+    mimetype: NotRequired[str]
     caption: NotRequired[str]
-    fileSha256: str
-    fileLength: str
-    height: int
-    width: int
-    mediaKey: str
-    fileEncSha256: str
-    directPath: str
-    mediaKeyTimestamp: str
+    fileSha256: NotRequired[str]
+    fileLength: NotRequired[str]
+    height: NotRequired[int]
+    width: NotRequired[int]
+    mediaKey: NotRequired[str]
+    fileEncSha256: NotRequired[str]
+    directPath: NotRequired[str]
+    mediaKeyTimestamp: NotRequired[str]
     jpegThumbnail: NotRequired[str]
     contextInfo: NotRequired[dict[str, Any]]
     firstScanSidecar: NotRequired[str]

@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 
 class DocumentMessage(TypedDict):
@@ -19,13 +19,13 @@ class DocumentMessage(TypedDict):
     """
 
     url: str
-    mimetype: str
-    title: str
-    fileSha256: str
-    fileLength: str
-    mediaKey: str
-    fileName: str
-    fileEncSha256: str
-    directPath: str
-    mediaKeyTimestamp: str
-    contactVcard: bool
+    mimetype: NotRequired[str]
+    title: NotRequired[str]
+    fileSha256: NotRequired[str]
+    fileLength: NotRequired[str]
+    mediaKey: NotRequired[str]
+    fileName: NotRequired[str]
+    fileEncSha256: NotRequired[str]
+    directPath: NotRequired[str]
+    mediaKeyTimestamp: NotRequired[str]
+    contactVcard: NotRequired[bool]

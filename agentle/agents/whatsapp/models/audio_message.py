@@ -20,14 +20,14 @@ class AudioMessage(TypedDict):
     """
 
     url: str
-    mimetype: str
-    fileSha256: str
-    fileLength: str
-    seconds: int
-    ptt: bool
-    mediaKey: str
-    fileEncSha256: str
-    directPath: str
-    mediaKeyTimestamp: str
+    mimetype: NotRequired[str]
+    fileSha256: NotRequired[str]
+    fileLength: NotRequired[str]
+    seconds: NotRequired[int]
+    ptt: NotRequired[bool]
+    mediaKey: NotRequired[str]
+    fileEncSha256: NotRequired[str]
+    directPath: NotRequired[str]
+    mediaKeyTimestamp: NotRequired[str]
     streamingSidecar: NotRequired[str]
     waveform: NotRequired[str]

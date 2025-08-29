@@ -1,4 +1,4 @@
-from typing import NotRequired, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 
 class VideoMessage(TypedDict):
@@ -25,5 +25,20 @@ class VideoMessage(TypedDict):
     """
 
     url: str
-    mimetype: str
+    mimetype: NotRequired[str]
     caption: NotRequired[str]
+    fileSha256: NotRequired[str]
+    fileLength: NotRequired[str]
+    height: NotRequired[int]
+    width: NotRequired[int]
+    mediaKey: NotRequired[str]
+    fileEncSha256: NotRequired[str]
+    directPath: NotRequired[str]
+    mediaKeyTimestamp: NotRequired[str]
+    jpegThumbnail: NotRequired[str]
+    contextInfo: NotRequired[dict[str, Any]]
+    firstScanSidecar: NotRequired[str]
+    firstScanLength: NotRequired[int]
+    scansSidecar: NotRequired[str]
+    scanLengths: NotRequired[list[int]]
+    midQualityFileSha256: NotRequired[str]
