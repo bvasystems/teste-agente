@@ -11,7 +11,7 @@ import os
 import tempfile
 from collections.abc import MutableSequence
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from rsb.functions.ext2mime import ext2mime
 from rsb.models.field import Field
@@ -224,41 +224,75 @@ class PDFFileParser(DocumentParser):
                 page_images: MutableSequence[Image] = []
                 image_descriptions: MutableSequence[str] = []
 
-                if self.visual_description_provider and self.strategy == "high":
-                    for image_num, image in enumerate(page.images):
-                        image_bytes = image.data
-                        image_hash = hashlib.sha256(image_bytes).hexdigest()
+                # Extract individual images for the Image objects
+                for image in page.images:
+                    page_images.append(
+                        Image(
+                            contents=image.data,
+                            name=image.name,
+                            ocr_text="",  # Will be filled by page screenshot analysis
+                        )
+                    )
 
-                        if image_hash in image_cache:
-                            cached_md, cached_ocr = image_cache[image_hash]
-                            image_md = cached_md
-                            ocr_text = cached_ocr
+                # If there are images and we have a visual description provider, 
+                # capture a screenshot of the entire page instead of processing each image individually
+                if page_images and self.visual_description_provider and self.strategy == "high":
+                    try:
+                        import pymupdf
+                        
+                        # Create a temporary PDF with just this page for screenshot
+                        temp_pdf_path = os.path.join(temp_dir, f"page_{page_num}.pdf")
+                        temp_doc = pymupdf.open()
+                        temp_doc.insert_pdf(pymupdf.open(file_path), from_page=page_num, to_page=page_num)
+                        temp_doc.save(temp_pdf_path)
+                        temp_doc.close()
+                        
+                        # Render the page as an image
+                        doc = pymupdf.open(temp_pdf_path)  # type: ignore
+                        page_obj = doc[0]  # type: ignore
+                        pix = page_obj.get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0))  # type: ignore # 2x scale for better quality
+                        page_image_bytes: bytes = pix.tobytes("png")  # type: ignore
+                        doc.close()  # type: ignore
+                        
+                        # Generate hash for caching
+                        page_hash = hashlib.sha256(page_image_bytes).hexdigest()  # type: ignore
+                        
+                        if page_hash in image_cache:
+                            cached_md, cached_ocr = image_cache[page_hash]
+                            page_description = cached_md
+                            page_ocr_text = cached_ocr
                         else:
+                            # Send the page screenshot to the visual description agent
                             agent_input = FilePart(
-                                mime_type=ext2mime(Path(image.name).suffix),
-                                data=image.data,
+                                mime_type="image/png",
+                                data=page_image_bytes,  # type: ignore
                             )
 
                             agent_response = await self.visual_description_provider.generate_by_prompt_async(
                                 agent_input,
-                                developer_prompt="You are a helpful assistant that deeply understands visual media.",
+                                developer_prompt="You are a helpful assistant that deeply understands visual media. Analyze this PDF page screenshot and extract all text content and describe any visual elements like images, charts, diagrams, etc.",
                                 response_schema=VisualMediaDescription,
                             )
 
-                            image_md = agent_response.parsed.md
-                            ocr_text = agent_response.parsed.ocr_text or ""
-                            image_cache[image_hash] = (image_md, ocr_text or "")
-
-                        image_descriptions.append(
-                            f"Page Image {image_num + 1}: {image_md}"
-                        )
-                        page_images.append(
-                            Image(
-                                contents=image.data,
-                                name=image.name,
-                                ocr_text=ocr_text,
-                            )
-                        )
+                            page_description = agent_response.parsed.md
+                            page_ocr_text = agent_response.parsed.ocr_text or ""
+                            image_cache[page_hash] = (page_description, page_ocr_text)
+                        
+                        # Update all images on this page with the OCR text from the page analysis
+                        for image in page_images:
+                            image.ocr_text = page_ocr_text
+                        
+                        # Add the page description
+                        image_descriptions.append(f"Page Visual Content: {page_description}")
+                        
+                    except ImportError:
+                        logger.warning("PyMuPDF not available for page screenshot optimization. Falling back to individual image processing.")
+                        # Fallback to original individual image processing
+                        await self._process_images_individually(page, page_images, image_descriptions, image_cache)
+                    except Exception as e:
+                        logger.warning(f"Failed to capture page screenshot: {e}. Falling back to individual image processing.")
+                        # Fallback to original individual image processing
+                        await self._process_images_individually(page, page_images, image_descriptions, image_cache)
 
                 page_text = [page.extract_text(), "".join(image_descriptions)]
                 md = "".join(page_text)
@@ -282,3 +316,54 @@ class PDFFileParser(DocumentParser):
         except FileValidationError as e:
             logger.error(f"File validation failed for PDF file: {e}")
             raise ValueError(f"PDF file validation failed: {e}") from e
+
+    async def _process_images_individually(
+        self, 
+        page: Any, 
+        page_images: MutableSequence[Image], 
+        image_descriptions: MutableSequence[str], 
+        image_cache: dict[str, tuple[str, str]]
+    ) -> None:
+        """
+        Fallback method to process images individually when page screenshot optimization fails.
+        
+        This method processes each image on a PDF page individually using the visual description
+        provider, which is the original behavior before the optimization.
+        
+        Args:
+            page: The PDF page object from pypdf
+            page_images: List of Image objects to update with OCR text
+            image_descriptions: List to append image descriptions to
+            image_cache: Cache dictionary for storing processed image results
+        """
+        if not self.visual_description_provider:
+            return
+            
+        for image_num, (image, page_image) in enumerate(zip(page.images, page_images)):
+            image_bytes = image.data
+            image_hash = hashlib.sha256(image_bytes).hexdigest()
+
+            if image_hash in image_cache:
+                cached_md, cached_ocr = image_cache[image_hash]
+                image_md = cached_md
+                ocr_text = cached_ocr
+            else:
+                agent_input = FilePart(
+                    mime_type=ext2mime(Path(image.name).suffix),
+                    data=image.data,
+                )
+
+                agent_response = await self.visual_description_provider.generate_by_prompt_async(
+                    agent_input,
+                    developer_prompt="You are a helpful assistant that deeply understands visual media.",
+                    response_schema=VisualMediaDescription,
+                )
+
+                image_md = agent_response.parsed.md
+                ocr_text = agent_response.parsed.ocr_text or ""
+                image_cache[image_hash] = (image_md, ocr_text or "")
+
+            image_descriptions.append(
+                f"Page Image {image_num + 1}: {image_md}"
+            )
+            page_image.ocr_text = ocr_text
