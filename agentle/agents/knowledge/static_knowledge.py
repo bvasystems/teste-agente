@@ -1,12 +1,16 @@
-from rsb.models.base_model import BaseModel
-from rsb.models.field import Field
+from __future__ import annotations
+
 from typing import Literal, Optional
 
+from rsb.models.base_model import BaseModel
+from rsb.models.field import Field
+
+from agentle.parsing.parsed_file import ParsedFile
 from agentle.utils.file_validation import (
-    is_url,
-    is_file_path,
-    validate_content_type,
     FileValidationError,
+    is_file_path,
+    is_url,
+    validate_content_type,
 )
 
 NO_CACHE = None
@@ -31,6 +35,14 @@ class StaticKnowledge(BaseModel):
 
     parse_timeout: float = Field(default=30)
     """The timeout for the parse operation in seconds."""
+
+    @classmethod
+    def from_parsed_file(
+        cls,
+        parsed_file: ParsedFile,
+        cache: int | NoCache | Literal["infinite"] = NO_CACHE,
+    ) -> StaticKnowledge:
+        return cls(content=parsed_file.md, cache=cache)
 
     def is_url(self) -> bool:
         """Check if the content is a URL.
