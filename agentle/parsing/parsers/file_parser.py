@@ -1,14 +1,6 @@
-import inspect
 from pathlib import Path
-from typing import Any, Literal, MutableMapping, cast
+from typing import Literal, cast
 from urllib.parse import urlparse
-
-from agentle.utils.file_validation import (
-    FileValidationError,
-    resolve_file_path,
-    validate_file_exists,
-    is_url as is_valid_url,
-)
 
 from rsb.functions.create_instance_dynamically import create_instance_dynamically
 from rsb.models.field import Field
@@ -16,6 +8,14 @@ from rsb.models.field import Field
 from agentle.generations.providers.base.generation_provider import GenerationProvider
 from agentle.parsing.document_parser import DocumentParser
 from agentle.parsing.parsed_file import ParsedFile
+from agentle.utils.file_validation import (
+    FileValidationError,
+    resolve_file_path,
+    validate_file_exists,
+)
+from agentle.utils.file_validation import (
+    is_url as is_valid_url,
+)
 
 
 class FileParser(DocumentParser):
@@ -251,21 +251,10 @@ class FileParser(DocumentParser):
                     f"Unsupported file extension '{path.suffix}' for file: {resolved_path}"
                 )
 
-        # Get the signature of the parser constructor
-        parser_signature = inspect.signature(parser_cls.__init__)
-        valid_params = parser_signature.parameters.keys()
-
-        # Only include arguments that are accepted by the parser constructor
-        potential_args = {
-            "strategy": self.strategy,
-            "visual_description_provider": self.visual_description_provider,
-            "audio_description_provider": self.audio_description_provider,
-        }
-
-        kwargs: MutableMapping[str, Any] = {}
-        for arg_name, arg_value in potential_args.items():
-            if arg_name in valid_params:
-                kwargs[arg_name] = arg_value
-
-        # Use resolved path for parsing to ensure absolute path is used
-        return await parser_cls(**kwargs).parse_async(str(resolved_path))
+        return await create_instance_dynamically(
+            parser_cls,
+            visual_description_provider=self.visual_description_provider,
+            audio_description_provider=self.audio_description_provider,
+            parse_timeout=self.parse_timeout,
+            strategy=self.strategy,
+        ).parse_async(document_path=str(resolved_path))
