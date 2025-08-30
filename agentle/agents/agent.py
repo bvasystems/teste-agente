@@ -256,9 +256,6 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
     ```
     """
 
-    # Dear dev
-    # Really sorry to use "Any" here. But if we use DocumentParser, we get an import cycle.
-    # No worries, in the model_validator, we check if it's a DocumentParser.
     document_parser: DocumentParser | None = Field(default=None)
     """
     A document parser to be used by the agent. This will be used to parse the static
