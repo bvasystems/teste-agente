@@ -240,7 +240,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
     static_knowledge: Sequence[StaticKnowledge | str] = Field(default_factory=list)
     """
     Static knowledge to be used by the agent. This will be used to enrich the agent's
-    knowledge base. This will be FULLY (**entire document**) indexed to the conversation.
+    knowledge base. This will be FULLY indexed to the conversation (**entire document**).
     This can be any url or a local file path.
     
     You can provide a cache duration (in seconds) to cache the parsed content for subsequent calls.
@@ -555,6 +555,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             "endpoints": self.endpoints,
             "apis": self.apis,
             "conversation_store": self.conversation_store,
+            "static_knowledge": self.static_knowledge,
             # "tools": self.tools,
         }
 
@@ -590,6 +591,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         apis=obj.get("apis") or [],
                         tools=obj.get("tools") or [],
                         conversation_store=obj.get("conversation_store") or None,
+                        static_knowledge=obj.get("static_knowledge") or [],
                     )
                 case _:
                     raise NotImplementedError("Not implemented yet.")
