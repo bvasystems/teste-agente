@@ -190,8 +190,9 @@ class WhatsAppBot(BaseModel):
             except Exception as e:
                 logger.error(f"Error in cleanup loop: {e}")
 
+    # Fix 3: Enhanced cleanup logic that respects active message sending
     async def _cleanup_abandoned_processors(self) -> None:
-        """Clean up batch processors that have been running too long."""
+        """Clean up batch processors that have been running too long, but protect active message sending."""
         abandoned_processors: MutableSequence[str] = []
 
         for phone_number, task in self._batch_processors.items():
@@ -201,10 +202,28 @@ class WhatsAppBot(BaseModel):
 
             # Check if session is still processing
             session = await self.provider.get_session(phone_number)
-            if session and session.is_batch_expired(
-                self.config.max_batch_timeout_seconds * 2
-            ):
-                logger.warning(f"Found abandoned batch processor for {phone_number}")
+            if not session:
+                # No session found, abandon this processor
+                abandoned_processors.append(phone_number)
+                task.cancel()
+                continue
+
+            # CRITICAL: Don't abandon if currently sending messages
+            is_sending_messages = session.context_data.get("is_sending_messages", False)
+
+            if is_sending_messages:
+                logger.info(
+                    f"[CLEANUP] Protecting batch processor for {phone_number} - currently sending messages"
+                )
+                continue
+
+            # Check if batch has been running too long
+            if session.is_batch_expired(
+                self.config.max_batch_timeout_seconds * 3
+            ):  # Give more time
+                logger.warning(
+                    f"[CLEANUP] Found abandoned batch processor for {phone_number} (not sending messages)"
+                )
                 abandoned_processors.append(phone_number)
                 task.cancel()
 
@@ -687,19 +706,14 @@ class WhatsAppBot(BaseModel):
 
             logger.info("[BATCH_PROCESSOR] ═══════════ BATCH PROCESSOR END ═══════════")
 
+    # Fix 2: Enhanced session timeout management during message sending
     async def _process_message_batch(
         self, phone_number: str, session: WhatsAppSession, processing_token: str
     ) -> GeneratedAssistantMessage[Any] | None:
-        """Process a batch of messages for a user with token validation."""
+        """Process a batch of messages for a user with enhanced timeout protection."""
         logger.info("[BATCH_PROCESSING] ═══════════ BATCH PROCESSING START ═══════════")
         logger.info(
             f"[BATCH_PROCESSING] Phone: {phone_number}, Token: {processing_token}"
-        )
-        logger.info(
-            f"[BATCH_PROCESSING] Pending messages count: {len(session.pending_messages)}"
-        )
-        logger.info(
-            f"[BATCH_PROCESSING] Current response callbacks count: {len(self._response_callbacks)}"
         )
 
         if not session.pending_messages:
@@ -711,6 +725,11 @@ class WhatsAppBot(BaseModel):
             return None
 
         try:
+            # IMPORTANT: Mark session as "sending messages" to prevent cleanup during sending
+            session.context_data["is_sending_messages"] = True
+            session.context_data["sending_started_at"] = datetime.now().isoformat()
+            await self.provider.update_session(session)
+
             # Show typing indicator
             if self.config.typing_indicator:
                 logger.debug(
@@ -740,9 +759,6 @@ class WhatsAppBot(BaseModel):
             logger.info(
                 f"[BATCH_PROCESSING] ✅ Agent processing complete for {phone_number}"
             )
-            logger.info(
-                f"[BATCH_PROCESSING] Response generated: {response is not None}"  # type: ignore
-            )
 
             if response:
                 logger.info(
@@ -758,11 +774,15 @@ class WhatsAppBot(BaseModel):
             logger.info(
                 f"[BATCH_PROCESSING] 📤 Sending response to {phone_number} (quote_messages={self.config.quote_messages}, reply to: {first_message_id})"
             )
+
+            # CRITICAL: Send response with enhanced error handling
             await self._send_response(phone_number, response, first_message_id)
 
-            # Update session
+            # Update session - clear sending state
             session.message_count += len(pending_messages)
             session.last_activity = datetime.now()
+            session.context_data["is_sending_messages"] = False
+            session.context_data["sending_completed_at"] = datetime.now().isoformat()
 
             # Finish batch processing with token validation
             session.finish_batch_processing(processing_token)
@@ -772,15 +792,8 @@ class WhatsAppBot(BaseModel):
                 f"[BATCH_PROCESSING] ✅ Successfully processed batch for {phone_number}. Total messages processed: {session.message_count}"
             )
 
-            # Call response callbacks - THIS IS CRITICAL
-            logger.info(
-                f"[BATCH_PROCESSING] 📞 About to call response callbacks for {phone_number}"
-            )
+            # Call response callbacks
             await self._call_response_callbacks(phone_number, response)
-            logger.info(
-                f"[BATCH_PROCESSING] ✅ Response callbacks completed for {phone_number}"
-            )
-
             return response
 
         except Exception as e:
@@ -788,22 +801,24 @@ class WhatsAppBot(BaseModel):
                 f"[BATCH_PROCESSING_ERROR] ❌ Error processing message batch for {phone_number}: {e}",
                 exc_info=True,
             )
+
+            # Clear sending state on error
+            try:
+                session.context_data["is_sending_messages"] = False
+                session.context_data["sending_error_at"] = datetime.now().isoformat()
+                session.context_data["sending_error"] = str(e)
+            except:
+                pass
+
             await self._send_error_message(phone_number)
+
             # Ensure session state is cleaned up even on error
             session.finish_batch_processing(processing_token)
             await self.provider.update_session(session)
 
-            # Call response callbacks with None response on error - THIS IS CRITICAL
-            logger.info(
-                "[BATCH_PROCESSING] 📞 Calling response callbacks with None response due to error"
-            )
+            # Call response callbacks with None response on error
             await self._call_response_callbacks(phone_number, None)
-            logger.info("[BATCH_PROCESSING] ✅ Error response callbacks completed")
             raise
-        finally:
-            logger.info(
-                "[BATCH_PROCESSING] ═══════════ BATCH PROCESSING END ═══════════"
-            )
 
     async def _process_single_message(
         self, message: WhatsAppMessage, session: WhatsAppSession
@@ -1447,13 +1462,14 @@ class WhatsAppBot(BaseModel):
             )
             raise
 
+    # Fix 1: Robust message sending with retry and continuation
     async def _send_response(
         self,
         to: str,
         response: GeneratedAssistantMessage[Any] | str,
         reply_to: str | None = None,
     ) -> None:
-        """Send response message(s) to user with quote support and line break splitting."""
+        """Send response message(s) to user with enhanced error handling and retry logic."""
         # Extract text from GeneratedAssistantMessage if needed
         response_text = (
             response.text
@@ -1467,7 +1483,11 @@ class WhatsAppBot(BaseModel):
 
         # Split messages by line breaks and length
         messages = self._split_message_by_line_breaks(response_text)
-        logger.debug(f"[SEND_RESPONSE] Split response into {len(messages)} parts")
+        logger.info(f"[SEND_RESPONSE] Split response into {len(messages)} parts")
+
+        # Track sending state to handle partial failures
+        successfully_sent_count = 0
+        failed_parts: list[dict[str, Any]] = []
 
         for i, msg in enumerate(messages):
             logger.debug(
@@ -1476,28 +1496,65 @@ class WhatsAppBot(BaseModel):
 
             # Show typing indicator before each message if configured
             if self.config.typing_indicator:
-                logger.debug(
-                    f"[SEND_RESPONSE] Sending typing indicator to {to} for message {i + 1}"
-                )
-                await self.provider.send_typing_indicator(
-                    to, self.config.typing_duration
-                )
+                try:
+                    logger.debug(
+                        f"[SEND_RESPONSE] Sending typing indicator to {to} for message {i + 1}"
+                    )
+                    await self.provider.send_typing_indicator(
+                        to, self.config.typing_duration
+                    )
+                except Exception as e:
+                    # Don't let typing indicator failures break message sending
+                    logger.warning(
+                        f"[SEND_RESPONSE] Failed to send typing indicator: {e}"
+                    )
 
             # Only quote the first message if quote_messages is enabled
             quoted_id = reply_to if i == 0 else None
 
-            try:
-                sent_message = await self.provider.send_text_message(
-                    to=to, text=msg, quoted_message_id=quoted_id
+            # Retry logic for individual message parts
+            max_retries = 3
+            retry_delay = 1.0
+            sent_successfully = False
+
+            for attempt in range(max_retries + 1):
+                try:
+                    sent_message = await self.provider.send_text_message(
+                        to=to, text=msg, quoted_message_id=quoted_id
+                    )
+                    logger.debug(
+                        f"[SEND_RESPONSE] Successfully sent message part {i + 1} to {to}: {sent_message.id}"
+                    )
+                    sent_successfully = True
+                    successfully_sent_count += 1
+                    break
+
+                except Exception as e:
+                    if attempt < max_retries:
+                        # Calculate exponential backoff delay
+                        delay = retry_delay * (2**attempt)
+                        logger.warning(
+                            f"[SEND_RESPONSE] Failed to send message part {i + 1} to {to} (attempt {attempt + 1}/{max_retries + 1}), retrying in {delay}s: {e}"
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        # Final failure - log but continue with next parts
+                        logger.error(
+                            f"[SEND_RESPONSE_ERROR] Failed to send message part {i + 1} to {to} after {max_retries + 1} attempts: {e}"
+                        )
+                        failed_parts.append(
+                            {
+                                "part_number": i + 1,
+                                "text": msg[:100] + "..." if len(msg) > 100 else msg,
+                                "error": str(e),
+                            }
+                        )
+
+            # If this part failed, continue with next parts instead of stopping
+            if not sent_successfully:
+                logger.warning(
+                    f"[SEND_RESPONSE] Message part {i + 1} failed, continuing with remaining parts"
                 )
-                logger.debug(
-                    f"[SEND_RESPONSE] Successfully sent message part {i + 1} to {to}: {sent_message.id}"
-                )
-            except Exception as e:
-                logger.error(
-                    f"[SEND_RESPONSE_ERROR] Failed to send message part {i + 1} to {to}: {e}"
-                )
-                raise
 
             # Delay between messages (respecting typing duration + small buffer)
             if i < len(messages) - 1:
@@ -1512,47 +1569,101 @@ class WhatsAppBot(BaseModel):
                 )
                 await asyncio.sleep(delay)
 
-        logger.info(
-            f"[SEND_RESPONSE] Successfully sent all {len(messages)} message parts to {to}"
-        )
+        # Log final sending results
+        if failed_parts:
+            logger.error(
+                f"[SEND_RESPONSE] Completed sending with {successfully_sent_count}/{len(messages)} parts successful, {len(failed_parts)} failed"
+            )
+            logger.error(f"[SEND_RESPONSE] Failed parts details: {failed_parts}")
 
+            # Optionally send error notification for partial failures
+            if successfully_sent_count == 0:
+                # Total failure - send error message
+                await self._send_error_message(to, reply_to)
+            elif len(failed_parts) > 0:
+                # Partial failure - optionally notify user
+                try:
+                    error_msg = f"⚠️ Algumas partes da mensagem podem não ter sido enviadas devido a problemas técnicos. {len(failed_parts)} de {len(messages)} partes falharam."
+                    await self.provider.send_text_message(to=to, text=error_msg)
+                except Exception as e:
+                    logger.warning(
+                        f"[SEND_RESPONSE] Failed to send partial failure notification: {e}"
+                    )
+        else:
+            logger.info(
+                f"[SEND_RESPONSE] Successfully sent all {len(messages)} message parts to {to}"
+            )
+
+    # Fix 4: Enhanced message splitting with better error handling
     def _split_message_by_line_breaks(self, text: str) -> Sequence[str]:
-        """Split message by line breaks first, then by length if needed."""
-        if not text.strip():
-            return [""]
+        """Split message by line breaks first, then by length if needed with enhanced validation."""
+        if not text or not text.strip():
+            return ["[Mensagem vazia]"]  # Portuguese: "Empty message"
 
-        # First split by double line breaks (paragraphs)
-        paragraphs = text.split("\n\n")
-        messages: MutableSequence[str] = []
+        try:
+            # First split by double line breaks (paragraphs)
+            paragraphs = text.split("\n\n")
+            messages: MutableSequence[str] = []
 
-        for paragraph in paragraphs:
-            # Then split each paragraph by single line breaks
-            lines = paragraph.split("\n")
-
-            for line in lines:
-                line = line.strip()
-                if not line:
+            for paragraph in paragraphs:
+                if not paragraph.strip():
                     continue
 
-                # Check if this line fits within message length limits
-                if len(line) <= self.config.max_message_length:
-                    messages.append(line)
-                else:
-                    # Split long lines by length
-                    split_lines = self._split_long_line(line)
-                    messages.extend(split_lines)
+                # Then split each paragraph by single line breaks
+                lines = paragraph.split("\n")
 
-        # Filter out empty messages
-        final_messages = [msg for msg in messages if msg.strip()]
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
 
-        # If no messages were created, return a placeholder
-        if not final_messages:
-            final_messages = [""]
+                    # Check if this line fits within message length limits
+                    if len(line) <= self.config.max_message_length:
+                        messages.append(line)
+                    else:
+                        # Split long lines by length
+                        split_lines = self._split_long_line(line)
+                        messages.extend(split_lines)
 
-        logger.debug(
-            f"[SPLIT_MESSAGE] Split '{text[:100]}...' into {len(final_messages)} messages"
-        )
-        return final_messages
+            # Filter out empty messages and validate
+            final_messages = []
+            for msg in messages:
+                if msg and msg.strip():
+                    # Ensure message doesn't exceed WhatsApp's absolute limit
+                    if len(msg) > 65536:  # WhatsApp's hard limit
+                        # Split even further if needed
+                        for i in range(0, len(msg), 65536):
+                            chunk = msg[i : i + 65536]
+                            if chunk.strip():
+                                final_messages.append(chunk.strip())
+                    else:
+                        final_messages.append(msg.strip())
+
+            # If no valid messages were created, return a placeholder
+            if not final_messages:
+                final_messages = [
+                    "[Não foi possível processar a mensagem]"
+                ]  # Portuguese: "Could not process message"
+
+            logger.debug(
+                f"[SPLIT_MESSAGE] Split message of {len(text)} chars into {len(final_messages)} parts"
+            )
+
+            # Log if we have many parts (potential performance issue)
+            if len(final_messages) > 10:
+                logger.warning(
+                    f"[SPLIT_MESSAGE] Large message split into {len(final_messages)} parts - this may take time to send"
+                )
+
+            return final_messages
+
+        except Exception as e:
+            logger.error(f"[SPLIT_MESSAGE_ERROR] Error splitting message: {e}")
+            # Fallback: return original message truncated if needed
+            if len(text) <= self.config.max_message_length:
+                return [text]
+            else:
+                return [text[: self.config.max_message_length]]
 
     def _split_long_line(self, line: str) -> Sequence[str]:
         """Split a single long line into chunks that fit within message length limits."""
