@@ -179,7 +179,6 @@ class WhatsAppBot(BaseModel):
         # REMOVED: context_manager.close() - no longer needed
         logger.info("WhatsApp bot stopped")
 
-
     async def handle_message(
         self, message: WhatsAppMessage
     ) -> GeneratedAssistantMessage[Any] | None:
@@ -297,7 +296,6 @@ class WhatsAppBot(BaseModel):
                 "[MESSAGE_HANDLER] ═══════════ MESSAGE HANDLER EXIT ═══════════"
             )
 
-
     async def _cleanup_loop(self) -> None:
         """Background task to clean up abandoned batch processors."""
         while self._running:
@@ -308,59 +306,6 @@ class WhatsAppBot(BaseModel):
                 break
             except Exception as e:
                 logger.error(f"Error in cleanup loop: {e}")
-
-    # Fix 3: Enhanced cleanup logic that respects active message sending
-    async def _cleanup_abandoned_processors(self) -> None:
-        """Clean up batch processors that have been running too long, but protect active message sending."""
-        abandoned_processors: MutableSequence[str] = []
-
-        for phone_number, task in self._batch_processors.items():
-            if task.done():
-                abandoned_processors.append(phone_number)
-                continue
-
-            # Check if session is still processing
-            session = await self.provider.get_session(phone_number)
-            if not session:
-                # No session found, abandon this processor
-                abandoned_processors.append(phone_number)
-                task.cancel()
-                continue
-
-            # CRITICAL: Don't abandon if currently sending messages
-            is_sending_messages = session.context_data.get("is_sending_messages", False)
-
-            if is_sending_messages:
-                logger.info(
-                    f"[CLEANUP] Protecting batch processor for {phone_number} - currently sending messages"
-                )
-                continue
-
-            # Check if batch has been running too long
-            if session.is_batch_expired(
-                self.config.max_batch_timeout_seconds * 3
-            ):  # Give more time
-                logger.warning(
-                    f"[CLEANUP] Found abandoned batch processor for {phone_number} (not sending messages)"
-                )
-                abandoned_processors.append(phone_number)
-                task.cancel()
-
-                # Reset session state
-                session.reset_session()
-                await self.provider.update_session(session)
-
-        # Clean up abandoned processors
-        for phone_number in abandoned_processors:
-            if phone_number in self._batch_processors:
-                del self._batch_processors[phone_number]
-            if phone_number in self._processing_locks:
-                del self._processing_locks[phone_number]
-
-        if abandoned_processors:
-            logger.info(
-                f"Cleaned up {len(abandoned_processors)} abandoned batch processors"
-            )
 
     async def handle_webhook(
         self,
@@ -651,6 +596,58 @@ class WhatsAppBot(BaseModel):
         logger.info("[CLEAR_CALLBACKS] ✅ All callbacks cleared")
         logger.info("[CLEAR_CALLBACKS] ═══════════ CALLBACKS CLEARED ═══════════")
         return count
+
+    async def _cleanup_abandoned_processors(self) -> None:
+        """Clean up batch processors that have been running too long, but protect active message sending."""
+        abandoned_processors: MutableSequence[str] = []
+
+        for phone_number, task in self._batch_processors.items():
+            if task.done():
+                abandoned_processors.append(phone_number)
+                continue
+
+            # Check if session is still processing
+            session = await self.provider.get_session(phone_number)
+            if not session:
+                # No session found, abandon this processor
+                abandoned_processors.append(phone_number)
+                task.cancel()
+                continue
+
+            # CRITICAL: Don't abandon if currently sending messages
+            is_sending_messages = session.context_data.get("is_sending_messages", False)
+
+            if is_sending_messages:
+                logger.info(
+                    f"[CLEANUP] Protecting batch processor for {phone_number} - currently sending messages"
+                )
+                continue
+
+            # Check if batch has been running too long
+            if session.is_batch_expired(
+                self.config.max_batch_timeout_seconds * 3
+            ):  # Give more time
+                logger.warning(
+                    f"[CLEANUP] Found abandoned batch processor for {phone_number} (not sending messages)"
+                )
+                abandoned_processors.append(phone_number)
+                task.cancel()
+
+                # Reset session state
+                session.reset_session()
+                await self.provider.update_session(session)
+
+        # Clean up abandoned processors
+        for phone_number in abandoned_processors:
+            if phone_number in self._batch_processors:
+                del self._batch_processors[phone_number]
+            if phone_number in self._processing_locks:
+                del self._processing_locks[phone_number]
+
+        if abandoned_processors:
+            logger.info(
+                f"Cleaned up {len(abandoned_processors)} abandoned batch processors"
+            )
 
     async def _handle_message_with_batching(
         self, message: WhatsAppMessage, session: WhatsAppSession
@@ -998,7 +995,6 @@ class WhatsAppBot(BaseModel):
 
             logger.info("[BATCH_PROCESSOR] ═══════════ BATCH PROCESSOR END ═══════════")
 
-    # Fix 2: Enhanced session timeout management during message sending
     async def _process_message_batch(
         self, phone_number: str, session: WhatsAppSession, processing_token: str
     ) -> GeneratedAssistantMessage[Any] | None:
@@ -1464,7 +1460,6 @@ class WhatsAppBot(BaseModel):
             )
             raise
 
-    # Fix 1: Robust message sending with retry and continuation
     async def _send_response(
         self,
         to: str,
@@ -1596,7 +1591,6 @@ class WhatsAppBot(BaseModel):
                 f"[SEND_RESPONSE] Successfully sent all {len(messages)} message parts to {to}"
             )
 
-    # Fix 4: Enhanced message splitting with better error handling
     def _split_message_by_line_breaks(self, text: str) -> Sequence[str]:
         """Split message by line breaks first, then by length if needed with enhanced validation."""
         if not text or not text.strip():
