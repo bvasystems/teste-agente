@@ -179,69 +179,6 @@ class WhatsAppBot(BaseModel):
         # REMOVED: context_manager.close() - no longer needed
         logger.info("WhatsApp bot stopped")
 
-    async def _cleanup_loop(self) -> None:
-        """Background task to clean up abandoned batch processors."""
-        while self._running:
-            try:
-                await asyncio.sleep(60)  # Check every minute
-                await self._cleanup_abandoned_processors()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error in cleanup loop: {e}")
-
-    # Fix 3: Enhanced cleanup logic that respects active message sending
-    async def _cleanup_abandoned_processors(self) -> None:
-        """Clean up batch processors that have been running too long, but protect active message sending."""
-        abandoned_processors: MutableSequence[str] = []
-
-        for phone_number, task in self._batch_processors.items():
-            if task.done():
-                abandoned_processors.append(phone_number)
-                continue
-
-            # Check if session is still processing
-            session = await self.provider.get_session(phone_number)
-            if not session:
-                # No session found, abandon this processor
-                abandoned_processors.append(phone_number)
-                task.cancel()
-                continue
-
-            # CRITICAL: Don't abandon if currently sending messages
-            is_sending_messages = session.context_data.get("is_sending_messages", False)
-
-            if is_sending_messages:
-                logger.info(
-                    f"[CLEANUP] Protecting batch processor for {phone_number} - currently sending messages"
-                )
-                continue
-
-            # Check if batch has been running too long
-            if session.is_batch_expired(
-                self.config.max_batch_timeout_seconds * 3
-            ):  # Give more time
-                logger.warning(
-                    f"[CLEANUP] Found abandoned batch processor for {phone_number} (not sending messages)"
-                )
-                abandoned_processors.append(phone_number)
-                task.cancel()
-
-                # Reset session state
-                session.reset_session()
-                await self.provider.update_session(session)
-
-        # Clean up abandoned processors
-        for phone_number in abandoned_processors:
-            if phone_number in self._batch_processors:
-                del self._batch_processors[phone_number]
-            if phone_number in self._processing_locks:
-                del self._processing_locks[phone_number]
-
-        if abandoned_processors:
-            logger.info(
-                f"Cleaned up {len(abandoned_processors)} abandoned batch processors"
-            )
 
     async def handle_message(
         self, message: WhatsAppMessage
@@ -359,6 +296,361 @@ class WhatsAppBot(BaseModel):
             logger.info(
                 "[MESSAGE_HANDLER] ═══════════ MESSAGE HANDLER EXIT ═══════════"
             )
+
+
+    async def _cleanup_loop(self) -> None:
+        """Background task to clean up abandoned batch processors."""
+        while self._running:
+            try:
+                await asyncio.sleep(60)  # Check every minute
+                await self._cleanup_abandoned_processors()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in cleanup loop: {e}")
+
+    # Fix 3: Enhanced cleanup logic that respects active message sending
+    async def _cleanup_abandoned_processors(self) -> None:
+        """Clean up batch processors that have been running too long, but protect active message sending."""
+        abandoned_processors: MutableSequence[str] = []
+
+        for phone_number, task in self._batch_processors.items():
+            if task.done():
+                abandoned_processors.append(phone_number)
+                continue
+
+            # Check if session is still processing
+            session = await self.provider.get_session(phone_number)
+            if not session:
+                # No session found, abandon this processor
+                abandoned_processors.append(phone_number)
+                task.cancel()
+                continue
+
+            # CRITICAL: Don't abandon if currently sending messages
+            is_sending_messages = session.context_data.get("is_sending_messages", False)
+
+            if is_sending_messages:
+                logger.info(
+                    f"[CLEANUP] Protecting batch processor for {phone_number} - currently sending messages"
+                )
+                continue
+
+            # Check if batch has been running too long
+            if session.is_batch_expired(
+                self.config.max_batch_timeout_seconds * 3
+            ):  # Give more time
+                logger.warning(
+                    f"[CLEANUP] Found abandoned batch processor for {phone_number} (not sending messages)"
+                )
+                abandoned_processors.append(phone_number)
+                task.cancel()
+
+                # Reset session state
+                session.reset_session()
+                await self.provider.update_session(session)
+
+        # Clean up abandoned processors
+        for phone_number in abandoned_processors:
+            if phone_number in self._batch_processors:
+                del self._batch_processors[phone_number]
+            if phone_number in self._processing_locks:
+                del self._processing_locks[phone_number]
+
+        if abandoned_processors:
+            logger.info(
+                f"Cleaned up {len(abandoned_processors)} abandoned batch processors"
+            )
+
+    async def handle_webhook(
+        self,
+        payload: WhatsAppWebhookPayload,
+        callback: Callable[
+            [str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None], None
+        ]
+        | Callable[
+            [str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None],
+            Awaitable[None],
+        ]
+        | None = None,
+        callback_context: dict[str, Any] | None = None,
+    ) -> GeneratedAssistantMessage[Any] | None:
+        """
+        Handle incoming webhook from WhatsApp.
+        """
+        logger.info("[WEBHOOK] ═══════════ WEBHOOK HANDLER ENTRY ═══════════")
+        logger.info(f"[WEBHOOK] Received webhook event: {payload.event}")
+        logger.info(f"[WEBHOOK] Callback provided: {callback is not None}")
+        logger.info(
+            f"[WEBHOOK] Callback context provided: {callback_context is not None}"
+        )
+        logger.info(
+            f"[WEBHOOK] Current response callbacks count: {len(self._response_callbacks)}"
+        )
+
+        # FOR BATCHING: Register callback permanently, don't remove it in finally block
+        # The batch processor will call it when the batch is processed
+        if callback:
+            logger.info("[WEBHOOK] Processing callback registration for batching...")
+            callback_with_context = CallbackWithContext(
+                callback=callback, context=callback_context
+            )
+
+            # Check if this exact callback is already registered to avoid duplicates
+            callback_exists = any(
+                existing.callback == callback and existing.context == callback_context
+                for existing in self._response_callbacks
+            )
+
+            logger.info(f"[WEBHOOK] Callback already exists: {callback_exists}")
+
+            if not callback_exists:
+                self._response_callbacks.append(callback_with_context)
+                logger.info(
+                    f"[WEBHOOK] ✅ Added callback for batching. Total callbacks: {len(self._response_callbacks)}"
+                )
+                logger.info(
+                    "[WEBHOOK] ⚠️  IMPORTANT: Callback will be called when batch is processed, not removed immediately"
+                )
+            else:
+                logger.warning("[WEBHOOK] ⚠️ Duplicate callback not added")
+
+        try:
+            logger.info("[WEBHOOK] Starting webhook validation...")
+            await self.provider.validate_webhook(payload)
+            logger.info("[WEBHOOK] ✅ Webhook validation passed")
+
+            response = None
+
+            # Handle Evolution API events
+            if payload.event == "messages.upsert":
+                logger.info("[WEBHOOK] 🔄 Handling messages.upsert event")
+                response = await self._handle_message_upsert(payload)
+                logger.info(
+                    f"[WEBHOOK] Message upsert response: {response is not None}"
+                )
+            elif payload.event == "messages.update":
+                logger.info("[WEBHOOK] 🔄 Handling messages.update event")
+                await self._handle_message_update(payload)
+            elif payload.event == "connection.update":
+                logger.info("[WEBHOOK] 🔄 Handling connection.update event")
+                await self._handle_connection_update(payload)
+            # Handle Meta API events
+            elif payload.entry:
+                logger.info("[WEBHOOK] 🔄 Handling Meta API webhook")
+                response = await self._handle_meta_webhook(payload)
+                logger.info(f"[WEBHOOK] Meta webhook response: {response is not None}")
+
+            # Call custom handlers
+            logger.info(
+                f"[WEBHOOK] Calling {len(self._webhook_handlers)} custom webhook handlers"
+            )
+            for i, handler in enumerate(self._webhook_handlers):
+                logger.debug(
+                    f"[WEBHOOK] Calling custom webhook handler {i + 1}/{len(self._webhook_handlers)}"
+                )
+                await handler(payload)
+
+            logger.info(
+                f"[WEBHOOK] ✅ Webhook processing completed. Response generated: {response is not None}"
+            )
+            return response
+
+        except Exception as e:
+            logger.error(
+                f"[WEBHOOK_ERROR] ❌ Error handling webhook: {e}", exc_info=True
+            )
+            return None
+        finally:
+            # FOR BATCHING: DON'T remove the callback here since batch processing is asynchronous
+            # The callback will be called later when the batch is processed
+            logger.info(
+                "[WEBHOOK] ℹ️  Callback will remain registered for batch processing"
+            )
+            logger.info(
+                f"[WEBHOOK] Current callbacks after webhook: {len(self._response_callbacks)}"
+            )
+            logger.info("[WEBHOOK] ═══════════ WEBHOOK HANDLER EXIT ═══════════")
+
+    def to_blacksheep_app(
+        self,
+        *,
+        router: "Router | None" = None,
+        services: "ContainerProtocol | None" = None,
+        show_error_details: bool = False,
+        mount: "MountRegistry | None" = None,
+        docs: "OpenAPIHandler | None" = None,
+        webhook_path: str = "/webhook/whatsapp",
+    ) -> "Application":
+        """
+        Convert the WhatsApp bot to a BlackSheep ASGI application.
+
+        Args:
+            router: Optional router to use
+            services: Optional services container
+            show_error_details: Whether to show error details in responses
+            mount: Optional mount registry
+            docs: Optional OpenAPI handler
+            webhook_path: Path for the webhook endpoint
+
+        Returns:
+            BlackSheep application with webhook endpoint
+        """
+        import blacksheep
+        from blacksheep.server.openapi.ui import ScalarUIProvider
+        from blacksheep.server.openapi.v3 import OpenAPIHandler
+        from openapidocs.v3 import Info
+
+        app = blacksheep.Application(
+            router=router,
+            services=services,
+            show_error_details=show_error_details,
+            mount=mount,
+        )
+
+        if docs is None:
+            docs = OpenAPIHandler(
+                ui_path="/openapi",
+                info=Info(title="Agentle WhatsApp Bot API", version="1.0.0"),
+            )
+            docs.ui_providers.append(ScalarUIProvider(ui_path="/docs"))
+
+        docs.bind_app(app)
+
+        @blacksheep.post(webhook_path)
+        async def _(
+            webhook_payload: blacksheep.FromJSON[WhatsAppWebhookPayload],
+        ) -> blacksheep.Response:
+            """
+            Handle incoming WhatsApp webhooks.
+
+            Args:
+                webhook_payload: The webhook payload from WhatsApp
+
+            Returns:
+                Success response
+            """
+            try:
+                # Process the webhook payload
+                payload_data: WhatsAppWebhookPayload = webhook_payload.value
+                logger.info(
+                    f"[WEBHOOK_ENDPOINT] Received webhook payload: {payload_data.event}"
+                )
+                await self.handle_webhook(payload_data)
+
+                # Return success response
+                return blacksheep.json(
+                    {"status": "success", "message": "Webhook processed"}
+                )
+
+            except Exception as e:
+                logger.error(
+                    f"[WEBHOOK_ENDPOINT_ERROR] Webhook processing error: {e}",
+                    exc_info=True,
+                )
+                return blacksheep.json(
+                    {"status": "error", "message": "Failed to process webhook"},
+                    status=500,
+                )
+
+        @app.on_start
+        async def _() -> None:
+            await self.start_async()
+
+        return app
+
+    def add_webhook_handler(self, handler: Callable[..., Any]) -> None:
+        """Add custom webhook handler."""
+        self._webhook_handlers.append(handler)
+
+    def add_response_callback(
+        self,
+        callback: Callable[
+            [str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None], None
+        ]
+        | Callable[
+            [str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None],
+            Awaitable[None],
+        ],
+        context: dict[str, Any] | None = None,
+        allow_duplicates: bool = False,
+    ) -> None:
+        """Add callback to be called when a response is generated."""
+        logger.info("[ADD_CALLBACK] ═══════════ ADDING RESPONSE CALLBACK ═══════════")
+        logger.info(
+            f"[ADD_CALLBACK] Callback function: {callback.__name__ if hasattr(callback, '__name__') else 'unnamed'}"
+        )
+        logger.info(f"[ADD_CALLBACK] Context provided: {context is not None}")
+        logger.info(f"[ADD_CALLBACK] Allow duplicates: {allow_duplicates}")
+        logger.info(
+            f"[ADD_CALLBACK] Current callbacks count: {len(self._response_callbacks)}"
+        )
+
+        callback_with_context = CallbackWithContext(callback=callback, context=context)
+
+        if not allow_duplicates:
+            # Check if this exact callback+context combination already exists
+            callback_exists = any(
+                existing.callback == callback and existing.context == context
+                for existing in self._response_callbacks
+            )
+            if callback_exists:
+                logger.warning(
+                    f"[ADD_CALLBACK] ⚠️ Duplicate callback registration prevented for {callback.__name__ if hasattr(callback, '__name__') else 'unnamed'}"
+                )
+                return
+
+        self._response_callbacks.append(callback_with_context)
+        logger.info(
+            f"[ADD_CALLBACK] ✅ Callback added successfully. Total callbacks: {len(self._response_callbacks)}"
+        )
+        logger.info("[ADD_CALLBACK] ═══════════ CALLBACK ADDED ═══════════")
+
+    def remove_response_callback(
+        self,
+        callback: Callable[
+            [str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None], None
+        ],
+        context: dict[str, Any] | None = None,
+    ) -> bool:
+        """Remove a specific callback from the registered callbacks."""
+        logger.info(
+            "[REMOVE_CALLBACK] ═══════════ REMOVING RESPONSE CALLBACK ═══════════"
+        )
+        logger.info(
+            f"[REMOVE_CALLBACK] Callback function: {callback.__name__ if hasattr(callback, '__name__') else 'unnamed'}"
+        )
+        logger.info(f"[REMOVE_CALLBACK] Context provided: {context is not None}")
+        logger.info(
+            f"[REMOVE_CALLBACK] Current callbacks count: {len(self._response_callbacks)}"
+        )
+
+        for i, existing in enumerate(self._response_callbacks):
+            if existing.callback == callback and existing.context == context:
+                self._response_callbacks.pop(i)
+                logger.info(
+                    f"[REMOVE_CALLBACK] ✅ Callback removed successfully. Remaining callbacks: {len(self._response_callbacks)}"
+                )
+                logger.info(
+                    "[REMOVE_CALLBACK] ═══════════ CALLBACK REMOVED ═══════════"
+                )
+                return True
+
+        logger.warning("[REMOVE_CALLBACK] ⚠️ Callback not found for removal")
+        logger.info("[REMOVE_CALLBACK] ═══════════ CALLBACK NOT FOUND ═══════════")
+        return False
+
+    def clear_response_callbacks(self) -> int:
+        """Remove all registered response callbacks."""
+        logger.info(
+            "[CLEAR_CALLBACKS] ═══════════ CLEARING ALL RESPONSE CALLBACKS ═══════════"
+        )
+        count = len(self._response_callbacks)
+        logger.info(f"[CLEAR_CALLBACKS] Clearing {count} callbacks")
+        self._response_callbacks.clear()
+        logger.info("[CLEAR_CALLBACKS] ✅ All callbacks cleared")
+        logger.info("[CLEAR_CALLBACKS] ═══════════ CALLBACKS CLEARED ═══════════")
+        return count
 
     async def _handle_message_with_batching(
         self, message: WhatsAppMessage, session: WhatsAppSession
@@ -807,7 +1099,7 @@ class WhatsAppBot(BaseModel):
                 session.context_data["is_sending_messages"] = False
                 session.context_data["sending_error_at"] = datetime.now().isoformat()
                 session.context_data["sending_error"] = str(e)
-            except:
+            except Exception:
                 pass
 
             await self._send_error_message(phone_number)
@@ -1019,296 +1311,6 @@ class WhatsAppBot(BaseModel):
 
         # Simply return the user message - Agent will handle conversation history via chat_id
         return user_message
-
-    async def handle_webhook(
-        self,
-        payload: WhatsAppWebhookPayload,
-        callback: Callable[
-            [str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None], None
-        ]
-        | Callable[
-            [str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None],
-            Awaitable[None],
-        ]
-        | None = None,
-        callback_context: dict[str, Any] | None = None,
-    ) -> GeneratedAssistantMessage[Any] | None:
-        """
-        Handle incoming webhook from WhatsApp.
-        """
-        logger.info("[WEBHOOK] ═══════════ WEBHOOK HANDLER ENTRY ═══════════")
-        logger.info(f"[WEBHOOK] Received webhook event: {payload.event}")
-        logger.info(f"[WEBHOOK] Callback provided: {callback is not None}")
-        logger.info(
-            f"[WEBHOOK] Callback context provided: {callback_context is not None}"
-        )
-        logger.info(
-            f"[WEBHOOK] Current response callbacks count: {len(self._response_callbacks)}"
-        )
-
-        # FOR BATCHING: Register callback permanently, don't remove it in finally block
-        # The batch processor will call it when the batch is processed
-        if callback:
-            logger.info("[WEBHOOK] Processing callback registration for batching...")
-            callback_with_context = CallbackWithContext(
-                callback=callback, context=callback_context
-            )
-
-            # Check if this exact callback is already registered to avoid duplicates
-            callback_exists = any(
-                existing.callback == callback and existing.context == callback_context
-                for existing in self._response_callbacks
-            )
-
-            logger.info(f"[WEBHOOK] Callback already exists: {callback_exists}")
-
-            if not callback_exists:
-                self._response_callbacks.append(callback_with_context)
-                logger.info(
-                    f"[WEBHOOK] ✅ Added callback for batching. Total callbacks: {len(self._response_callbacks)}"
-                )
-                logger.info(
-                    "[WEBHOOK] ⚠️  IMPORTANT: Callback will be called when batch is processed, not removed immediately"
-                )
-            else:
-                logger.warning("[WEBHOOK] ⚠️ Duplicate callback not added")
-
-        try:
-            logger.info("[WEBHOOK] Starting webhook validation...")
-            await self.provider.validate_webhook(payload)
-            logger.info("[WEBHOOK] ✅ Webhook validation passed")
-
-            response = None
-
-            # Handle Evolution API events
-            if payload.event == "messages.upsert":
-                logger.info("[WEBHOOK] 🔄 Handling messages.upsert event")
-                response = await self._handle_message_upsert(payload)
-                logger.info(
-                    f"[WEBHOOK] Message upsert response: {response is not None}"
-                )
-            elif payload.event == "messages.update":
-                logger.info("[WEBHOOK] 🔄 Handling messages.update event")
-                await self._handle_message_update(payload)
-            elif payload.event == "connection.update":
-                logger.info("[WEBHOOK] 🔄 Handling connection.update event")
-                await self._handle_connection_update(payload)
-            # Handle Meta API events
-            elif payload.entry:
-                logger.info("[WEBHOOK] 🔄 Handling Meta API webhook")
-                response = await self._handle_meta_webhook(payload)
-                logger.info(f"[WEBHOOK] Meta webhook response: {response is not None}")
-
-            # Call custom handlers
-            logger.info(
-                f"[WEBHOOK] Calling {len(self._webhook_handlers)} custom webhook handlers"
-            )
-            for i, handler in enumerate(self._webhook_handlers):
-                logger.debug(
-                    f"[WEBHOOK] Calling custom webhook handler {i + 1}/{len(self._webhook_handlers)}"
-                )
-                await handler(payload)
-
-            logger.info(
-                f"[WEBHOOK] ✅ Webhook processing completed. Response generated: {response is not None}"
-            )
-            return response
-
-        except Exception as e:
-            logger.error(
-                f"[WEBHOOK_ERROR] ❌ Error handling webhook: {e}", exc_info=True
-            )
-            return None
-        finally:
-            # FOR BATCHING: DON'T remove the callback here since batch processing is asynchronous
-            # The callback will be called later when the batch is processed
-            logger.info(
-                "[WEBHOOK] ℹ️  Callback will remain registered for batch processing"
-            )
-            logger.info(
-                f"[WEBHOOK] Current callbacks after webhook: {len(self._response_callbacks)}"
-            )
-            logger.info("[WEBHOOK] ═══════════ WEBHOOK HANDLER EXIT ═══════════")
-
-    def to_blacksheep_app(
-        self,
-        *,
-        router: "Router | None" = None,
-        services: "ContainerProtocol | None" = None,
-        show_error_details: bool = False,
-        mount: "MountRegistry | None" = None,
-        docs: "OpenAPIHandler | None" = None,
-        webhook_path: str = "/webhook/whatsapp",
-    ) -> "Application":
-        """
-        Convert the WhatsApp bot to a BlackSheep ASGI application.
-
-        Args:
-            router: Optional router to use
-            services: Optional services container
-            show_error_details: Whether to show error details in responses
-            mount: Optional mount registry
-            docs: Optional OpenAPI handler
-            webhook_path: Path for the webhook endpoint
-
-        Returns:
-            BlackSheep application with webhook endpoint
-        """
-        import blacksheep
-        from blacksheep.server.openapi.ui import ScalarUIProvider
-        from blacksheep.server.openapi.v3 import OpenAPIHandler
-        from openapidocs.v3 import Info
-
-        app = blacksheep.Application(
-            router=router,
-            services=services,
-            show_error_details=show_error_details,
-            mount=mount,
-        )
-
-        if docs is None:
-            docs = OpenAPIHandler(
-                ui_path="/openapi",
-                info=Info(title="Agentle WhatsApp Bot API", version="1.0.0"),
-            )
-            docs.ui_providers.append(ScalarUIProvider(ui_path="/docs"))
-
-        docs.bind_app(app)
-
-        @blacksheep.post(webhook_path)
-        async def _(
-            webhook_payload: blacksheep.FromJSON[WhatsAppWebhookPayload],
-        ) -> blacksheep.Response:
-            """
-            Handle incoming WhatsApp webhooks.
-
-            Args:
-                webhook_payload: The webhook payload from WhatsApp
-
-            Returns:
-                Success response
-            """
-            try:
-                # Process the webhook payload
-                payload_data: WhatsAppWebhookPayload = webhook_payload.value
-                logger.info(
-                    f"[WEBHOOK_ENDPOINT] Received webhook payload: {payload_data.event}"
-                )
-                await self.handle_webhook(payload_data)
-
-                # Return success response
-                return blacksheep.json(
-                    {"status": "success", "message": "Webhook processed"}
-                )
-
-            except Exception as e:
-                logger.error(
-                    f"[WEBHOOK_ENDPOINT_ERROR] Webhook processing error: {e}",
-                    exc_info=True,
-                )
-                return blacksheep.json(
-                    {"status": "error", "message": "Failed to process webhook"},
-                    status=500,
-                )
-
-        @app.on_start
-        async def _() -> None:
-            await self.start_async()
-
-        return app
-
-    def add_webhook_handler(self, handler: Callable[..., Any]) -> None:
-        """Add custom webhook handler."""
-        self._webhook_handlers.append(handler)
-
-    def add_response_callback(
-        self,
-        callback: Callable[
-            [str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None], None
-        ]
-        | Callable[
-            [str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None],
-            Awaitable[None],
-        ],
-        context: dict[str, Any] | None = None,
-        allow_duplicates: bool = False,
-    ) -> None:
-        """Add callback to be called when a response is generated."""
-        logger.info("[ADD_CALLBACK] ═══════════ ADDING RESPONSE CALLBACK ═══════════")
-        logger.info(
-            f"[ADD_CALLBACK] Callback function: {callback.__name__ if hasattr(callback, '__name__') else 'unnamed'}"
-        )
-        logger.info(f"[ADD_CALLBACK] Context provided: {context is not None}")
-        logger.info(f"[ADD_CALLBACK] Allow duplicates: {allow_duplicates}")
-        logger.info(
-            f"[ADD_CALLBACK] Current callbacks count: {len(self._response_callbacks)}"
-        )
-
-        callback_with_context = CallbackWithContext(callback=callback, context=context)
-
-        if not allow_duplicates:
-            # Check if this exact callback+context combination already exists
-            callback_exists = any(
-                existing.callback == callback and existing.context == context
-                for existing in self._response_callbacks
-            )
-            if callback_exists:
-                logger.warning(
-                    f"[ADD_CALLBACK] ⚠️ Duplicate callback registration prevented for {callback.__name__ if hasattr(callback, '__name__') else 'unnamed'}"
-                )
-                return
-
-        self._response_callbacks.append(callback_with_context)
-        logger.info(
-            f"[ADD_CALLBACK] ✅ Callback added successfully. Total callbacks: {len(self._response_callbacks)}"
-        )
-        logger.info("[ADD_CALLBACK] ═══════════ CALLBACK ADDED ═══════════")
-
-    def remove_response_callback(
-        self,
-        callback: Callable[
-            [str, GeneratedAssistantMessage[Any] | None, dict[str, Any] | None], None
-        ],
-        context: dict[str, Any] | None = None,
-    ) -> bool:
-        """Remove a specific callback from the registered callbacks."""
-        logger.info(
-            "[REMOVE_CALLBACK] ═══════════ REMOVING RESPONSE CALLBACK ═══════════"
-        )
-        logger.info(
-            f"[REMOVE_CALLBACK] Callback function: {callback.__name__ if hasattr(callback, '__name__') else 'unnamed'}"
-        )
-        logger.info(f"[REMOVE_CALLBACK] Context provided: {context is not None}")
-        logger.info(
-            f"[REMOVE_CALLBACK] Current callbacks count: {len(self._response_callbacks)}"
-        )
-
-        for i, existing in enumerate(self._response_callbacks):
-            if existing.callback == callback and existing.context == context:
-                self._response_callbacks.pop(i)
-                logger.info(
-                    f"[REMOVE_CALLBACK] ✅ Callback removed successfully. Remaining callbacks: {len(self._response_callbacks)}"
-                )
-                logger.info(
-                    "[REMOVE_CALLBACK] ═══════════ CALLBACK REMOVED ═══════════"
-                )
-                return True
-
-        logger.warning("[REMOVE_CALLBACK] ⚠️ Callback not found for removal")
-        logger.info("[REMOVE_CALLBACK] ═══════════ CALLBACK NOT FOUND ═══════════")
-        return False
-
-    def clear_response_callbacks(self) -> int:
-        """Remove all registered response callbacks."""
-        logger.info(
-            "[CLEAR_CALLBACKS] ═══════════ CLEARING ALL RESPONSE CALLBACKS ═══════════"
-        )
-        count = len(self._response_callbacks)
-        logger.info(f"[CLEAR_CALLBACKS] Clearing {count} callbacks")
-        self._response_callbacks.clear()
-        logger.info("[CLEAR_CALLBACKS] ✅ All callbacks cleared")
-        logger.info("[CLEAR_CALLBACKS] ═══════════ CALLBACKS CLEARED ═══════════")
-        return count
 
     async def _call_response_callbacks(
         self, phone_number: str, response: GeneratedAssistantMessage[Any] | None
