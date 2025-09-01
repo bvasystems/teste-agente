@@ -438,6 +438,21 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
     ) -> None:
         self.static_knowledge = knowledge
 
+    def resolve_tools(self) -> None:
+        """
+        Resolves callable tools in self.tools by converting them to Tool objects.
+
+        This method modifies self.tools in place, converting any callable items
+        to Tool objects using Tool.from_callable. Tool objects that are already
+        Tool instances are left unchanged.
+
+        Returns:
+            None: This method modifies self.tools in place.
+        """
+        for i, tool in enumerate(self.tools):
+            if callable(tool) and not isinstance(tool, Tool):
+                self.tools[i] = Tool.from_callable(tool)
+
     def change_instructions(
         self,
         instructions: str
@@ -3231,6 +3246,323 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
         return AgentToBlackSheepApplicationAdapter(*extra_routes).adapt(self)
 
+    @classmethod
+    def input2context(
+        cls,
+        input: AgentInput | Any,
+        instructions: str,
+    ) -> Context:
+        """
+        Converts user input to a Context object.
+
+        This internal method converts the various supported input types to
+        a standardized Context object that contains the messages to be processed.
+
+        Supports a wide variety of input types, from simple strings to
+        complex objects like DataFrames, images, files, and Pydantic models.
+
+        Args:
+            input: The input in any supported format.
+            instructions: The agent instructions as a string.
+
+        Returns:
+            Context: A Context object containing the messages to be processed.
+        """
+        developer_message = DeveloperMessage(parts=[TextPart(text=instructions)])
+
+        if isinstance(input, Context):
+            # If it's already a Context, return it as is.
+            input.add_developer_message(instructions)
+            return input
+        elif isinstance(input, UserMessage):
+            # If it's a UserMessage, prepend the developer instructions.
+            return Context(message_history=[developer_message, input])
+        elif isinstance(input, str):
+            # Handle plain string input
+            return Context(
+                message_history=[
+                    developer_message,
+                    UserMessage(parts=[TextPart(text=input)]),
+                ]
+            )
+        elif isinstance(input, (TextPart, FilePart, Tool)):
+            # Handle single message parts
+            return Context(
+                message_history=cast(
+                    MutableSequence[DeveloperMessage | UserMessage | AssistantMessage],
+                    [
+                        developer_message,
+                        UserMessage(
+                            parts=cast(
+                                MutableSequence[
+                                    TextPart
+                                    | FilePart
+                                    | Tool[Any]
+                                    | ToolExecutionSuggestion
+                                    | ToolExecutionResult
+                                ],
+                                [input],
+                            )
+                        ),
+                    ],
+                )
+            )
+
+        # Sequence handling: Check for Message sequences or Part sequences
+        # Explicitly check for Sequence for MyPy's benefit
+        elif isinstance(input, Sequence) and not isinstance(input, (str, bytes)):  # pyright: ignore[reportUnnecessaryIsInstance]
+            # Check if it's a sequence of Messages or Parts (AFTER specific types)
+            if input and isinstance(
+                input[0], (AssistantMessage, DeveloperMessage, UserMessage)
+            ):
+                # Sequence of Messages
+                # Ensure it's a list of Messages for type consistency and prepend developer message
+                message_history = [developer_message] + list(
+                    cast(
+                        Sequence[AssistantMessage | DeveloperMessage | UserMessage],
+                        input,
+                    )
+                )
+                return Context(message_history=message_history)
+            elif input and isinstance(input[0], (TextPart, FilePart, Tool)):
+                # Sequence of Parts
+                # Ensure it's a list of the correct Part types
+                valid_parts = cast(Sequence[TextPart | FilePart | Tool], input)
+                return Context(
+                    message_history=[
+                        developer_message,
+                        UserMessage(parts=list(valid_parts)),
+                    ]
+                )
+
+        elif callable(input) and not isinstance(input, Tool):
+            # Handle callable input (that's not a Tool)
+            return Context(
+                message_history=[
+                    developer_message,
+                    UserMessage(parts=[TextPart(text=str(input()))]),
+                ]
+            )
+        # Handle pandas DataFrame if available
+        elif HAS_PANDAS:
+            try:
+                import pandas as pd
+
+                if isinstance(input, pd.DataFrame):
+                    # Convert DataFrame to Markdown
+                    return Context(
+                        message_history=[
+                            developer_message,
+                            UserMessage(
+                                parts=[TextPart(text=input.to_markdown() or "")]
+                            ),
+                        ]
+                    )
+            except ImportError:
+                pass
+        # Handle numpy arrays if available
+        elif HAS_NUMPY:
+            try:
+                import numpy as np
+
+                if isinstance(input, np.ndarray):
+                    # Convert NumPy array to string representation
+                    return Context(
+                        message_history=[
+                            developer_message,
+                            UserMessage(
+                                parts=[
+                                    TextPart(
+                                        text=np.array2string(
+                                            cast(np.ndarray[Any, Any], input)
+                                        )
+                                    )
+                                ]
+                            ),
+                        ]
+                    )
+            except ImportError:
+                pass
+        # Handle PIL images if available
+        elif HAS_PIL:
+            try:
+                from PIL import Image
+
+                if isinstance(input, Image.Image):
+                    import io
+
+                    img_byte_arr = io.BytesIO()
+                    img_format = getattr(input, "format", "PNG") or "PNG"
+                    input.save(img_byte_arr, format=img_format)
+                    img_byte_arr.seek(0)
+
+                    mime_type_map = {
+                        "PNG": "image/png",
+                        "JPEG": "image/jpeg",
+                        "JPG": "image/jpeg",
+                        "GIF": "image/gif",
+                        "WEBP": "image/webp",
+                        "BMP": "image/bmp",
+                        "TIFF": "image/tiff",
+                    }
+                    mime_type = mime_type_map.get(
+                        img_format, f"image/{img_format.lower()}"
+                    )
+
+                    return Context(
+                        message_history=[
+                            developer_message,
+                            UserMessage(
+                                parts=[
+                                    FilePart(
+                                        data=img_byte_arr.getvalue(),
+                                        mime_type=mime_type,
+                                    )
+                                ]
+                            ),
+                        ]
+                    )
+            except ImportError:
+                pass
+        elif isinstance(input, bytes):
+            # Try decoding bytes, otherwise provide a description
+            try:
+                text = input.decode("utf-8")
+            except UnicodeDecodeError:
+                text = f"Input is binary data of size {len(input)} bytes."
+            return Context(
+                message_history=[
+                    developer_message,
+                    UserMessage(parts=[TextPart(text=text)]),
+                ]
+            )
+        elif isinstance(input, (datetime.datetime, datetime.date, datetime.time)):
+            # Convert datetime objects to ISO format string
+            return Context(
+                message_history=[
+                    developer_message,
+                    UserMessage(parts=[TextPart(text=input.isoformat())]),
+                ]
+            )
+        elif isinstance(input, Path):
+            # Read file content if it's a file path that exists
+            if input.is_file():
+                try:
+                    file_content = input.read_text()
+                    return Context(
+                        message_history=[
+                            developer_message,
+                            UserMessage(parts=[TextPart(text=file_content)]),
+                        ]
+                    )
+                except Exception as e:
+                    # Fallback to string representation if reading fails
+                    return Context(
+                        message_history=[
+                            developer_message,
+                            UserMessage(
+                                parts=[
+                                    TextPart(
+                                        text=f"Failed to read file {input}: {str(e)}"
+                                    )
+                                ]
+                            ),
+                        ]
+                    )
+            else:
+                # If it's not a file or doesn't exist, use the string representation
+                return Context(
+                    message_history=[
+                        developer_message,
+                        UserMessage(parts=[TextPart(text=str(input))]),
+                    ]
+                )
+        elif isinstance(input, Prompt):
+            return Context(
+                message_history=[
+                    developer_message,
+                    UserMessage(parts=[TextPart(text=input.text)]),
+                ]
+            )
+        elif isinstance(input, (BytesIO, StringIO)):
+            # Read content from BytesIO/StringIO
+            input.seek(0)  # Ensure reading from the start
+            content = input.read()
+            if isinstance(content, bytes):
+                try:
+                    text = content.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = f"Input is binary data stream of size {len(content)} bytes."
+            else:  # str
+                text = content
+            return Context(
+                message_history=[
+                    developer_message,
+                    UserMessage(parts=[TextPart(text=text)]),
+                ]
+            )
+        elif isinstance(input, ParsedFile):
+            return Context(
+                message_history=[
+                    developer_message,
+                    UserMessage(parts=[TextPart(text=input.md)]),
+                ]
+            )
+
+        # Handle Pydantic models if available
+        elif HAS_PYDANTIC:
+            try:
+                from pydantic import BaseModel as PydanticBaseModel
+
+                if isinstance(input, PydanticBaseModel):
+                    # Convert Pydantic model to JSON string
+                    text = input.model_dump_json(indent=2)
+                    return Context(
+                        message_history=[
+                            developer_message,
+                            UserMessage(parts=[TextPart(text=f"```json\n{text}\n```")]),
+                        ]
+                    )
+            except (ImportError, AttributeError):
+                pass
+
+        elif isinstance(input, (dict, list, tuple, set, frozenset)):
+            # Convert dict, list, tuple, set, frozenset to JSON string
+            try:
+                # Use json.dumps for serialization
+                text = json.dumps(
+                    input, indent=2, default=str
+                )  # Add default=str for non-serializable
+            except TypeError:
+                # Fallback to string representation if json fails
+                text = f"Input is a collection: {str(cast(object, input))}"
+            return Context(
+                message_history=[
+                    developer_message,
+                    UserMessage(parts=[TextPart(text=f"```json\n{text}\n```")]),
+                ]
+            )
+
+        # Fallback for any unhandled type
+        # Convert to string representation as a last resort
+        try:
+            # Use safer type handling
+            input_type_name = type(input).__name__  # type: ignore[reportGeneralTypeIssues, reportUnknownArgumentType]
+            text = str(input)  # type: ignore[reportGeneralTypeIssues, reportUnknownArgumentType]
+        except Exception:
+            # Use safer type handling
+            input_type_name = (
+                "unknown"  # Fall back to a string if we can't get the type name
+            )
+            text = f"Input of type {input_type_name} could not be converted to string"
+
+        return Context(  # type: ignore[reportGeneralTypeIssues, reportUnknownArgumentType]
+            message_history=[
+                developer_message,
+                UserMessage(parts=[TextPart(text=text)]),  # type: ignore[reportGeneralTypeIssues, reportUnknownArgumentType]
+            ]
+        )
+
     def clone(
         self,
         *,
@@ -4029,323 +4361,6 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             return instructions()
         else:
             return "".join(instructions)
-
-    @classmethod
-    def input2context(
-        cls,
-        input: AgentInput | Any,
-        instructions: str,
-    ) -> Context:
-        """
-        Converts user input to a Context object.
-
-        This internal method converts the various supported input types to
-        a standardized Context object that contains the messages to be processed.
-
-        Supports a wide variety of input types, from simple strings to
-        complex objects like DataFrames, images, files, and Pydantic models.
-
-        Args:
-            input: The input in any supported format.
-            instructions: The agent instructions as a string.
-
-        Returns:
-            Context: A Context object containing the messages to be processed.
-        """
-        developer_message = DeveloperMessage(parts=[TextPart(text=instructions)])
-
-        if isinstance(input, Context):
-            # If it's already a Context, return it as is.
-            input.add_developer_message(instructions)
-            return input
-        elif isinstance(input, UserMessage):
-            # If it's a UserMessage, prepend the developer instructions.
-            return Context(message_history=[developer_message, input])
-        elif isinstance(input, str):
-            # Handle plain string input
-            return Context(
-                message_history=[
-                    developer_message,
-                    UserMessage(parts=[TextPart(text=input)]),
-                ]
-            )
-        elif isinstance(input, (TextPart, FilePart, Tool)):
-            # Handle single message parts
-            return Context(
-                message_history=cast(
-                    MutableSequence[DeveloperMessage | UserMessage | AssistantMessage],
-                    [
-                        developer_message,
-                        UserMessage(
-                            parts=cast(
-                                MutableSequence[
-                                    TextPart
-                                    | FilePart
-                                    | Tool[Any]
-                                    | ToolExecutionSuggestion
-                                    | ToolExecutionResult
-                                ],
-                                [input],
-                            )
-                        ),
-                    ],
-                )
-            )
-
-        # Sequence handling: Check for Message sequences or Part sequences
-        # Explicitly check for Sequence for MyPy's benefit
-        elif isinstance(input, Sequence) and not isinstance(input, (str, bytes)):  # pyright: ignore[reportUnnecessaryIsInstance]
-            # Check if it's a sequence of Messages or Parts (AFTER specific types)
-            if input and isinstance(
-                input[0], (AssistantMessage, DeveloperMessage, UserMessage)
-            ):
-                # Sequence of Messages
-                # Ensure it's a list of Messages for type consistency and prepend developer message
-                message_history = [developer_message] + list(
-                    cast(
-                        Sequence[AssistantMessage | DeveloperMessage | UserMessage],
-                        input,
-                    )
-                )
-                return Context(message_history=message_history)
-            elif input and isinstance(input[0], (TextPart, FilePart, Tool)):
-                # Sequence of Parts
-                # Ensure it's a list of the correct Part types
-                valid_parts = cast(Sequence[TextPart | FilePart | Tool], input)
-                return Context(
-                    message_history=[
-                        developer_message,
-                        UserMessage(parts=list(valid_parts)),
-                    ]
-                )
-
-        elif callable(input) and not isinstance(input, Tool):
-            # Handle callable input (that's not a Tool)
-            return Context(
-                message_history=[
-                    developer_message,
-                    UserMessage(parts=[TextPart(text=str(input()))]),
-                ]
-            )
-        # Handle pandas DataFrame if available
-        elif HAS_PANDAS:
-            try:
-                import pandas as pd
-
-                if isinstance(input, pd.DataFrame):
-                    # Convert DataFrame to Markdown
-                    return Context(
-                        message_history=[
-                            developer_message,
-                            UserMessage(
-                                parts=[TextPart(text=input.to_markdown() or "")]
-                            ),
-                        ]
-                    )
-            except ImportError:
-                pass
-        # Handle numpy arrays if available
-        elif HAS_NUMPY:
-            try:
-                import numpy as np
-
-                if isinstance(input, np.ndarray):
-                    # Convert NumPy array to string representation
-                    return Context(
-                        message_history=[
-                            developer_message,
-                            UserMessage(
-                                parts=[
-                                    TextPart(
-                                        text=np.array2string(
-                                            cast(np.ndarray[Any, Any], input)
-                                        )
-                                    )
-                                ]
-                            ),
-                        ]
-                    )
-            except ImportError:
-                pass
-        # Handle PIL images if available
-        elif HAS_PIL:
-            try:
-                from PIL import Image
-
-                if isinstance(input, Image.Image):
-                    import io
-
-                    img_byte_arr = io.BytesIO()
-                    img_format = getattr(input, "format", "PNG") or "PNG"
-                    input.save(img_byte_arr, format=img_format)
-                    img_byte_arr.seek(0)
-
-                    mime_type_map = {
-                        "PNG": "image/png",
-                        "JPEG": "image/jpeg",
-                        "JPG": "image/jpeg",
-                        "GIF": "image/gif",
-                        "WEBP": "image/webp",
-                        "BMP": "image/bmp",
-                        "TIFF": "image/tiff",
-                    }
-                    mime_type = mime_type_map.get(
-                        img_format, f"image/{img_format.lower()}"
-                    )
-
-                    return Context(
-                        message_history=[
-                            developer_message,
-                            UserMessage(
-                                parts=[
-                                    FilePart(
-                                        data=img_byte_arr.getvalue(),
-                                        mime_type=mime_type,
-                                    )
-                                ]
-                            ),
-                        ]
-                    )
-            except ImportError:
-                pass
-        elif isinstance(input, bytes):
-            # Try decoding bytes, otherwise provide a description
-            try:
-                text = input.decode("utf-8")
-            except UnicodeDecodeError:
-                text = f"Input is binary data of size {len(input)} bytes."
-            return Context(
-                message_history=[
-                    developer_message,
-                    UserMessage(parts=[TextPart(text=text)]),
-                ]
-            )
-        elif isinstance(input, (datetime.datetime, datetime.date, datetime.time)):
-            # Convert datetime objects to ISO format string
-            return Context(
-                message_history=[
-                    developer_message,
-                    UserMessage(parts=[TextPart(text=input.isoformat())]),
-                ]
-            )
-        elif isinstance(input, Path):
-            # Read file content if it's a file path that exists
-            if input.is_file():
-                try:
-                    file_content = input.read_text()
-                    return Context(
-                        message_history=[
-                            developer_message,
-                            UserMessage(parts=[TextPart(text=file_content)]),
-                        ]
-                    )
-                except Exception as e:
-                    # Fallback to string representation if reading fails
-                    return Context(
-                        message_history=[
-                            developer_message,
-                            UserMessage(
-                                parts=[
-                                    TextPart(
-                                        text=f"Failed to read file {input}: {str(e)}"
-                                    )
-                                ]
-                            ),
-                        ]
-                    )
-            else:
-                # If it's not a file or doesn't exist, use the string representation
-                return Context(
-                    message_history=[
-                        developer_message,
-                        UserMessage(parts=[TextPart(text=str(input))]),
-                    ]
-                )
-        elif isinstance(input, Prompt):
-            return Context(
-                message_history=[
-                    developer_message,
-                    UserMessage(parts=[TextPart(text=input.text)]),
-                ]
-            )
-        elif isinstance(input, (BytesIO, StringIO)):
-            # Read content from BytesIO/StringIO
-            input.seek(0)  # Ensure reading from the start
-            content = input.read()
-            if isinstance(content, bytes):
-                try:
-                    text = content.decode("utf-8")
-                except UnicodeDecodeError:
-                    text = f"Input is binary data stream of size {len(content)} bytes."
-            else:  # str
-                text = content
-            return Context(
-                message_history=[
-                    developer_message,
-                    UserMessage(parts=[TextPart(text=text)]),
-                ]
-            )
-        elif isinstance(input, ParsedFile):
-            return Context(
-                message_history=[
-                    developer_message,
-                    UserMessage(parts=[TextPart(text=input.md)]),
-                ]
-            )
-
-        # Handle Pydantic models if available
-        elif HAS_PYDANTIC:
-            try:
-                from pydantic import BaseModel as PydanticBaseModel
-
-                if isinstance(input, PydanticBaseModel):
-                    # Convert Pydantic model to JSON string
-                    text = input.model_dump_json(indent=2)
-                    return Context(
-                        message_history=[
-                            developer_message,
-                            UserMessage(parts=[TextPart(text=f"```json\n{text}\n```")]),
-                        ]
-                    )
-            except (ImportError, AttributeError):
-                pass
-
-        elif isinstance(input, (dict, list, tuple, set, frozenset)):
-            # Convert dict, list, tuple, set, frozenset to JSON string
-            try:
-                # Use json.dumps for serialization
-                text = json.dumps(
-                    input, indent=2, default=str
-                )  # Add default=str for non-serializable
-            except TypeError:
-                # Fallback to string representation if json fails
-                text = f"Input is a collection: {str(cast(object, input))}"
-            return Context(
-                message_history=[
-                    developer_message,
-                    UserMessage(parts=[TextPart(text=f"```json\n{text}\n```")]),
-                ]
-            )
-
-        # Fallback for any unhandled type
-        # Convert to string representation as a last resort
-        try:
-            # Use safer type handling
-            input_type_name = type(input).__name__  # type: ignore[reportGeneralTypeIssues, reportUnknownArgumentType]
-            text = str(input)  # type: ignore[reportGeneralTypeIssues, reportUnknownArgumentType]
-        except Exception:
-            # Use safer type handling
-            input_type_name = (
-                "unknown"  # Fall back to a string if we can't get the type name
-            )
-            text = f"Input of type {input_type_name} could not be converted to string"
-
-        return Context(  # type: ignore[reportGeneralTypeIssues, reportUnknownArgumentType]
-            message_history=[
-                developer_message,
-                UserMessage(parts=[TextPart(text=text)]),  # type: ignore[reportGeneralTypeIssues, reportUnknownArgumentType]
-            ]
-        )
 
     def _get_tool_call_pattern_key(
         self, tool_name: str, args: Mapping[str, object]

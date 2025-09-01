@@ -28,6 +28,7 @@ from agentle.generations.providers.google.google_generation_provider import (
 from agentle.generations.providers.ollama.ollama_generation_provider import (
     OllamaGenerationProvider,
 )
+from agentle.generations.tools.tool import Tool
 from agentle.mcp.servers.stdio_mcp_server import StdioMCPServer
 from agentle.mcp.servers.streamable_http_mcp_server import StreamableHTTPMCPServer
 from agentle.parsing.cache.in_memory_document_cache_store import (
@@ -49,6 +50,10 @@ class ExampleResponse(BaseModel):
 async def call_me(param: str | float | None = None) -> ExampleResponse:
     print(param)
     return ExampleResponse(response=None)
+
+
+def sum(a: int, b: int) -> int:
+    return a + b
 
 
 agent = Agent(
@@ -94,7 +99,7 @@ agent = Agent(
         ),
         StdioMCPServer(server_name="Example STDIO", command="npx -y example"),
     ],
-    tools=[call_me],
+    tools=[call_me, Tool.from_callable(sum)],
     config=AgentConfig(maxToolCalls=2, maxIterations=23),
     debug=True,
     suspension_manager=SuspensionManager(store=InMemorySuspensionStore()),
