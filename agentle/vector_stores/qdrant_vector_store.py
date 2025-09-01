@@ -179,7 +179,7 @@ class QdrantVectorStore(VectorStore):
                     + "payload contents"
                 )
 
-            metadata: Mapping[str, Any] | None = payload.get("metadata")
+            metadata = payload.get("metadata")
             if metadata is not None and not isinstance(metadata, dict):
                 raise ValueError(
                     "Metadata is not an instance of Mapping and "

@@ -73,7 +73,7 @@ class OllamaGenerationProvider(GenerationProvider):
 
         tool_adapter = ToolToOllamaToolAdapter()
 
-        bm = cast(BaseModel, response_schema) if response_schema else None
+        bm = cast(BaseModel, response_schema) if response_schema else None  # type: ignore
 
         _generation_config = self._normalize_generation_config(generation_config)
 
