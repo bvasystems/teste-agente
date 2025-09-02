@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.8.16
+fix(in_memory_session_store): ensure ttl_seconds is converted to integer
+
+Convert ttl_seconds to integer before calculating expiry time to prevent potential type errors
+
 ## v0.8.15
 - feat(whatsapp): add chat_id support for message handling
 
