@@ -161,17 +161,25 @@ class Context(BaseModel):
 
         Args:
             new_history: The new sequence of messages to set as the context's message history
-            reset_execution_state: Whether to reset the execution state to its initial values
-            keep_developer_messages: Whether to keep existing developer messages in the history
+            keep_developer_messages: Whether to preserve existing developer messages from current context
         """
         if keep_developer_messages:
-            new_history = [
+            # Extract developer messages from current context (contains current instructions)
+            developer_messages = [
+                m for m in self.message_history if isinstance(m, DeveloperMessage)
+            ]
+            
+            # Extract non-developer messages from the new history (conversation history)
+            non_developer_new_messages = [
                 m for m in new_history if not isinstance(m, DeveloperMessage)
-            ] + list(self.message_history)
-            self.message_history = new_history
-            return
-
-        self.message_history = list(new_history)
+            ]
+            
+            # Combine: developer messages first (instructions), then conversation history
+            self.message_history = developer_messages + non_developer_new_messages
+        else:
+            # Simple replacement without preservation
+            self.message_history = list(new_history)
+        
         self.execution_state.last_updated_at = datetime.now()
 
     @property
