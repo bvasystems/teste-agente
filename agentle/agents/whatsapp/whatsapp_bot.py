@@ -189,6 +189,8 @@ class WhatsAppBot(BaseModel):
         logger.info(
             f"[MESSAGE_HANDLER] Received message from {message.from_number}: ID={message.id}, Type={type(message).__name__}"
         )
+        # ADICIONE ESTE LOG:
+        logger.info(f"[MESSAGE_HANDLER] Chat ID recebido: {chat_id}")
         logger.info(
             f"[MESSAGE_HANDLER] Current response callbacks count: {len(self._response_callbacks)}"
         )
@@ -214,6 +216,13 @@ class WhatsAppBot(BaseModel):
                 )
                 return
 
+            # MUDANÇA CRÍTICA: Armazenar o chat_id personalizado na sessão
+            if chat_id:
+                session.context_data["custom_chat_id"] = chat_id
+                logger.info(
+                    f"[MESSAGE_HANDLER] Stored custom chat_id in session: {chat_id}"
+                )
+
             logger.info(
                 f"[SESSION_STATE] Session for {message.from_number}: is_processing={session.is_processing}, pending_messages={len(session.pending_messages)}, message_count={session.message_count}"
             )
@@ -236,11 +245,16 @@ class WhatsAppBot(BaseModel):
                         await self._send_rate_limit_message(message.from_number)
                     return None
 
+            effective_chat_id = chat_id or message.from_number
+            logger.info(
+                f"[MESSAGE_HANDLER] Effective chat_id para conversação: {effective_chat_id}"
+            )
+
             # Check welcome message for first interaction
             if (
                 await cast(
                     ConversationStore, self.agent.conversation_store
-                ).get_conversation_history_length(message.from_number)
+                ).get_conversation_history_length(effective_chat_id)
                 == 0
                 and self.config.welcome_message
             ):
@@ -272,14 +286,14 @@ class WhatsAppBot(BaseModel):
                     f"[BATCHING] Batching config: delay={self.config.batch_delay_seconds}s, max_size={self.config.max_batch_size}, max_timeout={self.config.max_batch_timeout_seconds}s"
                 )
                 response = await self._handle_message_with_batching(
-                    message, session, chat_id=chat_id
+                    message, session, chat_id=effective_chat_id
                 )
             else:
                 logger.info(
                     f"[IMMEDIATE] ⚡ Processing message immediately for {message.from_number}"
                 )
                 response = await self._process_single_message(
-                    message, session, chat_id=chat_id
+                    message, session, chat_id=effective_chat_id
                 )
 
             logger.info(
@@ -1447,17 +1461,29 @@ class WhatsAppBot(BaseModel):
         session: WhatsAppSession,
         chat_id: str | None = None,
     ) -> GeneratedAssistantMessage[Any]:
-        """Process input with agent using phone number as chat_id for conversation persistence."""
+        """Process input with agent using custom chat_id for conversation persistence."""
         logger.info("[AGENT_PROCESSING] Starting agent processing")
+
+        # MUDANÇA CRÍTICA: Recuperar chat_id personalizado da sessão se não fornecido
+        effective_chat_id = chat_id
+        if not effective_chat_id:
+            effective_chat_id = session.context_data.get("custom_chat_id")
+        if not effective_chat_id:
+            effective_chat_id = session.phone_number
+
+        logger.info(f"[AGENT_PROCESSING] Using effective chat_id: {effective_chat_id}")
+        logger.info(
+            f"[AGENT_PROCESSING] Chat ID type: {'CUSTOM' if chat_id else 'FALLBACK'}"
+        )
 
         try:
             async with self.agent.start_mcp_servers_async():
                 logger.debug("[AGENT_PROCESSING] Started MCP servers")
 
-                # Run agent with phone number as chat_id for conversation persistence
+                # Run agent with effective chat_id for conversation persistence
                 result = await self.agent.run_async(
                     agent_input,
-                    chat_id=chat_id or session.phone_number,
+                    chat_id=effective_chat_id,
                 )
                 logger.info("[AGENT_PROCESSING] Agent run completed successfully")
 
