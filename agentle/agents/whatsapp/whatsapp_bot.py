@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import re
 from collections.abc import (
     Awaitable,
     Callable,
@@ -261,8 +262,9 @@ class WhatsAppBot(BaseModel):
                 logger.info(
                     f"[WELCOME] Sending welcome message to {message.from_number}"
                 )
+                formatted_welcome = self._format_whatsapp_markdown(self.config.welcome_message)
                 await self.provider.send_text_message(
-                    message.from_number, self.config.welcome_message
+                    message.from_number, formatted_welcome
                 )
                 session.message_count += 1
                 await self.provider.update_session(session)
@@ -1557,6 +1559,38 @@ class WhatsAppBot(BaseModel):
             )
             raise
 
+    def _format_whatsapp_markdown(self, text: str) -> str:
+        """Convert standard markdown to WhatsApp-compatible formatting.
+        
+        WhatsApp supports:
+        - *bold* for bold text
+        - _italic_ for italic text  
+        - ~strikethrough~ for strikethrough text
+        - ```code``` for monospace text
+        - No support for standard **bold** or __italic__ markdown
+        """
+        if not text:
+            return text
+            
+        # Convert **bold** to *bold* (WhatsApp format)
+        
+        # Handle **bold** -> *bold*
+        text = re.sub(r'\*\*([^*]+)\*\*', r'*\1*', text)
+        
+        # Handle __italic__ -> _italic_
+        text = re.sub(r'__([^_]+)__', r'_\1_', text)
+        
+        # Handle ~~strikethrough~~ -> ~strikethrough~
+        text = re.sub(r'~~([^~]+)~~', r'~\1~', text)
+        
+        # Handle `code` -> ```code``` (WhatsApp monospace)
+        text = re.sub(r'`([^`]+)`', r'```\1```', text)
+        
+        # Handle code blocks ```code``` (already WhatsApp compatible)
+        # No changes needed for code blocks
+        
+        return text
+
     async def _send_response(
         self,
         to: str,
@@ -1570,6 +1604,9 @@ class WhatsAppBot(BaseModel):
             if isinstance(response, GeneratedAssistantMessage)
             else response
         )
+        
+        # Apply WhatsApp-specific markdown formatting
+        response_text = self._format_whatsapp_markdown(response_text)
 
         logger.info(
             f"[SEND_RESPONSE] Sending response to {to} (length: {len(response_text)}, reply_to: {reply_to})"
@@ -1678,7 +1715,8 @@ class WhatsAppBot(BaseModel):
                 # Partial failure - optionally notify user
                 try:
                     error_msg = f"⚠️ Algumas partes da mensagem podem não ter sido enviadas devido a problemas técnicos. {len(failed_parts)} de {len(messages)} partes falharam."
-                    await self.provider.send_text_message(to=to, text=error_msg)
+                    formatted_error_msg = self._format_whatsapp_markdown(error_msg)
+                    await self.provider.send_text_message(to=to, text=formatted_error_msg)
                 except Exception as e:
                     logger.warning(
                         f"[SEND_RESPONSE] Failed to send partial failure notification: {e}"
@@ -1825,8 +1863,9 @@ class WhatsAppBot(BaseModel):
         try:
             # Only quote if quote_messages is enabled
             quoted_id = reply_to if self.config.quote_messages else None
+            formatted_error = self._format_whatsapp_markdown(self.config.error_message)
             await self.provider.send_text_message(
-                to=to, text=self.config.error_message, quoted_message_id=quoted_id
+                to=to, text=formatted_error, quoted_message_id=quoted_id
             )
             logger.debug(f"[SEND_ERROR] Successfully sent error message to {to}")
         except Exception as e:
@@ -1871,7 +1910,8 @@ class WhatsAppBot(BaseModel):
         message = "You're sending messages too quickly. Please wait a moment before sending more messages."
         logger.info(f"[RATE_LIMIT] Sending rate limit message to {to}")
         try:
-            await self.provider.send_text_message(to=to, text=message)
+            formatted_message = self._format_whatsapp_markdown(message)
+            await self.provider.send_text_message(to=to, text=formatted_message)
             logger.debug(f"[RATE_LIMIT] Successfully sent rate limit message to {to}")
         except Exception as e:
             logger.error(
