@@ -1117,6 +1117,18 @@ class WhatsAppBot(BaseModel):
             agent_input = await self._convert_message_batch_to_input(
                 pending_messages, session
             )
+            
+            # Check if batch conversion returned None (empty batch)
+            if not agent_input:
+                logger.warning(
+                    f"[BATCH_PROCESSING] Batch conversion returned None for {phone_number} - skipping empty batch"
+                )
+                # Clear sending state and finish batch processing
+                session.context_data["is_sending_messages"] = False
+                session.context_data["sending_completed_at"] = datetime.now().isoformat()
+                session.finish_batch_processing(processing_token)
+                await self.provider.update_session(session)
+                return None
 
             # Process with agent
             logger.info(f"[BATCH_PROCESSING] 🤖 Running agent for {phone_number}")
@@ -1376,12 +1388,14 @@ class WhatsAppBot(BaseModel):
                     )
                     parts.append(TextPart(text="[Media file - failed to download]"))
 
-        # If no parts were added, add a placeholder
+        # If no parts were added, skip processing instead of creating placeholder
         if not parts:
             logger.warning(
-                "[BATCH_CONVERSION] No parts were created, adding placeholder"
+                "[BATCH_CONVERSION] No parts were created - skipping batch processing to avoid empty message"
             )
-            parts.append(TextPart(text="[Empty message batch]"))
+            # Return None to indicate this batch should be skipped
+            # This prevents the agent from receiving empty content
+            return None
 
         # Create user message with first message's push name
         first_message = message_batch[0] if message_batch else {}
@@ -1545,11 +1559,11 @@ class WhatsAppBot(BaseModel):
                 return generated_message
 
             logger.warning("[AGENT_PROCESSING] No generation found in result")
-            # Return an empty GeneratedAssistantMessage when no generation is found
+            # Return a more appropriate fallback message
             from agentle.generations.models.message_parts.text import TextPart
 
             return GeneratedAssistantMessage[Any](
-                parts=[TextPart(text="I processed your message but have no response.")],
+                parts=[TextPart(text="Desculpe, não consegui processar sua mensagem no momento. Tente novamente.")],
                 parsed=None,
             )
 
@@ -2001,7 +2015,7 @@ class WhatsAppBot(BaseModel):
                 return result
             else:
                 logger.warning(
-                    "[MESSAGE_UPSERT] ❌ Failed to parse message from Evolution API data"
+                    "[MESSAGE_UPSERT] ❌ Failed to parse message or message was skipped (empty/placeholder content)"
                 )
                 return None
 
@@ -2205,21 +2219,14 @@ class WhatsAppBot(BaseModel):
                         f"[PARSE_EVOLUTION] Unknown message type in content: {list(msg_content.keys())}"
                     )
 
-            # If we get here and message is empty but we have messageType info, create a placeholder
+            # If we get here and message is empty but we have messageType info, skip processing
             elif message_type and message_type != "":
                 logger.info(
-                    f"[PARSE_EVOLUTION] Empty message content but messageType is '{message_type}' - creating placeholder"
+                    f"[PARSE_EVOLUTION] Empty message content with messageType '{message_type}' - skipping to avoid empty message processing"
                 )
-                return WhatsAppTextMessage(
-                    id=message_id,
-                    push_name=data.get("pushName", "Unknown"),
-                    from_number=from_number,
-                    to_number=self.provider.get_instance_identifier(),
-                    timestamp=datetime.fromtimestamp(
-                        data.get("messageTimestamp", 0) / 1000
-                    ),
-                    text=f"[{message_type}]",  # Placeholder for message types we can't parse
-                )
+                # Return None to skip processing instead of creating placeholder messages
+                # This prevents the agent from receiving empty/placeholder content
+                return None
 
             logger.warning("[PARSE_EVOLUTION] No recognizable message content found")
             return None
