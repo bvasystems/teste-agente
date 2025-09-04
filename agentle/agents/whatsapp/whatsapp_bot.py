@@ -783,26 +783,50 @@ class WhatsAppBot(BaseModel):
                     f"[BATCHING] Updated session state: processing={updated_session.is_processing}, token={updated_session.processing_token}, pending={len(updated_session.pending_messages)}"
                 )
 
-                # Only start processor if we successfully initiated processing
-                if (
+                # CRITICAL FIX: Enhanced race condition protection for batch processor creation
+                should_create_processor = (
                     updated_session.is_processing
                     and updated_session.processing_token
                     and phone_number not in self._batch_processors
-                ):
+                )
+                
+                # Double-check to prevent race conditions
+                if should_create_processor:
+                    # Check again inside the lock to prevent duplicate processors
+                    if phone_number in self._batch_processors:
+                        existing_task = self._batch_processors[phone_number]
+                        if not existing_task.done():
+                            logger.info(
+                                f"[BATCHING] ⚠️ Processor already exists for {phone_number}, skipping creation"
+                            )
+                            should_create_processor = False
+                        else:
+                            logger.info(
+                                f"[BATCHING] 🧹 Cleaning up completed processor for {phone_number}"
+                            )
+                            del self._batch_processors[phone_number]
+                
+                if should_create_processor:
                     logger.info(
                         f"[BATCHING] 🚀 Starting new batch processor for {phone_number}"
                     )
                     logger.info(
                         f"[BATCHING] Processing token: {updated_session.processing_token}"
                     )
-                    self._batch_processors[phone_number] = asyncio.create_task(
-                        self._batch_processor(
-                            phone_number, updated_session.processing_token
+                    # Ensure processing_token is not None before passing to _batch_processor
+                    if updated_session.processing_token:
+                        self._batch_processors[phone_number] = asyncio.create_task(
+                            self._batch_processor(
+                                phone_number, updated_session.processing_token
+                            )
                         )
-                    )
-                    logger.info(
-                        f"[BATCHING] ✅ Batch processor task created for {phone_number}"
-                    )
+                        logger.info(
+                            f"[BATCHING] ✅ Batch processor task created for {phone_number}"
+                        )
+                    else:
+                        logger.error(
+                            f"[BATCHING] ❌ Cannot create processor: processing_token is None for {phone_number}"
+                        )
                 else:
                     logger.info(
                         f"[BATCHING] Message added to existing batch for {phone_number}"

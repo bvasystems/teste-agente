@@ -38,6 +38,9 @@ class WhatsAppSession(BaseModel):
     batch_timeout_at: datetime | None = Field(
         default=None, description="When to force process the current batch"
     )
+    last_message_added_at: datetime | None = Field(
+        default=None, description="When the last message was added to the current batch"
+    )
 
     # Spam protection tracking
     last_message_at: datetime | None = Field(
@@ -71,18 +74,34 @@ class WhatsAppSession(BaseModel):
             self.phone_number = self.phone_number.split("@")[0]
 
     def add_pending_message(self, message_data: dict[str, Any]) -> None:
-        """Add a message to the pending queue with improved logging."""
+        """Add a message to the pending queue with improved logging and timer reset."""
         logger.debug(
             f"[SESSION] Adding pending message for {self.phone_number}. "
             + f"Queue size before: {len(self.pending_messages)}"
         )
 
+        current_time = datetime.now()
         self.pending_messages.append(message_data)
+        
+        # CRITICAL FIX: Always update when last message was added
+        self.last_message_added_at = current_time
+        
+        # CRITICAL FIX: Reset batch timer when new messages arrive to existing batch
+        # This ensures messages are properly accumulated instead of processed separately
+        if self.is_processing and self.batch_started_at:
+            old_batch_started = self.batch_started_at
+            self.batch_started_at = current_time
+            logger.info(
+                f"[SESSION] ⏰ TIMER RESET for {self.phone_number}: "
+                + f"batch_started_at updated from {old_batch_started} to {self.batch_started_at} "
+                + f"due to new message arrival (queue size: {len(self.pending_messages)})"
+            )
+        
         # Update last activity only if we're not in the middle of batch processing
         # This prevents race conditions with the batch timer
         if not self.is_processing:
-            self.last_activity = datetime.now()
-            self.last_state_change = datetime.now()
+            self.last_activity = current_time
+            self.last_state_change = current_time
 
         logger.info(
             f"[SESSION] Added pending message to {self.phone_number}. "
@@ -220,14 +239,19 @@ class WhatsAppSession(BaseModel):
             )
             return True
 
-        # Use batch start time for delay calculation
+        # IMPROVED LOGIC: Consider time since last message was added
+        # This ensures we wait for the full delay after the last message
         if self.batch_started_at:
-            time_since_batch_start = (now - self.batch_started_at).total_seconds()
-            should_process = time_since_batch_start >= batch_delay_seconds
+            reference_time = self.batch_started_at
+            if self.last_message_added_at and self.last_message_added_at > self.batch_started_at:
+                reference_time = self.last_message_added_at
+
+            time_since_reference = (now - reference_time).total_seconds()
+            should_process = time_since_reference >= batch_delay_seconds
 
             logger.debug(
-                f"[BATCH_DECISION] Time since batch started for {self.phone_number}: "
-                + f"{time_since_batch_start:.2f}s (threshold: {batch_delay_seconds}s) -> {should_process}"
+                f"[BATCH_DECISION] Time since reference time for {self.phone_number}: "
+                + f"{time_since_reference:.2f}s (threshold: {batch_delay_seconds}s) -> {should_process}"
             )
 
             return should_process
@@ -300,12 +324,14 @@ class WhatsAppSession(BaseModel):
             )
             return False
 
+        current_time = datetime.now()
         self.is_processing = False
         self.batch_started_at = None
         self.batch_timeout_at = None
+        self.last_message_added_at = None  # Reset last message time
         self.processing_token = None
-        self.last_activity = datetime.now()
-        self.last_state_change = datetime.now()
+        self.last_activity = current_time
+        self.last_state_change = current_time
 
         logger.debug(
             f"[BATCH_FINISH] Batch processing finished for {self.phone_number}: "
