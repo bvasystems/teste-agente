@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.8.18
+feat(agent): add thinking tags removal and improve message formatting
+
+Add new _remove_thinking_tags method to clean agent responses before sending
+Improve markdown formatting for WhatsApp compatibility
+Fix session data preservation during batching operations
+
+fix(whatsapp_bot): handle empty message batches by skipping processing
+
+Skip processing empty message batches instead of creating placeholder content
+Return more appropriate fallback message when agent processing fails
+Update logging messages to reflect new empty batch handling behavior
+
 ## v0.8.17
 feat(whatsapp): add markdown formatting for WhatsApp messages
 
