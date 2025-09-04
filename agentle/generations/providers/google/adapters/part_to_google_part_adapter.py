@@ -36,8 +36,9 @@ response = model.generate_content([google_part])
 
 from __future__ import annotations
 
-import base64
 from typing import TYPE_CHECKING, Any, cast
+
+from agentle.utils.fix_base64_padding import safe_b64decode
 
 from rsb.adapters.adapter import Adapter
 
@@ -153,9 +154,14 @@ class PartToGooglePartAdapter(
                 return GooglePart(text=str(_f))
             case FilePart():
                 data = _f.data
+                if isinstance(data, str):
+                    decoded_data = safe_b64decode(data)
+                else:
+                    decoded_data = data
+                    
                 return GooglePart(
                     inline_data=Blob(
-                        data=base64.b64decode(data) if isinstance(data, str) else data,
+                        data=decoded_data,
                         mime_type=_f.mime_type,
                     )
                 )
