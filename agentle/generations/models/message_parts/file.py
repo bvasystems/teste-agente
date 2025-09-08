@@ -17,44 +17,44 @@ if TYPE_CHECKING:
     from PIL.Image import Image as PILImageType
 
 
-class __ImageModule(Protocol):
+class _ImageModule(Protocol):
     """Protocol for PIL Image module."""
 
     @staticmethod
     def open(fp: str | bytes | io.BytesIO) -> "PILImageType": ...
 
 
-class __MagicModule(Protocol):
+class _MagicModule(Protocol):
     """Protocol for python-magic module."""
 
     @staticmethod
     def from_buffer(buffer: bytes, mime: bool = False) -> str: ...
 
 
-class __PyPDF2Module(Protocol):
+class _PyPDF2Module(Protocol):
     """Protocol for PyPDF2 module."""
 
     class PdfReader:
         def __init__(self, stream: str | io.BytesIO) -> None: ...
 
 
-class __SoundFileModule(Protocol):
+class _SoundFileModule(Protocol):
     """Protocol for soundfile module."""
 
     @staticmethod
     def info(file: str | io.BytesIO) -> Any: ...
 
 
-class __OptionalDependencies:
+class _OptionalDependencies:
     """Type-safe handler for optional dependency imports."""
 
     def __init__(self) -> None:
-        self._pil_image: __ImageModule | None = self._try_import_pil()
-        self._magic: __MagicModule | None = self._try_import_magic()
-        self._pypdf2: __PyPDF2Module | None = self._try_import_pypdf2()
-        self._soundfile: __SoundFileModule | None = self._try_import_soundfile()
+        self._pil_image: _ImageModule | None = self._try_import_pil()
+        self._magic: _MagicModule | None = self._try_import_magic()
+        self._pypdf2: _PyPDF2Module | None = self._try_import_pypdf2()
+        self._soundfile: _SoundFileModule | None = self._try_import_soundfile()
 
-    def _try_import_pil(self) -> __ImageModule | None:
+    def _try_import_pil(self) -> _ImageModule | None:
         try:
             from PIL import Image
 
@@ -62,7 +62,7 @@ class __OptionalDependencies:
         except ImportError:
             return None
 
-    def _try_import_magic(self) -> __MagicModule | None:            
+    def _try_import_magic(self) -> _MagicModule | None:            
         try:
             import magic
 
@@ -70,7 +70,7 @@ class __OptionalDependencies:
         except ImportError:
             return None
 
-    def _try_import_pypdf2(self) -> __PyPDF2Module | None:
+    def _try_import_pypdf2(self) -> _PyPDF2Module | None:
         try:
             import PyPDF2
 
@@ -78,7 +78,7 @@ class __OptionalDependencies:
         except ImportError:
             return None
 
-    def _try_import_soundfile(self) -> __SoundFileModule | None:
+    def _try_import_soundfile(self) -> _SoundFileModule | None:
         try:
             import soundfile as sf
 
@@ -87,22 +87,22 @@ class __OptionalDependencies:
             return None
 
     @property
-    def pil_image(self) -> __ImageModule | None:
+    def pil_image(self) -> _ImageModule | None:
         """PIL Image module if available."""
         return self._pil_image
 
     @property
-    def magic(self) -> __MagicModule | None:
+    def magic(self) -> _MagicModule | None:
         """Python-magic module if available."""
         return self._magic
 
     @property
-    def pypdf2(self) -> __PyPDF2Module | None:
+    def pypdf2(self) -> _PyPDF2Module | None:
         """PyPDF2 module if available."""
         return self._pypdf2
 
     @property
-    def soundfile(self) -> __SoundFileModule | None:
+    def soundfile(self) -> _SoundFileModule | None:
         """Soundfile module if available."""
         return self._soundfile
 
@@ -128,7 +128,7 @@ class __OptionalDependencies:
 
 
 # Global instance for dependency checking
-_deps: __OptionalDependencies = __OptionalDependencies()
+_deps: _OptionalDependencies = _OptionalDependencies()
 
 
 class FilePart(BaseModel):
