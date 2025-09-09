@@ -1613,49 +1613,27 @@ class WhatsAppBot(BaseModel):
                     f"[AGENT_PROCESSING] Generated response (length: {len(generated_message.text)})"
                 )
 
-                # Remove thinking tags from the response text
-                original_text = generated_message.text
-                cleaned_text = self._remove_thinking_tags(original_text)
+                # FIXED: Always clean thinking tags from all parts
+                cleaned_parts: list[TextPart | ToolExecutionSuggestion] = []
+                
+                for part in generated_message.parts:
+                    if part.type == "text":
+                        from agentle.generations.models.message_parts.text import TextPart
 
-                # Log if thinking tags were found and removed
-                if original_text != cleaned_text:
-                    logger.info(
-                        "[AGENT_PROCESSING] Removed thinking tags from response. "
-                        + f"Original length: {len(original_text)}, Cleaned length: {len(cleaned_text)}"
-                    )
+                        part_text = str(part.text) if part.text else ""
+                        cleaned_part_text = self._remove_thinking_tags(part_text)
+                        cleaned_parts.append(TextPart(text=cleaned_part_text))
+                    else:
+                        # FIXED: Keep non-text parts
+                        cleaned_parts.append(part)
 
-                # Create a new message with cleaned text if thinking tags were found
-                if original_text != cleaned_text:
-                    # Update the text parts with cleaned content
-                    cleaned_parts: list[TextPart | ToolExecutionSuggestion] = []
-                    for part in generated_message.parts:
-                        if hasattr(part, "text") and part.text:
-                            # Create new TextPart with cleaned text
-                            from agentle.generations.models.message_parts.text import (
-                                TextPart,
-                            )
-
-                            part_text = str(part.text) if part.text else ""
-                            cleaned_part = TextPart(
-                                text=self._remove_thinking_tags(part_text)
-                            )
-                            cleaned_parts.append(cleaned_part)
-                            continue
-
-                            # Keep non-text parts as they are
-                            cleaned_parts.append(part)
-
-                    # Create new message with cleaned parts
-                    cleaned_message = GeneratedAssistantMessage[Any](
-                        parts=cleaned_parts,
-                        parsed=generated_message.parsed,
-                    )
-                    return cleaned_message
-
-                return generated_message
+                # Always return cleaned message
+                return GeneratedAssistantMessage[Any](
+                    parts=cleaned_parts,
+                    parsed=generated_message.parsed,
+                )
 
             logger.warning("[AGENT_PROCESSING] No generation found in result")
-            # Return a more appropriate fallback message
             from agentle.generations.models.message_parts.text import TextPart
 
             return GeneratedAssistantMessage[Any](
@@ -1672,13 +1650,15 @@ class WhatsAppBot(BaseModel):
                 f"[AGENT_PROCESSING_ERROR] Agent processing error: {e}", exc_info=True
             )
             raise
-
+    
     def _remove_thinking_tags(self, text: str) -> str:
         """Remove thinking tags and their content from the response text.
 
         This method handles:
         - Multiple occurrences of thinking tags
         - Tags spanning multiple lines
+        - Malformed or incomplete tags
+        - Case-insensitive matching
         - Responses with no thinking tags
 
         Args:
@@ -1690,20 +1670,75 @@ class WhatsAppBot(BaseModel):
         if not text:
             return text
 
+        original_text = text
+        
+        # Pattern 1: Complete thinking tags (case-insensitive, multiline)
         # Use re.DOTALL flag to make . match newlines as well
-        # This handles thinking tags that span multiple lines
-        cleaned_text = re.sub(
-            r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL | re.IGNORECASE
+        text = re.sub(
+            r"<thinking>.*?</thinking>", 
+            "", 
+            text, 
+            flags=re.DOTALL | re.IGNORECASE
+        )
+        
+        # Pattern 2: Handle malformed tags or incomplete tags
+        # Remove opening thinking tags without closing tags (to the end of text)
+        text = re.sub(
+            r"<thinking>.*?$", 
+            "", 
+            text, 
+            flags=re.DOTALL | re.IGNORECASE
+        )
+        
+        # Pattern 3: Remove any remaining orphaned closing tags
+        text = re.sub(
+            r"</thinking>", 
+            "", 
+            text, 
+            flags=re.IGNORECASE
+        )
+        
+        # Pattern 4: Handle variations with attributes or whitespace
+        text = re.sub(
+            r"<thinking[^>]*>.*?</thinking[^>]*>", 
+            "", 
+            text, 
+            flags=re.DOTALL | re.IGNORECASE
         )
 
         # Clean up any extra whitespace that might be left after removing thinking tags
-        cleaned_text = re.sub(
-            r"\n\s*\n\s*\n", "\n\n", cleaned_text
-        )  # Replace multiple newlines with double newlines
-        cleaned_text = cleaned_text.strip()  # Remove leading/trailing whitespace
+        # Replace multiple consecutive newlines with double newlines
+        text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
+        
+        # Remove excessive spaces
+        text = re.sub(r"[ \t]+", " ", text)
+        
+        # Clean up leading/trailing whitespace
+        text = text.strip()
+        
+        # Log if thinking tags were found and removed
+        if original_text != text:
+            thinking_tags_removed = len(re.findall(
+                r"<thinking[^>]*>.*?</thinking[^>]*>", 
+                original_text, 
+                flags=re.DOTALL | re.IGNORECASE
+            ))
+            logger.warning(
+                f"[THINKING_CLEANUP] Removed {thinking_tags_removed} thinking tag(s). "
+                f"Original length: {len(original_text)}, Cleaned length: {len(text)}"
+            )
+            
+            # Additional debug info for persistent issues
+            if self.config.debug_mode:
+                logger.debug(
+                    f"[THINKING_CLEANUP] Original text preview: {original_text[:200]}..."
+                )
+                logger.debug(
+                    f"[THINKING_CLEANUP] Cleaned text preview: {text[:200]}..."
+                )
 
-        return cleaned_text
-
+        return text
+    
     def _format_whatsapp_markdown(self, text: str) -> str:
         """Convert standard markdown to WhatsApp-compatible formatting.
 
