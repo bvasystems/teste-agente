@@ -11,7 +11,7 @@ import os
 import tempfile
 from collections.abc import MutableSequence
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from rsb.functions.ext2mime import ext2mime
 from rsb.models.field import Field
@@ -224,7 +224,8 @@ class PDFFileParser(DocumentParser):
                 pymupdf_module = None
                 mu_doc = None
                 try:
-                    import pymupdf as pymupdf_module  # type: ignore
+                    # PyMuPDF's import name is "fitz" (package name is pymupdf)
+                    import fitz as pymupdf_module  # type: ignore
 
                     mu_doc = pymupdf_module.open(file_path)  # type: ignore
                 except ImportError:
@@ -262,11 +263,21 @@ class PDFFileParser(DocumentParser):
                         if mu_doc is not None and pymupdf_module is not None:
                             try:
                                 # Render the page directly from the already-opened PyMuPDF document
-                                page_obj = mu_doc[page_num]  # type: ignore
-                                pix = page_obj.get_pixmap(
-                                    matrix=pymupdf_module.Matrix(2.0, 2.0)  # type: ignore
-                                )  # 2x scale for better quality
-                                page_image_bytes: bytes = pix.tobytes("png")  # type: ignore
+                                # Cast to Any so static checkers don't confuse this with pypdf's Page
+                                page_obj = cast(Any, mu_doc[page_num])  # type: ignore
+                                matrix = pymupdf_module.Matrix(2.0, 2.0)  # type: ignore
+
+                                # Support both modern and legacy PyMuPDF APIs
+                                get_pixmap = getattr(
+                                    page_obj, "get_pixmap", None
+                                ) or getattr(page_obj, "getPixmap", None)
+                                if not callable(get_pixmap):
+                                    raise AttributeError(
+                                        "PyMuPDF Page has no get_pixmap/getPixmap method"
+                                    )
+
+                                pix = get_pixmap(matrix=matrix)  # type: ignore[call-arg]
+                                page_image_bytes: bytes = pix.tobytes("png")  # type: ignore[attr-defined]
 
                                 # Generate hash for caching
                                 page_hash = hashlib.sha256(page_image_bytes).hexdigest()  # type: ignore
