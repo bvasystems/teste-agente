@@ -13,7 +13,7 @@ from collections.abc import (
 )
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional, cast
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from rsb.coroutines.run_sync import run_sync
 from rsb.models.base_model import BaseModel
@@ -84,7 +84,8 @@ class CallbackWithContext:
             Awaitable[None],
         ]
     )
-    context: dict[str, Any] | None = None
+
+    context: dict[str, Any] = field(default_factory=dict)
 
 
 class WhatsAppBot(BaseModel):
@@ -199,7 +200,7 @@ class WhatsAppBot(BaseModel):
         # Log callback details
         for i, cb in enumerate(self._response_callbacks):
             logger.info(
-                f"[MESSAGE_HANDLER] Callback {i + 1}: {cb.callback.__name__ if hasattr(cb.callback, '__name__') else 'unnamed'}, Context: {cb.context is not None}"
+                f"[MESSAGE_HANDLER] Callback {i + 1}: {cb.callback.__name__ if hasattr(cb.callback, '__name__') else 'unnamed'}, Context: {cb.context}"
             )
 
         try:
@@ -363,7 +364,7 @@ class WhatsAppBot(BaseModel):
         if callback:
             logger.info("[WEBHOOK] Processing callback registration for batching...")
             callback_with_context = CallbackWithContext(
-                callback=callback, context=callback_context
+                callback=callback, context=callback_context or {}
             )
 
             # Check if this exact callback is already registered to avoid duplicates
@@ -556,7 +557,9 @@ class WhatsAppBot(BaseModel):
             f"[ADD_CALLBACK] Current callbacks count: {len(self._response_callbacks)}"
         )
 
-        callback_with_context = CallbackWithContext(callback=callback, context=context)
+        callback_with_context = CallbackWithContext(
+            callback=callback, context=context or {}
+        )
 
         if not allow_duplicates:
             # Check if this exact callback+context combination already exists
@@ -1188,7 +1191,7 @@ class WhatsAppBot(BaseModel):
 
             # Process with agent
             logger.info(f"[BATCH_PROCESSING] 🤖 Running agent for {phone_number}")
-            response = await self._process_with_agent(
+            response, input_tokens, output_tokens = await self._process_with_agent(
                 agent_input, session, chat_id=chat_id
             )
             logger.info(
@@ -1228,7 +1231,12 @@ class WhatsAppBot(BaseModel):
             )
 
             # Call response callbacks
-            await self._call_response_callbacks(phone_number, response)
+            await self._call_response_callbacks(
+                phone_number,
+                response,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
             return response
 
         except Exception as e:
@@ -1252,7 +1260,12 @@ class WhatsAppBot(BaseModel):
             await self.provider.update_session(session)
 
             # Call response callbacks with None response on error
-            await self._call_response_callbacks(phone_number, None)
+            await self._call_response_callbacks(
+                phone_number,
+                None,
+                input_tokens=0,
+                output_tokens=0,
+            )
             raise
 
     async def _process_single_message(
@@ -1288,7 +1301,7 @@ class WhatsAppBot(BaseModel):
 
             # Process with agent
             logger.info(f"[SINGLE_MESSAGE] 🤖 Running agent for {message.from_number}")
-            response = await self._process_with_agent(
+            response, input_tokens, output_tokens = await self._process_with_agent(
                 agent_input, session, chat_id=chat_id
             )
             logger.info(
@@ -1321,7 +1334,12 @@ class WhatsAppBot(BaseModel):
             logger.info(
                 f"[SINGLE_MESSAGE] 📞 About to call response callbacks for {message.from_number}"
             )
-            await self._call_response_callbacks(message.from_number, response)
+            await self._call_response_callbacks(
+                message.from_number,
+                response,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
             logger.info(
                 f"[SINGLE_MESSAGE] ✅ Response callbacks completed for {message.from_number}"
             )
@@ -1338,7 +1356,12 @@ class WhatsAppBot(BaseModel):
             logger.info(
                 "[SINGLE_MESSAGE] 📞 Calling response callbacks with None response due to error"
             )
-            await self._call_response_callbacks(message.from_number, None)
+            await self._call_response_callbacks(
+                phone_number=message.from_number,
+                response=None,
+                input_tokens=0,
+                output_tokens=0,
+            )
             logger.info("[SINGLE_MESSAGE] ✅ Error response callbacks completed")
             raise
         finally:
@@ -1463,7 +1486,11 @@ class WhatsAppBot(BaseModel):
         return user_message
 
     async def _call_response_callbacks(
-        self, phone_number: str, response: GeneratedAssistantMessage[Any] | None
+        self,
+        phone_number: str,
+        response: GeneratedAssistantMessage[Any] | None,
+        input_tokens: float,
+        output_tokens: float,
     ) -> None:
         """Call all registered response callbacks."""
         logger.info("[CALLBACKS] ═══════════ CALLING RESPONSE CALLBACKS ═══════════")
@@ -1490,6 +1517,10 @@ class WhatsAppBot(BaseModel):
             )
             logger.info(
                 f"[CALLBACKS] Callback context keys: {list(callback_with_context.context.keys()) if callback_with_context.context else 'None'}"
+            )
+
+            callback_with_context.context.update(
+                {"input_tokens": input_tokens, "output_tokens": output_tokens}
             )
 
             try:
@@ -1580,7 +1611,7 @@ class WhatsAppBot(BaseModel):
         agent_input: AgentInput,
         session: WhatsAppSession,
         chat_id: str | None = None,
-    ) -> GeneratedAssistantMessage[Any]:
+    ) -> tuple[GeneratedAssistantMessage[Any], int, int]:
         """Process input with agent using custom chat_id for conversation persistence."""
         logger.info("[AGENT_PROCESSING] Starting agent processing")
 
@@ -1605,6 +1636,12 @@ class WhatsAppBot(BaseModel):
                     agent_input,
                     chat_id=effective_chat_id,
                 )
+                input_tokens = result.input_tokens
+                output_tokens = result.output_tokens
+
+                logger.debug(f"Input tokens: {input_tokens}")
+                logger.debug(f"Output tokens: {output_tokens}")
+
                 logger.info("[AGENT_PROCESSING] Agent run completed successfully")
 
             if result.generation:
@@ -1630,21 +1667,29 @@ class WhatsAppBot(BaseModel):
                         cleaned_parts.append(part)
 
                 # Always return cleaned message
-                return GeneratedAssistantMessage[Any](
-                    parts=cleaned_parts,
-                    parsed=generated_message.parsed,
+                return (
+                    GeneratedAssistantMessage[Any](
+                        parts=cleaned_parts,
+                        parsed=generated_message.parsed,
+                    ),
+                    input_tokens,
+                    output_tokens,
                 )
 
             logger.warning("[AGENT_PROCESSING] No generation found in result")
             from agentle.generations.models.message_parts.text import TextPart
 
-            return GeneratedAssistantMessage[Any](
-                parts=[
-                    TextPart(
-                        text="Desculpe, não consegui processar sua mensagem no momento. Tente novamente."
-                    )
-                ],
-                parsed=None,
+            return (
+                GeneratedAssistantMessage[Any](
+                    parts=[
+                        TextPart(
+                            text="Desculpe, não consegui processar sua mensagem no momento. Tente novamente."
+                        )
+                    ],
+                    parsed=None,
+                ),
+                input_tokens,
+                output_tokens,
             )
 
         except Exception as e:
