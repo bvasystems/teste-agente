@@ -184,7 +184,7 @@ class AgentRunOutput[T_StructuredOutput](BaseModel):
         return self.is_streaming and not self.is_final_chunk
 
     @property
-    def chunk_tokens(self) -> int:
+    def output_tokens(self) -> int:
         """
         Number of tokens in this specific chunk.
         For non-streaming, returns total tokens.
@@ -192,6 +192,12 @@ class AgentRunOutput[T_StructuredOutput](BaseModel):
         if self.generation is None:
             return 0
         return self.generation.usage.completion_tokens
+
+    @property
+    def input_tokens(self) -> int:
+        if self.generation is None:
+            return 0
+        return self.generation.usage.prompt_tokens
 
     @property
     def total_tokens_so_far(self) -> int:
@@ -338,7 +344,7 @@ class AgentRunOutput[T_StructuredOutput](BaseModel):
 
             # Show streaming-specific text info
             if self.is_streaming:
-                lines.append(f"   • Chunk Tokens: {self.chunk_tokens}")
+                lines.append(f"   • Chunk Tokens: {self.output_tokens}")
                 if not self.is_final_chunk:
                     lines.append("   • Text Preview (chunk):")
                 else:
