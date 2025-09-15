@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.8.25
+feat(circuit breakers): new duckdb and mywsql implementations
+
 ## v0.8.24
 fix(whatsapp): thinking tags not properlly removed
 
