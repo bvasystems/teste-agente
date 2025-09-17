@@ -558,8 +558,70 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 self.guardrail_manager.add_output_validator(validator)
 
         _vs = self.vector_stores or []
-        for vector_store in _vs:
-            self.tools.append(vector_store.as_search_tool())
+        if _vs:
+            # Collect existing tool names to avoid collisions and avoid duplicates across re-inits
+            existing_tool_names: set[str] = set()
+            for _tool in self.tools:
+                if isinstance(_tool, Tool):
+                    existing_tool_names.add(_tool.name)
+                elif callable(_tool):
+                    name = getattr(_tool, "__name__", None)
+                    if name:
+                        existing_tool_names.add(str(name))
+
+            # Build a stable, per-agent tool name for each VectorStore and create tool via name override
+            vs_tool_names: dict[VectorStore, str] = {}
+            for idx, vs in enumerate(_vs):
+                # Base semantic name per store (collection + optional hint)
+                base_name = getattr(vs, "_search_tool_name", "vector_search")
+                # If multiple stores, add a short suffix to differentiate
+                proposed = base_name if len(_vs) == 1 else f"{base_name}_{idx + 1}"
+
+                # Ensure uniqueness against all existing tools
+                unique_name = proposed
+                if unique_name in existing_tool_names:
+                    suffix = 2
+                    while f"{proposed}_{suffix}" in existing_tool_names:
+                        suffix += 1
+                    unique_name = f"{proposed}_{suffix}"
+
+                # Create a fresh tool instance with this unique name; do not mutate cached tool
+                vs_tool = vs.as_search_tool(name=unique_name)
+                if vs_tool.name not in existing_tool_names:
+                    self.tools.append(vs_tool)
+                    existing_tool_names.add(vs_tool.name)
+                vs_tool_names[vs] = vs_tool.name
+
+            # If multiple vector stores, enhance instructions to help the AI choose
+            if len(_vs) > 1:
+                store_descriptions: list[str] = []
+                for vs in _vs:
+                    desc = (
+                        vs.detailed_agent_description
+                        if vs.detailed_agent_description
+                        else f"Vector store for '{vs.default_collection_name}'"
+                    )
+                    tool_name = vs_tool_names.get(vs)
+                    if tool_name:
+                        store_descriptions.append(f"- {tool_name}: {desc}")
+
+                if store_descriptions:
+                    context_enhancement = dedent(
+                        f"""
+
+                        You have access to {len(_vs)} vector search tools for retrieving information:
+                        {chr(10).join(store_descriptions)}
+
+                        Choose the appropriate search tool based on the user's query topic.
+                        """
+                    )
+
+                    # Append to existing instructions
+                    if isinstance(self.instructions, str):
+                        self.instructions = self.instructions + context_enhancement
+                    elif isinstance(self.instructions, list):
+                        self.instructions.append(context_enhancement)
+                    # For Prompt or callable, we can't easily append, so skip
 
         # Collect all endpoints and APIs
         all_endpoints: MutableSequence[Endpoint | API] = []

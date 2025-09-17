@@ -3,6 +3,7 @@ from collections.abc import MutableSequence, Sequence
 import logging
 from textwrap import dedent
 from typing import Literal, ParamSpec
+import re
 
 from rsb.coroutines.run_sync import run_sync
 
@@ -46,6 +47,16 @@ class VectorStore(abc.ABC):
         self.embedding_provider = embedding_provider
         self.generation_provider = generation_provider
         self.detailed_agent_description = detailed_agent_description
+        # Cache the generated search tool to keep it stable and avoid duplicates
+        self._search_tool: Tool[..., str] | None = None
+        # Create a friendly, deterministic function name based on the collection name
+        base = (default_collection_name or "agentle").strip()
+        slug = re.sub(r"[^a-zA-Z0-9_.-]", "_", base)
+        if not re.match(r"^[A-Za-z_]", slug):
+            slug = f"vs_{slug}"
+        if len(slug) > 24:
+            slug = slug[:24]
+        self._search_tool_name: str = f"vector_search_{slug}"
 
     def find_related_content(
         self,
@@ -299,75 +310,99 @@ class VectorStore(abc.ABC):
     @abc.abstractmethod
     async def list_collections_async(self) -> Sequence[Collection]: ...
 
-    def as_search_tool(self) -> Tool[..., str]:
-        async def retrieval_augmented_generation_search(
-            query: str, top_k: int = 5
-        ) -> str:
-            related_chunks = await self.find_related_content_async(query=query, k=top_k)
-            chunk_descriptions = [chunk.describe() for chunk in related_chunks]
-            return dedent(f"""\
-            <RelatedChunks>
-            {"\n\n".join(chunk_descriptions)}
-            </RelatedChunks>
-            """)
+    def as_search_tool(self, name: str | None = None) -> Tool[..., str]:
+        """Return a Tool for searching this vector store.
 
-        tool = Tool.from_callable(
-            retrieval_augmented_generation_search,
-            description=dedent("""\
-            Searches a vector database for text chunks relevant to a query.
+        - When name is None (default), returns a cached Tool instance with a
+            deterministic name derived from the collection. This keeps tool
+            identity stable application-wide and avoids duplicates.
+        - When a custom name is provided, returns a fresh Tool instance with
+            that name without mutating or replacing the cached tool. This is
+            useful for per-agent disambiguation when multiple stores exist.
+        """
 
-            This tool is essential for answering questions or finding information
-            contained within a specific, indexed knowledge base. Use it when a user's
-            query pertains to specific documents, files, or internal data that is
-            not part of your general knowledge. It helps ground your answers in
-            factual, source-based information.
+        def _build_tool(tool_name: str) -> Tool[..., str]:
+            async def retrieval_augmented_generation_search(
+                query: str, top_k: int = 5
+            ) -> str:
+                related_chunks = await self.find_related_content_async(
+                    query=query, k=top_k
+                )
+                chunk_descriptions = [chunk.describe() for chunk in related_chunks]
+                return dedent(f"""\
+                                <RelatedChunks>
+                                {"\n\n".join(chunk_descriptions)}
+                                </RelatedChunks>
+                                """)
 
-            Args:
-                query (str): The search query used to find relevant information. To
-                             ensure the best results, formulate this query carefully:
-                             - Be Specific and Detailed: Include proper nouns, technical
-                               terms, dates, project codes, or any unique identifiers
-                               from the user's request. This significantly helps
-                               narrow the search.
-                             - Use Full Questions or Phrases: Instead of just keywords
-                               (e.g., "marketing budget"), formulate a complete
-                               question or a descriptive phrase (e.g., "What was the
-                               approved marketing budget for Q4 2025?"). This provides
-                               richer semantic context for the vector search.
-                             - Extract the Core Intent: Distill the user's request to
-                               its essential informational need. Remove conversational
-                               filler. For example, if the user asks, "Hey, can you
-                               look up our new remote work policy for me?", the ideal
-                               query is "new remote work policy".
-                top_k (int, optional): The maximum number of relevant text chunks
-                                       to return. Defaults to 5.
+            return Tool.from_callable(
+                retrieval_augmented_generation_search,
+                name=tool_name,
+                description=dedent("""\
+                                Searches a vector database for text chunks relevant to a query.
 
-            Returns:
-                str: A string containing the search results formatted within
-                     <RelatedChunks> tags. Each chunk includes the text content
-                     and metadata (like the source document), providing context
-                     for the information found.
+                                This tool is essential for answering questions or finding information
+                                contained within a specific, indexed knowledge base. Use it when a user's
+                                query pertains to specific documents, files, or internal data that is
+                                not part of your general knowledge. It helps ground your answers in
+                                factual, source-based information.
 
-            Handling Search Results:
-                - The search may sometimes return no results or content that is not
-                  relevant to the user's query. Your primary responsibility is to
-                  adhere to the user's instructions on how to proceed in this scenario.
-                - If the user has not provided specific instructions, you should adopt
-                  the following default behavior:
-                  1.  Do NOT invent an answer.
-                  2.  Clearly and politely state that you could not find a specific
-                      answer in the available documents.
-                  3.  You may suggest that the user try rephrasing the question.
-                  Example Response: "I searched the documents but couldn't find a
-                  specific answer regarding the 'Q3 innovation fund.' You might
-                  try rephrasing the query, perhaps with a project name included."
-            """)
-            + dedent(f"""\
-                      <VectorStoreCustomDescription>
-                      {self.detailed_agent_description}
-                      </VectorStoreCustomDescription>
-                      """)
-            if self.detailed_agent_description
-            else "",
-        )
-        return tool
+                                Args:
+                                        query (str): The search query used to find relevant information. To
+                                                                 ensure the best results, formulate this query carefully:
+                                                                 - Be Specific and Detailed: Include proper nouns, technical
+                                                                     terms, dates, project codes, or any unique identifiers
+                                                                     from the user's request. This significantly helps
+                                                                     narrow the search.
+                                                                 - Use Full Questions or Phrases: Instead of just keywords
+                                                                     (e.g., "marketing budget"), formulate a complete
+                                                                     question or a descriptive phrase (e.g., "What was the
+                                                                     approved marketing budget for Q4 2025?"). This provides
+                                                                     richer semantic context for the vector search.
+                                                                 - Extract the Core Intent: Distill the user's request to
+                                                                     its essential informational need. Remove conversational
+                                                                     filler. For example, if the user asks, "Hey, can you
+                                                                     look up our new remote work policy for me?", the ideal
+                                                                     query is "new remote work policy".
+                                        top_k (int, optional): The maximum number of relevant text chunks
+                                                                                     to return. Defaults to 5.
+
+                                Returns:
+                                        str: A string containing the search results formatted within
+                                                 <RelatedChunks> tags. Each chunk includes the text content
+                                                 and metadata (like the source document), providing context
+                                                 for the information found.
+
+                                Handling Search Results:
+                                        - The search may sometimes return no results or content that is not
+                                            relevant to the user's query. Your primary responsibility is to
+                                            adhere to the user's instructions on how to proceed in this scenario.
+                                        - If the user has not provided specific instructions, you should adopt
+                                            the following default behavior:
+                                        - 1.  Do NOT invent an answer.
+                                        - 2.  Clearly and politely state that you could not find a specific
+                                                    answer in the available documents.
+                                        - 3.  You may suggest that the user try rephrasing the question.
+                                        - Example Response: "I searched the documents but couldn't find a
+                                            specific answer regarding the 'Q3 innovation fund.' You might
+                                            try rephrasing the query, perhaps with a project name included."
+                                """)
+                + dedent(f"""\
+                                                    <VectorStoreCustomDescription>
+                                                    {self.detailed_agent_description}
+                                                    </VectorStoreCustomDescription>
+                                                    """)
+                if self.detailed_agent_description
+                else "",
+            )
+
+        # Default behavior: cached tool with deterministic name
+        if name is None:
+            if self._search_tool is not None:
+                return self._search_tool
+            tool = _build_tool(self._search_tool_name)
+            self._search_tool = tool
+            return tool
+
+        # Custom name: return a fresh tool instance without affecting cache
+        return _build_tool(name)
