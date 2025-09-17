@@ -1,6 +1,6 @@
 [project]
 name = "agentle"
-version = "v0.8.26"
+version = "v0.8.27"
 description = "..."
 readme = "README.md"
 requires-python = ">=3.13"
