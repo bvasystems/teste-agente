@@ -4,7 +4,7 @@ requires-python = ">=3.13"
 
 [[package]]
 name = "agentle"
-version = "0.8.29"
+version = "0.8.30"
 source = { editable = "." }
 dependencies = [
     { name = "aiocache" },
@@ -80,6 +80,7 @@ dev = [
     { name = "pyodbc" },
     { name = "pypdf" },
     { name = "pytest" },
+    { name = "pytest-asyncio" },
     { name = "python-docx" },
     { name = "python-dotenv" },
     { name = "python-magic" },
@@ -216,6 +217,7 @@ dev = [
     { name = "pyodbc", specifier = ">=5.2.0" },
     { name = "pypdf", specifier = ">=5.4.0" },
     { name = "pytest", specifier = ">=8.3.5" },
+    { name = "pytest-asyncio", specifier = ">=0.23.8" },
     { name = "python-docx", specifier = ">=1.1.2" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "python-magic", specifier = ">=0.4.27" },
@@ -3305,6 +3307,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest-asyncio"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/42/86/9e3c5f48f7b7b638b216e4b9e645f54d199d7abbbab7a64a13b4e12ba10f/pytest_asyncio-1.2.0.tar.gz", hash = "sha256:c609a64a2a8768462d0c99811ddb8bd2583c33fd33cf7f21af1c142e824ffb57", size = 50119 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/93/2fa34714b7a4ae72f2f8dad66ba17dd9a2c793220719e736dda28b7aec27/pytest_asyncio-1.2.0-py3-none-any.whl", hash = "sha256:8e17ae5e46d8e7efe51ab6494dd2010f4ca8dae51652aa3c8d55acf50bfb2e99", size = 15095 },
+]
+
+[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 source = { registry = "https://pypi.org/simple" }
@@ -3613,14 +3627,14 @@ wheels = [
 
 [[package]]
 name = "rock-solid-base"
-version = "0.1.10"
+version = "0.1.13"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/47/15/4604d97d87debfd9ffccace32ccb4c9b8d25b32f8f14128c46888b97e99e/rock_solid_base-0.1.10.tar.gz", hash = "sha256:56805b55bd1cbf124f07a653805ea08c47fe28f4cfd901073e8cd7b8eb2c87b4", size = 67012 }
+sdist = { url = "https://files.pythonhosted.org/packages/0a/f7/3d824c6aa242279d4abb33406df65e3668cc2f8486e0f0430a796665029a/rock_solid_base-0.1.13.tar.gz", hash = "sha256:00890a28a86bae191586b3482aebb892420c2afd3bf95b4004c0473a419bf30d", size = 71779 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ea/f0/491f5756d2b56ecfde520469cfbadcd5f903fb8279b3e54e774497b3d57b/rock_solid_base-0.1.10-py3-none-any.whl", hash = "sha256:05db03c7a2546e826c5026ee40daf51a3b70428307f05d8789aa0566c1dc2218", size = 54252 },
+    { url = "https://files.pythonhosted.org/packages/1c/e4/7a3f8a93d6b50238a18a03dbea24147bf90046fc11171e359276783dce47/rock_solid_base-0.1.13-py3-none-any.whl", hash = "sha256:8c45a1128373ac59434491edc4368b624cebe6811eea44aa8961982db5db008f", size = 59585 },
 ]
 
 [[package]]
