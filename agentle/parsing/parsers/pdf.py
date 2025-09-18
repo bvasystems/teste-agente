@@ -239,6 +239,24 @@ class PDFFileParser(DocumentParser):
                     pymupdf_module = None
                     mu_doc = None
 
+                # Attempt whole-document Markdown via MarkItDown (optional). We'll still build per-page sections
+                whole_doc_md: str | None = None
+                try:
+                    try:
+                        from markitdown import MarkItDown  # type: ignore
+
+                        md_converter = MarkItDown(enable_plugins=False)
+                        md_result = md_converter.convert(file_path)
+                        if hasattr(md_result, "markdown") and md_result.markdown:
+                            whole_doc_md = str(md_result.markdown)
+                    except ImportError:
+                        whole_doc_md = None
+                    except Exception as e:
+                        logger.warning(f"MarkItDown conversion failed for PDF: {e}")
+                        whole_doc_md = None
+                except Exception:
+                    whole_doc_md = None
+
                 for page_num, page in enumerate(reader.pages):
                     page_images: MutableSequence[Image] = []
                     image_descriptions: MutableSequence[str] = []
@@ -328,8 +346,28 @@ class PDFFileParser(DocumentParser):
                                 page, page_images, image_descriptions, image_cache
                             )
 
-                    page_text = [page.extract_text(), "".join(image_descriptions)]
-                    md = "".join(page_text)
+                    # Derive page-level Markdown
+                    extracted_text = page.extract_text() or ""
+                    # Try slicing per-page content heuristically if whole_doc_md exists (best-effort)
+                    md_body = extracted_text
+                    if whole_doc_md:
+                        # Keep it simple: prefer extracted text; whole_doc_md is used mainly to
+                        # ensure better formatting across document if needed in the future.
+                        md_body = extracted_text
+
+                    visual_md = ""
+                    if image_descriptions:
+                        visual_md = "\n\n### Visual Content\n" + "\n".join(
+                            f"- {desc}" for desc in image_descriptions
+                        )
+
+                    # Assemble page markdown with a header
+                    page_header = f"## Page {page_num + 1}"
+                    md = "\n\n".join(
+                        part
+                        for part in [page_header, md_body.strip(), visual_md.strip()]
+                        if part
+                    )
                     section_content = SectionContent(
                         number=page_num + 1,
                         text=md,

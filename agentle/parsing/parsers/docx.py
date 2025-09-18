@@ -180,8 +180,29 @@ class DocxFileParser(DocumentParser):
         document = Document(document_path)
         image_cache: dict[str, tuple[str, str]] = {}  # (md, ocr_text)
 
-        paragraph_texts = [p.text for p in document.paragraphs if p.text.strip()]
-        doc_text = "\n".join(paragraph_texts)
+        # Prefer high-quality Markdown via MarkItDown when available
+        md_text: str | None = None
+        try:
+            try:
+                from markitdown import MarkItDown  # type: ignore
+
+                md_converter = MarkItDown(enable_plugins=False)  # safe default
+                md_result = md_converter.convert(document_path)
+                if hasattr(md_result, "markdown") and md_result.markdown:
+                    md_text = str(md_result.markdown)
+            except ImportError:
+                md_text = None
+            except Exception as e:  # Conversion failed; fall back gracefully
+                logger.warning(f"MarkItDown conversion failed for DOCX: {e}")
+                md_text = None
+        except Exception:
+            # Extra-guard: never fail the parser just because of markdown conversion
+            md_text = None
+
+        # Fallback: basic paragraph join when MarkItDown isn't available
+        if not md_text:
+            paragraph_texts = [p.text for p in document.paragraphs if p.text.strip()]
+            md_text = "\n\n".join(paragraph_texts)
 
         doc_images: list[tuple[str, bytes]] = []
         for rel in document.part._rels.values():  # type: ignore[reportPrivateUsage]
@@ -404,15 +425,20 @@ class DocxFileParser(DocumentParser):
                         pass
 
             if image_descriptions:
-                doc_text += "\n\n" + "\n".join(image_descriptions)
+                # Append a structured Visual Content section to the Markdown
+                visual_md = [
+                    "\n\n## Visual Content",
+                    *(f"- {desc}" for desc in image_descriptions),
+                ]
+                md_text += "\n" + "\n".join(visual_md)
 
         return ParsedFile(
             name=document_path,
             sections=[
                 SectionContent(
                     number=1,
-                    text=doc_text,
-                    md=doc_text,
+                    text=md_text,
+                    md=md_text,
                     images=final_images,
                 )
             ],
