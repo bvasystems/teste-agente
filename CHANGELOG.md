@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.8.30
+- feat(parsing): better markdown parsing
+
 ## v0.8.29
 
 - feat(providers): implementing provider ID into GenerationProvider subclasses
