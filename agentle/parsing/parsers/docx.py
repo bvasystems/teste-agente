@@ -13,9 +13,8 @@ import shutil
 import subprocess
 import hashlib
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
-from rsb.functions.ext2mime import ext2mime
 from rsb.models.field import Field
 
 
@@ -135,75 +134,36 @@ class DocxFileParser(DocumentParser):
         document_path: str,
     ) -> ParsedFile:
         """
-        Asynchronously parse a Word document and generate a structured representation.
-
-        This method reads a Word document, extracts its text content, and processes
-        any embedded images. With the "high" strategy, images are analyzed using the
-        visual description agent to extract text and generate descriptions.
-
-        Args:
-            document_path (str): Path to the Word document to be parsed
-
-        Returns:
-            ParsedFile: A structured representation where:
-                - The document is represented as a single section
-                - The section includes all text content from the document
-                - Embedded images are extracted and (optionally) analyzed
-
-        Example:
-            ```python
-            import asyncio
-            from agentle.parsing.parsers.docx import DocxFileParser
-
-            async def process_document():
-                parser = DocxFileParser(strategy="high")
-                result = await parser.parse_async("report.docx")
-
-                # Access the document content
-                print(f"Document text: {result.sections[0].text[:200]}...")
-
-                # Process images
-                print(f"Document contains {len(result.sections[0].images)} images")
-                for img in result.sections[0].images:
-                    if img.ocr_text:
-                        print(f"Image text: {img.ocr_text}")
-
-            asyncio.run(process_document())
-            ```
-
-        Note:
-            This method uses the python-docx library to read Word documents. For optimal
-            results, use .docx format rather than the older .doc format.
+        Parse a Word document into a single Markdown section and describe visuals without duplicating page OCR.
         """
         from docx import Document
 
         document = Document(document_path)
-        image_cache: dict[str, tuple[str, str]] = {}  # (md, ocr_text)
 
-        # Prefer high-quality Markdown via MarkItDown when available
+        # Base Markdown via MarkItDown (best-effort)
         md_text: str | None = None
         try:
             try:
                 from markitdown import MarkItDown  # type: ignore
 
-                md_converter = MarkItDown(enable_plugins=False)  # safe default
+                md_converter = MarkItDown(enable_plugins=False)
                 md_result = md_converter.convert(document_path)
                 if hasattr(md_result, "markdown") and md_result.markdown:
                     md_text = str(md_result.markdown)
             except ImportError:
                 md_text = None
-            except Exception as e:  # Conversion failed; fall back gracefully
+            except Exception as e:
                 logger.warning(f"MarkItDown conversion failed for DOCX: {e}")
                 md_text = None
         except Exception:
-            # Extra-guard: never fail the parser just because of markdown conversion
             md_text = None
 
-        # Fallback: basic paragraph join when MarkItDown isn't available
         if not md_text:
+            # Fallback: join paragraphs with spacing
             paragraph_texts = [p.text for p in document.paragraphs if p.text.strip()]
             md_text = "\n\n".join(paragraph_texts)
 
+        # Extract embedded images (kept as Image objects; OCR left empty to avoid duplication)
         doc_images: list[tuple[str, bytes]] = []
         for rel in document.part._rels.values():  # type: ignore[reportPrivateUsage]
             if "image" in rel.reltype:
@@ -212,37 +172,28 @@ class DocxFileParser(DocumentParser):
                 image_bytes = image_part.blob
                 doc_images.append((image_name, image_bytes))
 
-        final_images: list[Image] = []
-        image_descriptions: list[str] = []
+        final_images: list[Image] = [
+            Image(name=name, contents=bytes(data), ocr_text="")
+            for name, data in doc_images
+        ]
 
-        # Always collect the Image objects first (OCR text may be filled later)
-        for image_name, image_bytes in doc_images:
-            final_images.append(
-                Image(
-                    name=image_name,
-                    contents=image_bytes,
-                    ocr_text="",
-                )
-            )
+        image_descriptions: list[str] = []
+        image_cache: dict[str, tuple[str, str]] = {}
 
         if self.visual_description_provider and self.strategy == "high" and doc_images:
-            # Optimization path: attempt to render page screenshots by converting DOCX -> PDF
-            # using a headless converter (LibreOffice/soffice or pandoc) and then use PyMuPDF
-            # to render pages that contain images. If any step fails, fall back to individual
-            # image processing as before.
-            used_page_screenshots = False
+            # Only support the page-screenshot path. If conversion or rendering fails, raise a clear error.
             try:
                 try:
                     import fitz as pymupdf_module  # type: ignore
-                except Exception:
-                    pymupdf_module = None  # type: ignore
+                except Exception as e:
+                    raise ValueError(
+                        "Page screenshot analysis requires PyMuPDF (import fitz). Please install 'pymupdf'."
+                    ) from e
 
                 def _try_convert_docx_to_pdf_headless(
                     input_path: str, out_dir: str
                 ) -> str | None:
-                    """Try headless DOCX->PDF using soffice/libreoffice or pandoc. Return PDF path or None."""
                     pdf_out = os.path.join(out_dir, f"{Path(input_path).stem}.pdf")
-                    # Prefer soffice (LibreOffice)
                     soffice = shutil.which("soffice") or shutil.which("libreoffice")
                     if soffice:
                         try:
@@ -268,7 +219,6 @@ class DocxFileParser(DocumentParser):
                                 f"LibreOffice (soffice) conversion failed: {e}"
                             )
 
-                    # Fallback to pandoc
                     pandoc = shutil.which("pandoc")
                     if pandoc:
                         try:
@@ -286,160 +236,91 @@ class DocxFileParser(DocumentParser):
 
                     return None
 
-                if pymupdf_module is not None:  # Only try if PyMuPDF is available
-                    with tempfile.TemporaryDirectory() as temp_dir:
-                        pdf_path = _try_convert_docx_to_pdf_headless(
-                            document_path, temp_dir
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    pdf_path = _try_convert_docx_to_pdf_headless(
+                        document_path, temp_dir
+                    )
+                    if not pdf_path:
+                        raise ValueError(
+                            "DOCX->PDF conversion failed or is unavailable. Install either 'libreoffice' (soffice) or 'pandoc' to enable page screenshot analysis."
                         )
-                        if not pdf_path:
-                            raise RuntimeError(
-                                "Headless DOCX->PDF conversion not available or failed"
-                            )
 
-                        try:
-                            mu_doc = pymupdf_module.open(pdf_path)  # type: ignore
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to open converted PDF with PyMuPDF. Falling back: {e}"
-                            )
-                            raise
-
-                        try:
-                            page_ocr_texts: list[str] = []
-                            for page_idx in range(mu_doc.page_count):  # type: ignore[attr-defined]
-                                page_obj = mu_doc[page_idx]  # type: ignore[index]
-
-                                # Determine if the page contains images
-                                get_images = getattr(
-                                    page_obj, "get_images", None
-                                ) or getattr(page_obj, "getImages", None)
-                                page_has_images = False
-                                if callable(get_images):
-                                    try:
-                                        img_list = get_images(full=True)  # type: ignore[call-arg]
-                                        page_has_images = bool(img_list)
-                                    except Exception:
-                                        page_has_images = (
-                                            True  # if unsure, try rendering
-                                        )
-
-                                if not page_has_images:
-                                    continue
-
-                                # Render the page at higher resolution
-                                matrix = getattr(pymupdf_module, "Matrix")(2.0, 2.0)  # type: ignore
-                                get_pixmap = getattr(
-                                    page_obj, "get_pixmap", None
-                                ) or getattr(page_obj, "getPixmap", None)
-                                if not callable(get_pixmap):
-                                    continue
-                                pix = get_pixmap(matrix=matrix)  # type: ignore[call-arg]
-                                page_image_bytes: bytes = pix.tobytes("png")  # type: ignore[attr-defined]
-
-                                # Cache by screenshot hash
-                                page_hash = hashlib.sha256(page_image_bytes).hexdigest()
-                                if page_hash in image_cache:
-                                    cached_md, cached_ocr = image_cache[page_hash]
-                                    page_description = cached_md
-                                    page_ocr_text = cached_ocr
-                                else:
-                                    agent_input = FilePart(
-                                        mime_type="image/png",
-                                        data=page_image_bytes,
-                                    )
-                                    agent_response = await self.visual_description_provider.generate_by_prompt_async(
-                                        agent_input,
-                                        developer_prompt=(
-                                            "You are a helpful assistant that deeply understands visual media. "
-                                            "Analyze this Word document page screenshot and extract all text content and "
-                                            "describe any visual elements like images, charts, diagrams, etc."
-                                        ),
-                                        response_schema=VisualMediaDescription,
-                                    )
-                                    page_description = agent_response.parsed.md
-                                    page_ocr_text = agent_response.parsed.ocr_text or ""
-                                    image_cache[page_hash] = (
-                                        page_description,
-                                        page_ocr_text,
-                                    )
-
-                                image_descriptions.append(
-                                    f"Page Visual Content: {page_description}"
-                                )
-                                if page_ocr_text:
-                                    page_ocr_texts.append(page_ocr_text)
-
-                            if image_descriptions:
-                                used_page_screenshots = True
-                                # Best-effort: distribute combined OCR text to images (page-level granularity isn't available in DOCX)
-                                if page_ocr_texts:
-                                    combined_ocr = "\n\n".join(
-                                        [
-                                            f"OCR (page {i + 1}):\n{t}"
-                                            for i, t in enumerate(page_ocr_texts)
-                                        ]
-                                    )
-                                    for img in final_images:
-                                        img.ocr_text = combined_ocr
-                        finally:
-                            try:
-                                mu_doc.close()  # type: ignore[attr-defined]
-                            except Exception:
-                                pass
-
-            except Exception:
-                # Any failure in the screenshot optimization will fall through to per-image processing
-                used_page_screenshots = False
-
-            if not used_page_screenshots:
-                # Fallback: process each embedded image individually
-                for idx, (image_name, image_bytes) in enumerate(doc_images, start=1):
-                    image_hash = hashlib.sha256(image_bytes).hexdigest()
-
-                    if image_hash in image_cache:
-                        cached_md, cached_ocr = image_cache[image_hash]
-                        image_md = cached_md
-                        ocr_text = cached_ocr
-                    else:
-                        agent_input = FilePart(
-                            mime_type=ext2mime(Path(image_name).suffix),
-                            data=image_bytes,
-                        )
-                        agent_response = await self.visual_description_provider.generate_by_prompt_async(
-                            agent_input,
-                            developer_prompt="You are a helpful assistant that deeply understands visual media.",
-                            response_schema=VisualMediaDescription,
-                        )
-                        image_md = agent_response.parsed.md
-                        ocr_text = agent_response.parsed.ocr_text or ""
-                        image_cache[image_hash] = (image_md, ocr_text or "")
-
-                    image_descriptions.append(f"Docx Image {idx}: {image_md}")
-                    # Update the corresponding Image object in final_images
                     try:
-                        img_obj = next(
-                            img for img in final_images if img.name == image_name
-                        )
-                        img_obj.ocr_text = ocr_text
-                    except StopIteration:
-                        pass
+                        mu_doc = pymupdf_module.open(pdf_path)  # type: ignore
+                    except Exception as e:
+                        raise ValueError(
+                            f"Failed to open converted PDF with PyMuPDF. Ensure the document is valid. Details: {e}"
+                        ) from e
 
-            if image_descriptions:
-                # Append a structured Visual Content section to the Markdown
-                visual_md = [
-                    "\n\n## Visual Content",
-                    *(f"- {desc}" for desc in image_descriptions),
-                ]
-                md_text += "\n" + "\n".join(visual_md)
+                    try:
+                        for page_idx in range(mu_doc.page_count):  # type: ignore[attr-defined]
+                            page_obj = mu_doc[page_idx]  # type: ignore[index]
+
+                            # Heuristically check for images
+                            get_images = getattr(
+                                page_obj, "get_images", None
+                            ) or getattr(page_obj, "getImages", None)
+                            page_has_images = False
+                            if callable(get_images):
+                                try:
+                                    img_list = get_images(full=True)  # type: ignore[call-arg]
+                                    page_has_images = bool(img_list)
+                                except Exception:
+                                    page_has_images = True
+                            if not page_has_images:
+                                continue
+
+                            # Render page screenshot at 2x
+                            matrix = getattr(pymupdf_module, "Matrix")(2.0, 2.0)  # type: ignore
+                            get_pixmap = getattr(
+                                page_obj, "get_pixmap", None
+                            ) or getattr(page_obj, "getPixmap", None)
+                            if not callable(get_pixmap):
+                                continue
+                            pix = get_pixmap(matrix=matrix)  # type: ignore[call-arg]
+                            page_image_bytes: bytes = cast(bytes, pix.tobytes("png"))  # type: ignore[attr-defined]
+
+                            page_hash = hashlib.sha256(page_image_bytes).hexdigest()
+                            if page_hash in image_cache:
+                                page_description = image_cache[page_hash][0]
+                            else:
+                                agent_input = FilePart(
+                                    mime_type="image/png", data=page_image_bytes
+                                )
+                                agent_response = await self.visual_description_provider.generate_by_prompt_async(
+                                    agent_input,
+                                    developer_prompt=(
+                                        "You are a highly precise visual analyst. You are given a screenshot of a Word document page. "
+                                        "Only identify and describe the images/graphics/figures present on this page. "
+                                        "Do NOT transcribe or repeat the page's regular text content. "
+                                        "If an image contains important embedded text (e.g., labels in a chart), summarize it succinctly as part of the image description. "
+                                        "Output clear, concise descriptions suitable for a 'Visual Content' section."
+                                    ),
+                                    response_schema=VisualMediaDescription,
+                                )
+                                page_description = agent_response.parsed.md
+                                image_cache[page_hash] = (page_description, "")
+
+                            image_descriptions.append(
+                                f"Page Visual Content: {page_description}"
+                            )
+                    finally:
+                        try:
+                            mu_doc.close()  # type: ignore[attr-defined]
+                        except Exception:
+                            pass
+            except Exception:
+                # Raise a clear error instead of falling back to per-image processing
+                raise
+
+        if image_descriptions:
+            md_text += "\n" + "\n".join(
+                ["\n\n## Visual Content", *[f"- {desc}" for desc in image_descriptions]]
+            )
 
         return ParsedFile(
             name=document_path,
             sections=[
-                SectionContent(
-                    number=1,
-                    text=md_text,
-                    md=md_text,
-                    images=final_images,
-                )
+                SectionContent(number=1, text=md_text, md=md_text, images=final_images)
             ],
         )

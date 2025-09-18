@@ -301,9 +301,8 @@ class PDFFileParser(DocumentParser):
                                 page_hash = hashlib.sha256(page_image_bytes).hexdigest()  # type: ignore
 
                                 if page_hash in image_cache:
-                                    cached_md, cached_ocr = image_cache[page_hash]
+                                    cached_md, _cached_ocr = image_cache[page_hash]
                                     page_description = cached_md
-                                    page_ocr_text = cached_ocr
                                 else:
                                     # Send the page screenshot to the visual description agent
                                     agent_input = FilePart(
@@ -313,20 +312,20 @@ class PDFFileParser(DocumentParser):
 
                                     agent_response = await self.visual_description_provider.generate_by_prompt_async(
                                         agent_input,
-                                        developer_prompt="You are a helpful assistant that deeply understands visual media. Analyze this PDF page screenshot and extract all text content and describe any visual elements like images, charts, diagrams, etc.",
+                                        developer_prompt=(
+                                            "You are a highly precise visual analyst. You are given a screenshot of a PDF page. "
+                                            "Only identify and describe the images/graphics/figures present on this page. "
+                                            "Do NOT transcribe or repeat the page's regular text content. "
+                                            "If an image contains important embedded text (e.g., labels in a chart), summarize it succinctly as part of the image description. "
+                                            "Output clear, concise descriptions suitable for a 'Visual Content' section."
+                                        ),
                                         response_schema=VisualMediaDescription,
                                     )
 
                                     page_description = agent_response.parsed.md
-                                    page_ocr_text = agent_response.parsed.ocr_text or ""
-                                    image_cache[page_hash] = (
-                                        page_description,
-                                        page_ocr_text,
-                                    )
+                                    image_cache[page_hash] = (page_description, "")
 
-                                # Update all images on this page with the OCR text from the page analysis
-                                for image in page_images:
-                                    image.ocr_text = page_ocr_text
+                                # Do not populate per-image OCR from the page screenshot; we only describe images
 
                                 # Add the page description
                                 image_descriptions.append(
@@ -418,14 +417,13 @@ class PDFFileParser(DocumentParser):
         if not self.visual_description_provider:
             return
 
-        for image_num, (image, page_image) in enumerate(zip(page.images, page_images)):
+        for image_num, image in enumerate(page.images):
             image_bytes = image.data
             image_hash = hashlib.sha256(image_bytes).hexdigest()
 
             if image_hash in image_cache:
-                cached_md, cached_ocr = image_cache[image_hash]
+                cached_md, _cached_ocr = image_cache[image_hash]
                 image_md = cached_md
-                ocr_text = cached_ocr
             else:
                 agent_input = FilePart(
                     mime_type=ext2mime(Path(image.name).suffix),
@@ -434,13 +432,16 @@ class PDFFileParser(DocumentParser):
 
                 agent_response = await self.visual_description_provider.generate_by_prompt_async(
                     agent_input,
-                    developer_prompt="You are a helpful assistant that deeply understands visual media.",
+                    developer_prompt=(
+                        "You are a highly precise visual analyst. You are given an image extracted from a PDF page. "
+                        "Describe the image/graphic/figure succinctly and accurately. Do NOT transcribe surrounding page text. "
+                        "Only include embedded text if it is part of the image and critical to understanding it (e.g., chart labels)."
+                    ),
                     response_schema=VisualMediaDescription,
                 )
 
                 image_md = agent_response.parsed.md
-                ocr_text = agent_response.parsed.ocr_text or ""
-                image_cache[image_hash] = (image_md, ocr_text or "")
+                image_cache[image_hash] = (image_md, "")
 
             image_descriptions.append(f"Page Image {image_num + 1}: {image_md}")
-            page_image.ocr_text = ocr_text
+            # Avoid setting OCR text; we only track visual descriptions

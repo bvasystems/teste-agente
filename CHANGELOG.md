@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.8.31
+- refactor(parsing/docx): fail fast on DOCX→PDF conversion/render errors; remove per-image fallback execution
+- perf(parsing/docx): single page screenshot per page when images are present; avoid duplicate OCR in descriptions
+- chore(parsing/docx): remove unused imports and resolve lints
+
 ## v0.8.30
 - feat(parsing): better markdown parsing
 
