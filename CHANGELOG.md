@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.8.32
+- fix(vector_store): prevent pickling errors by avoiding serialization of callables in retrieval_augmented_generation_search
+
 ## v0.8.31
 - refactor(parsing/docx): fail fast on DOCX→PDF conversion/render errors; remove per-image fallback execution
 - perf(parsing/docx): single page screenshot per page when images are present; avoid duplicate OCR in descriptions
