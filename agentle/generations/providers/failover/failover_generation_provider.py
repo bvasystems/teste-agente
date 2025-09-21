@@ -39,6 +39,9 @@ from agentle.generations.tools.tool import Tool
 from agentle.resilience.circuit_breaker.circuit_breaker_protocol import (
     CircuitBreakerProtocol,
 )
+from agentle.resilience.load_balancer.load_balancer_protocol import (
+    LoadBalancerProtocol,
+)
 
 if TYPE_CHECKING:
     from agentle.generations.tracing.otel_client import OtelClient
@@ -74,6 +77,7 @@ class FailoverGenerationProvider(GenerationProvider):
     otel_clients: Sequence[OtelClient]
     shuffle: bool
     circuit_breaker: CircuitBreakerProtocol | None
+    load_balancer: LoadBalancerProtocol | None
 
     def __init__(
         self,
@@ -84,6 +88,7 @@ class FailoverGenerationProvider(GenerationProvider):
         otel_clients: Sequence[OtelClient] | OtelClient | None = None,
         shuffle: bool = False,
         circuit_breaker: CircuitBreakerProtocol | None = None,
+        load_balancer: LoadBalancerProtocol | None = None,
     ) -> None:
         """
         Initialize the Failover Generation Provider.
@@ -118,6 +123,7 @@ class FailoverGenerationProvider(GenerationProvider):
         self.generation_providers = flattened_providers
         self.shuffle = shuffle
         self.circuit_breaker = circuit_breaker
+        self.load_balancer = load_balancer
         # Optional: include model into circuit scoping (useful when failures are model-specific)
         self.include_model_in_circuit: bool = False
 
@@ -261,14 +267,26 @@ class FailoverGenerationProvider(GenerationProvider):
         """
         exceptions: MutableSequence[tuple[GenerationProvider, Exception]] = []
 
-        # Get list of providers and optionally shuffle
+        # Get list of providers and optionally apply load balancing/shuffle
         providers = list(self.generation_providers)
-        if self.shuffle:
+        if self.load_balancer is not None:
+            try:
+                providers = list(
+                    await self.load_balancer.rank_providers(
+                        providers,
+                        model=model if isinstance(model, str) else None,
+                    )
+                )
+            except Exception:
+                # Fallback to given order on LB issues
+                pass
+        elif self.shuffle:
             random.shuffle(providers)
 
         # Track which providers were skipped due to open circuits
         skipped_providers: MutableSequence[GenerationProvider] = []
 
+        skipped_due_lb: MutableSequence[GenerationProvider] = []
         for provider in providers:
             # Check circuit breaker if configured
             if self.circuit_breaker is not None:
@@ -286,6 +304,20 @@ class FailoverGenerationProvider(GenerationProvider):
                 except Exception:
                     # If circuit breaker check fails, proceed with the provider
                     # This ensures we don't break functionality if circuit breaker has issues
+                    pass
+
+            # Load balancer admission control
+            if self.load_balancer is not None:
+                try:
+                    allowed = await self.load_balancer.acquire(
+                        provider.circuit_identity,
+                        model=model if isinstance(model, str) else None,
+                    )
+                    if not allowed:
+                        skipped_due_lb.append(provider)
+                        continue
+                except Exception:
+                    # If LB has issues, proceed as best-effort
                     pass
 
             try:
@@ -309,6 +341,26 @@ class FailoverGenerationProvider(GenerationProvider):
                         # Don't fail the successful generation if circuit breaker has issues
                         pass
 
+                # Record to load balancer accounting (usage)
+                if self.load_balancer is not None:
+                    try:
+                        usage = getattr(result, "usage", None)
+                        prompt_tokens = (
+                            getattr(usage, "prompt_tokens", None) if usage else None
+                        )
+                        completion_tokens = (
+                            getattr(usage, "completion_tokens", None) if usage else None
+                        )
+                        await self.load_balancer.record_result(
+                            provider.circuit_identity,
+                            model=model if isinstance(model, str) else None,
+                            success=True,
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                        )
+                    except Exception:
+                        pass
+
                 return result
 
             except Exception as e:
@@ -327,6 +379,17 @@ class FailoverGenerationProvider(GenerationProvider):
                             )
                     except Exception:
                         # Don't fail if circuit breaker has issues
+                        pass
+
+                # Record failure to LB
+                if self.load_balancer is not None:
+                    try:
+                        await self.load_balancer.record_result(
+                            provider.circuit_identity,
+                            model=model if isinstance(model, str) else None,
+                            success=False,
+                        )
+                    except Exception:
                         pass
 
                 continue
@@ -356,11 +419,42 @@ class FailoverGenerationProvider(GenerationProvider):
                         except Exception:
                             pass
 
+                    # Record to load balancer accounting (usage)
+                    if self.load_balancer is not None:
+                        try:
+                            usage = getattr(result, "usage", None)
+                            prompt_tokens = (
+                                getattr(usage, "prompt_tokens", None) if usage else None
+                            )
+                            completion_tokens = (
+                                getattr(usage, "completion_tokens", None)
+                                if usage
+                                else None
+                            )
+                            await self.load_balancer.record_result(
+                                provider.circuit_identity,
+                                model=model if isinstance(model, str) else None,
+                                success=True,
+                                prompt_tokens=prompt_tokens,
+                                completion_tokens=completion_tokens,
+                            )
+                        except Exception:
+                            pass
+
                     return result
 
                 except Exception as e:
                     exceptions.append((provider, e))
                     # Circuit is still failing, it will remain open
+                    if self.load_balancer is not None:
+                        try:
+                            await self.load_balancer.record_result(
+                                provider.circuit_identity,
+                                model=model if isinstance(model, str) else None,
+                                success=False,
+                            )
+                        except Exception:
+                            pass
                     continue
 
         # All providers failed
@@ -370,7 +464,7 @@ class FailoverGenerationProvider(GenerationProvider):
             )
 
         # Aggregate errors for diagnostics while preserving original exception type where possible
-        details = []
+        details: list[str] = []
         for prov, err in exceptions:
             ident = prov.circuit_identity
             summary = f"{err.__class__.__name__}: {str(err)[:200]}"
@@ -426,6 +520,7 @@ class FailoverGenerationProvider(GenerationProvider):
             otel_clients=self.otel_clients if self.otel_clients else None,
             shuffle=self.shuffle,
             circuit_breaker=self.circuit_breaker,
+            load_balancer=self.load_balancer,
         )
 
     def __sub__(
@@ -495,4 +590,5 @@ class FailoverGenerationProvider(GenerationProvider):
             otel_clients=self.otel_clients if self.otel_clients else None,
             shuffle=self.shuffle,
             circuit_breaker=self.circuit_breaker,
+            load_balancer=self.load_balancer,
         )
