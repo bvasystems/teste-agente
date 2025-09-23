@@ -135,10 +135,73 @@ class DocxFileParser(DocumentParser):
     ) -> ParsedFile:
         """
         Parse a Word document into a single Markdown section and describe visuals without duplicating page OCR.
+
+        Supports both .docx and legacy .doc files. For .doc files, attempts a
+        headless conversion to .docx using LibreOffice (soffice) or pandoc prior to parsing.
         """
         from docx import Document
 
-        document = Document(document_path)
+    original_input_name = document_path
+
+    # If a legacy .doc is provided, convert to .docx first so python-docx can read it
+    effective_path = document_path
+
+        def _try_convert_doc_to_docx_headless(input_path: str, out_dir: str) -> str | None:
+            docx_out = os.path.join(out_dir, f"{Path(input_path).stem}.docx")
+            # Prefer LibreOffice/soffice
+            soffice = shutil.which("soffice") or shutil.which("libreoffice")
+            if soffice:
+                try:
+                    subprocess.run(
+                        [
+                            soffice,
+                            "--headless",
+                            "--convert-to",
+                            "docx",
+                            "--outdir",
+                            out_dir,
+                            input_path,
+                        ],
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=120,
+                    )
+                    if os.path.exists(docx_out):
+                        return docx_out
+                except Exception as e:
+                    logger.warning(f"LibreOffice (soffice) DOC->DOCX conversion failed: {e}")
+
+            # Fallback to pandoc if available
+            pandoc = shutil.which("pandoc")
+            if pandoc:
+                try:
+                    subprocess.run(
+                        [pandoc, input_path, "-o", docx_out],
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=120,
+                    )
+                    if os.path.exists(docx_out):
+                        return docx_out
+                except Exception as e:
+                    logger.warning(f"pandoc DOC->DOCX conversion failed: {e}")
+
+            return None
+
+        if Path(document_path).suffix.lower() == ".doc":
+            # Use a context manager to ensure temporary files are cleaned up
+            with tempfile.TemporaryDirectory() as tmpdir:
+                converted = _try_convert_doc_to_docx_headless(document_path, tmpdir)
+                if not converted:
+                    raise ValueError("Legacy .doc file detected, but conversion to .docx failed or required tools are missing. Please install 'libreoffice' (soffice) or 'pandoc' to enable .doc support.")
+                effective_path = converted
+                # Load within context to read from the converted file
+                document = Document(effective_path)
+        else:
+            # Proceed using the original .docx path
+            document = Document(effective_path)
 
         # Base Markdown via MarkItDown (best-effort)
         md_text: str | None = None
@@ -147,7 +210,7 @@ class DocxFileParser(DocumentParser):
                 from markitdown import MarkItDown  # type: ignore
 
                 md_converter = MarkItDown(enable_plugins=False)
-                md_result = md_converter.convert(document_path)
+                md_result = md_converter.convert(effective_path)
                 if hasattr(md_result, "markdown") and md_result.markdown:
                     md_text = str(md_result.markdown)
             except ImportError:
@@ -238,7 +301,7 @@ class DocxFileParser(DocumentParser):
 
                 with tempfile.TemporaryDirectory() as temp_dir:
                     pdf_path = _try_convert_docx_to_pdf_headless(
-                        document_path, temp_dir
+                        effective_path, temp_dir
                     )
                     if not pdf_path:
                         raise ValueError(
@@ -319,7 +382,7 @@ class DocxFileParser(DocumentParser):
             )
 
         return ParsedFile(
-            name=document_path,
+            name=original_input_name,
             sections=[
                 SectionContent(number=1, text=md_text, md=md_text, images=final_images)
             ],
