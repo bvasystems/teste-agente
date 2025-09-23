@@ -1,5 +1,4 @@
 from rsb.models.base_model import BaseModel
-from rsb.models.config_dict import ConfigDict
 from rsb.models.field import Field
 
 
