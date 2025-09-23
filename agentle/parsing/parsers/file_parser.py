@@ -227,9 +227,7 @@ class FileParser(DocumentParser):
 
         # Normalize extension to be case-insensitive (e.g., .PDF -> pdf)
         normalized_ext = path.suffix.lstrip(".").lower()
-        parser_cls: type[DocumentParser] | None = parser_registry.get(
-            normalized_ext
-        )
+        parser_cls: type[DocumentParser] | None = parser_registry.get(normalized_ext)
 
         if not parser_cls:
             # Double-check URL handling (fallback)
