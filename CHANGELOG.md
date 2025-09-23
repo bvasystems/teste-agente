@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.8.33
+- refactor(parsing): update parse function to use GenerationProvider and normalize file extensions
+test(parsers): add test for uppercase file extension handling in FileParser
+
 ## v0.8.32
 - fix(vector_store): prevent pickling errors by avoiding serialization of callables in retrieval_augmented_generation_search
 
