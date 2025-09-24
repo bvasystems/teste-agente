@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.8.34
+- feat(whatsapp): add send_message method for independent message sending
+
 ## v0.8.33
 - refactor(parsing): update parse function to use GenerationProvider and normalize file extensions
 test(parsers): add test for uppercase file extension handling in FileParser
