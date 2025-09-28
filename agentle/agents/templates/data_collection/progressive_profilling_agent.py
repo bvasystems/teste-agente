@@ -248,7 +248,7 @@ class ProgressiveProfilingAgent(BaseModel):
             ):
                 # Return a list of messages with state message prepended
                 state_message = UserMessage(parts=[TextPart(text=state_context)])
-                return [state_message] + list(cast(list, inp))
+                return [state_message] + list(cast(list[Any], inp))
 
             # Check if it's a sequence of parts (TextPart, FilePart, etc.)
             elif isinstance(
@@ -294,7 +294,7 @@ class ProgressiveProfilingAgent(BaseModel):
             return f"{state_context}\n\n## User Input:\n{inp}"
 
         # For all other types (including non-iterable ones), convert to string
-        return f"{state_context}\n\n## User Input:\n{str(inp)}"
+        return f"{state_context}\n\n## User Input:\n{str(cast(Any, inp))}"
 
     def _validate_collected_data(self, data: CollectedData) -> CollectedData:
         """
