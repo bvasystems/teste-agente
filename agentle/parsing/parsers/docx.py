@@ -192,7 +192,10 @@ class DocxFileParser(DocumentParser):
                     )
 
                 # Copy converted file to a persistent temp file (outside context manager) for parsing
-                persistent_tmp = Path(tempfile.gettempdir()) / f"agentle_docx_{hashlib.sha256(str(original_path).encode()).hexdigest()}.docx"
+                persistent_tmp = (
+                    Path(tempfile.gettempdir())
+                    / f"agentle_docx_{hashlib.sha256(str(original_path).encode()).hexdigest()}.docx"
+                )
                 shutil.copyfile(converted, persistent_tmp)
                 working_path = persistent_tmp
 
