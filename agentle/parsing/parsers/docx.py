@@ -138,7 +138,71 @@ class DocxFileParser(DocumentParser):
         """
         from docx import Document
 
-        document = Document(document_path)
+        original_path = Path(document_path)
+        working_path = original_path
+
+        # If file is legacy .doc, attempt conversion to .docx using soffice or pandoc
+        if original_path.suffix.lower() == ".doc":
+            with tempfile.TemporaryDirectory() as tmpdir:
+                converted = None
+                soffice = shutil.which("soffice") or shutil.which("libreoffice")
+                if soffice:
+                    try:
+                        subprocess.run(
+                            [
+                                soffice,
+                                "--headless",
+                                "--convert-to",
+                                "docx",
+                                "--outdir",
+                                tmpdir,
+                                str(original_path),
+                            ],
+                            check=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            timeout=120,
+                        )
+                        candidate = Path(tmpdir) / (original_path.stem + ".docx")
+                        if candidate.exists():
+                            converted = candidate
+                    except Exception as e:
+                        logger.debug(f"LibreOffice conversion to .docx failed: {e}")
+
+                if converted is None:
+                    pandoc = shutil.which("pandoc")
+                    if pandoc:
+                        try:
+                            target = Path(tmpdir) / (original_path.stem + ".docx")
+                            subprocess.run(
+                                [pandoc, str(original_path), "-o", str(target)],
+                                check=True,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                timeout=120,
+                            )
+                            if target.exists():
+                                converted = target
+                        except Exception as e:
+                            logger.debug(f"pandoc conversion to .docx failed: {e}")
+
+                if converted is None:
+                    raise ValueError(
+                        "Failed to convert legacy .doc file to .docx. Install LibreOffice (soffice) or pandoc."
+                    )
+
+                # Copy converted file to a persistent temp file (outside context manager) for parsing
+                persistent_tmp = Path(tempfile.gettempdir()) / f"agentle_docx_{hashlib.sha256(str(original_path).encode()).hexdigest()}.docx"
+                shutil.copyfile(converted, persistent_tmp)
+                working_path = persistent_tmp
+
+        try:
+            document = Document(str(working_path))
+        except Exception as e:
+            # Provide clearer diagnostics when the file isn't a valid docx
+            raise ValueError(
+                f"Failed to open Word document '{document_path}'. If this is a legacy .doc file, ensure conversion tools (LibreOffice or pandoc) are installed. Original error: {e}"
+            ) from e
 
         # Base Markdown via MarkItDown (best-effort)
         md_text: str | None = None
@@ -147,7 +211,7 @@ class DocxFileParser(DocumentParser):
                 from markitdown import MarkItDown  # type: ignore
 
                 md_converter = MarkItDown(enable_plugins=False)
-                md_result = md_converter.convert(document_path)
+                md_result = md_converter.convert(str(working_path))
                 if hasattr(md_result, "markdown") and md_result.markdown:
                     md_text = str(md_result.markdown)
             except ImportError:
