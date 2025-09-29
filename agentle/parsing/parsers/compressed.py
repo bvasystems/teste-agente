@@ -178,59 +178,96 @@ class CompressedFileParser(DocumentParser):
         from agentle.parsing.parsers.file_parser import FileParser
 
         path = Path(document_path)
-        file_contents = path.read_bytes()
+        ext = path.suffix.lower().lstrip(".")  # Normalize extension ('.zip' -> 'zip')
 
         # We'll accumulate ParsedFile objects from each extracted child file
         parsed_files: MutableSequence[ParsedFile] = []
 
-        # Write the compressed file to a temporary location
-        with tempfile.NamedTemporaryFile(delete=True) as tmp:
-            tmp.write(file_contents)
-            tmp.flush()
+        # Open archive directly from path (avoid redundant temp copy)
+        match ext:
+            case "zip" | "pkz":
+                with zipfile.ZipFile(path, "r") as zip_ref:
+                    for info in zip_ref.infolist():
+                        if info.is_dir():
+                            continue
+                        # Extract member to a temporary file to hand off to FileParser
+                        member_basename = Path(info.filename).name
+                        if not member_basename:
+                            continue
+                        # Skip unsafe traversal attempts
+                        if ".." in Path(info.filename).parts:
+                            continue
+                        import os as _os
 
-            # Decide how to open the archive based on extension
-            match path.suffix:
-                case "zip" | "pkz":
-                    # Treat PKZ exactly like ZIP for demo purposes
-                    with zipfile.ZipFile(tmp.name, "r") as zip_ref:
-                        # Iterate over files inside the archive
-                        for info in zip_ref.infolist():
-                            # Directories have filename ending with "/"
-                            if info.is_dir():
-                                continue
+                        with tempfile.NamedTemporaryFile(
+                            delete=False, suffix=Path(member_basename).suffix
+                        ) as child_tmp:
+                            try:
+                                with zip_ref.open(info, "r") as src:
+                                    data_bytes = src.read()  # Expected bytes
+                                    # Fallback conversion only if an unexpected type appears
+                                    try:
+                                        child_tmp.write(data_bytes)  # type: ignore[arg-type]
+                                    except TypeError:
+                                        child_tmp.write(bytes(data_bytes))  # type: ignore[arg-type]
+                                child_tmp.flush()
+                                parser = FileParser(
+                                    visual_description_provider=self.visual_description_provider,
+                                    audio_description_provider=self.audio_description_provider,
+                                )
+                                child_parsed = await parser.parse_async(child_tmp.name)
+                                # Rename the parsed file's name to reflect original archive member
+                                child_parsed.name = member_basename
+                                parsed_files.append(child_parsed)
+                            finally:
+                                try:
+                                    _os.unlink(child_tmp.name)
+                                except Exception:
+                                    pass
 
-                            # Read raw bytes of the child file
-                            child_name = info.filename
-                            # Parse using our FileParser façade
-                            # (re-using the same strategy/visual_description_agent)
-                            parser = FileParser(
-                                visual_description_provider=self.visual_description_provider,
-                                audio_description_provider=self.audio_description_provider,
-                            )
-                            child_parsed = await parser.parse_async(child_name)
-                            parsed_files.append(child_parsed)
+            case "rar":
+                with rarfile.RarFile(path, "r") as rar_ref:
+                    for info in rar_ref.infolist():
+                        try:
+                            is_dir = info.isdir()  # type: ignore[attr-defined]
+                        except Exception:
+                            # Best-effort; if attribute missing treat as file
+                            is_dir = False
+                        if is_dir:
+                            continue
+                        member_basename = Path(cast(str, info.filename)).name  # type: ignore
+                        if not member_basename or ".." in Path(member_basename).parts:
+                            continue
+                        import os as _os
 
-                case "rar":
-                    with rarfile.RarFile(tmp.name, "r") as rar_ref:
-                        for info in rar_ref.infolist():
-                            """Type of "isdir" is unknownPylancereportUnknownMemberType"""
-                            if info.isdir():  # type: ignore
-                                continue
+                        with tempfile.NamedTemporaryFile(
+                            delete=False, suffix=Path(member_basename).suffix
+                        ) as child_tmp:
+                            try:
+                                with rar_ref.open(info, "r") as src:  # type: ignore[arg-type]
+                                    data_bytes = src.read()
+                                    try:
+                                        child_tmp.write(data_bytes)  # type: ignore[arg-type]
+                                    except TypeError:
+                                        child_tmp.write(bytes(data_bytes))  # type: ignore[arg-type]
+                                child_tmp.flush()
+                                parser = FileParser(
+                                    visual_description_provider=self.visual_description_provider,
+                                    audio_description_provider=self.audio_description_provider,
+                                )
+                                child_parsed = await parser.parse_async(child_tmp.name)
+                                child_parsed.name = member_basename
+                                parsed_files.append(child_parsed)
+                            finally:
+                                try:
+                                    _os.unlink(child_tmp.name)
+                                except Exception:
+                                    pass
 
-                            child_name: str = cast(str, info.filename)  # type: ignore
-
-                            parser = FileParser(
-                                visual_description_provider=self.visual_description_provider,
-                                audio_description_provider=self.audio_description_provider,
-                            )
-                            child_parsed = await parser.parse_async(child_name)
-                            parsed_files.append(child_parsed)
-
-                case _:
-                    # Fallback if something else accidentally calls this parser
-                    raise ValueError(
-                        f"CompressedFileParser does not handle extension: {path.suffix}"
-                    )
+            case _:
+                raise ValueError(
+                    f"CompressedFileParser does not handle extension: {path.suffix}"
+                )
 
         # Merge all the parsed files into a single ParsedFile
         return ParsedFile.from_parsed_files(parsed_files)
