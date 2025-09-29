@@ -12,8 +12,9 @@ import tempfile
 import shutil
 import subprocess
 import hashlib
+import uuid
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal, Any
 
 from rsb.models.field import Field
 
@@ -140,6 +141,8 @@ class DocxFileParser(DocumentParser):
 
         original_path = Path(document_path)
         working_path = original_path
+        cleanup_converted: bool = False
+        converted_temp_file: Path | None = None
 
         # If file is legacy .doc, attempt conversion to .docx using soffice or pandoc
         if original_path.suffix.lower() == ".doc":
@@ -192,202 +195,231 @@ class DocxFileParser(DocumentParser):
                     )
 
                 # Copy converted file to a persistent temp file (outside context manager) for parsing
+                # Use a unique temp file so parallel parses don't clash
                 persistent_tmp = (
                     Path(tempfile.gettempdir())
-                    / f"agentle_docx_{hashlib.sha256(str(original_path).encode()).hexdigest()}.docx"
+                    / f"agentle_docx_{uuid.uuid4().hex}.docx"
                 )
                 shutil.copyfile(converted, persistent_tmp)
                 working_path = persistent_tmp
+                converted_temp_file = persistent_tmp
+                cleanup_converted = True
 
-        try:
-            document = Document(str(working_path))
-        except Exception as e:
-            # Provide clearer diagnostics when the file isn't a valid docx
-            raise ValueError(
-                f"Failed to open Word document '{document_path}'. If this is a legacy .doc file, ensure conversion tools (LibreOffice or pandoc) are installed. Original error: {e}"
-            ) from e
-
-        # Base Markdown via MarkItDown (best-effort)
-        md_text: str | None = None
         try:
             try:
-                from markitdown import MarkItDown  # type: ignore
-
-                md_converter = MarkItDown(enable_plugins=False)
-                md_result = md_converter.convert(str(working_path))
-                if hasattr(md_result, "markdown") and md_result.markdown:
-                    md_text = str(md_result.markdown)
-            except ImportError:
-                md_text = None
+                document = Document(str(working_path))
             except Exception as e:
-                logger.warning(f"MarkItDown conversion failed for DOCX: {e}")
-                md_text = None
-        except Exception:
-            md_text = None
-
-        if not md_text:
-            # Fallback: join paragraphs with spacing
-            paragraph_texts = [p.text for p in document.paragraphs if p.text.strip()]
-            md_text = "\n\n".join(paragraph_texts)
-
-        # Extract embedded images (kept as Image objects; OCR left empty to avoid duplication)
-        doc_images: list[tuple[str, bytes]] = []
-        for rel in document.part._rels.values():  # type: ignore[reportPrivateUsage]
-            if "image" in rel.reltype:
-                image_part = rel.target_part
-                image_name = image_part.partname.split("/")[-1]
-                image_bytes = image_part.blob
-                doc_images.append((image_name, image_bytes))
-
-        final_images: list[Image] = [
-            Image(name=name, contents=bytes(data), ocr_text="")
-            for name, data in doc_images
-        ]
-
-        image_descriptions: list[str] = []
-        image_cache: dict[str, tuple[str, str]] = {}
-
-        if self.visual_description_provider and self.strategy == "high" and doc_images:
-            # Only support the page-screenshot path. If conversion or rendering fails, raise a clear error.
+                raise ValueError(
+                    f"Failed to open Word document '{document_path}'. If this is a legacy .doc file, ensure conversion tools (LibreOffice or pandoc) are installed. Original error: {e}"
+                ) from e
+            # Base Markdown via MarkItDown (best-effort)
+            md_text: str | None = None
             try:
                 try:
-                    import fitz as pymupdf_module  # type: ignore
+                    from markitdown import MarkItDown  # type: ignore
+
+                    md_converter = MarkItDown(enable_plugins=False)
+                    md_result = md_converter.convert(str(working_path))
+                    if hasattr(md_result, "markdown") and md_result.markdown:
+                        md_text = str(md_result.markdown)
+                except ImportError:
+                    md_text = None
                 except Exception as e:
-                    raise ValueError(
-                        "Page screenshot analysis requires PyMuPDF (import fitz). Please install 'pymupdf'."
-                    ) from e
+                    logger.warning(f"MarkItDown conversion failed for DOCX: {e}")
+                    md_text = None
+            except Exception:
+                md_text = None
 
-                def _try_convert_docx_to_pdf_headless(
-                    input_path: str, out_dir: str
-                ) -> str | None:
-                    pdf_out = os.path.join(out_dir, f"{Path(input_path).stem}.pdf")
-                    soffice = shutil.which("soffice") or shutil.which("libreoffice")
-                    if soffice:
-                        try:
-                            subprocess.run(
-                                [
-                                    soffice,
-                                    "--headless",
-                                    "--convert-to",
-                                    "pdf",
-                                    "--outdir",
-                                    out_dir,
-                                    input_path,
-                                ],
-                                check=True,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                timeout=120,
-                            )
-                            if os.path.exists(pdf_out):
-                                return pdf_out
-                        except Exception as e:
-                            logger.warning(
-                                f"LibreOffice (soffice) conversion failed: {e}"
-                            )
+            if not md_text:
+                # Fallback: join paragraphs with spacing
+                paragraph_texts = [
+                    p.text for p in document.paragraphs if p.text.strip()
+                ]
+                md_text = "\n\n".join(paragraph_texts)
 
-                    pandoc = shutil.which("pandoc")
-                    if pandoc:
-                        try:
-                            subprocess.run(
-                                [pandoc, input_path, "-o", pdf_out],
-                                check=True,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                timeout=120,
-                            )
-                            if os.path.exists(pdf_out):
-                                return pdf_out
-                        except Exception as e:
-                            logger.warning(f"pandoc conversion failed: {e}")
+            # Extract embedded images (kept as Image objects; OCR left empty to avoid duplication)
+            doc_images: list[tuple[str, bytes]] = []
+            for rel in document.part._rels.values():  # type: ignore[reportPrivateUsage]
+                if "image" in rel.reltype:
+                    image_part = rel.target_part
+                    image_name = image_part.partname.split("/")[-1]
+                    image_bytes = image_part.blob
+                    doc_images.append((image_name, image_bytes))
 
-                    return None
+            final_images: list[Image] = [
+                Image(name=name, contents=bytes(data), ocr_text="")
+                for name, data in doc_images
+            ]
 
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    pdf_path = _try_convert_docx_to_pdf_headless(
-                        document_path, temp_dir
-                    )
-                    if not pdf_path:
-                        raise ValueError(
-                            "DOCX->PDF conversion failed or is unavailable. Install either 'libreoffice' (soffice) or 'pandoc' to enable page screenshot analysis."
-                        )
+            image_descriptions: list[str] = []
+            image_cache: dict[str, tuple[str, str]] = {}
 
+            if (
+                self.visual_description_provider
+                and self.strategy == "high"
+                and doc_images
+            ):
+                # Only support the page-screenshot path. If conversion or rendering fails, raise a clear error.
+                try:
                     try:
-                        mu_doc = pymupdf_module.open(pdf_path)  # type: ignore
+                        import fitz as pymupdf_module  # type: ignore
                     except Exception as e:
                         raise ValueError(
-                            f"Failed to open converted PDF with PyMuPDF. Ensure the document is valid. Details: {e}"
+                            "Page screenshot analysis requires PyMuPDF (import fitz). Please install 'pymupdf'."
                         ) from e
 
-                    try:
-                        for page_idx in range(mu_doc.page_count):  # type: ignore[attr-defined]
-                            page_obj = mu_doc[page_idx]  # type: ignore[index]
-
-                            # Heuristically check for images
-                            get_images = getattr(
-                                page_obj, "get_images", None
-                            ) or getattr(page_obj, "getImages", None)
-                            page_has_images = False
-                            if callable(get_images):
-                                try:
-                                    img_list = get_images(full=True)  # type: ignore[call-arg]
-                                    page_has_images = bool(img_list)
-                                except Exception:
-                                    page_has_images = True
-                            if not page_has_images:
-                                continue
-
-                            # Render page screenshot at 2x
-                            matrix = getattr(pymupdf_module, "Matrix")(2.0, 2.0)  # type: ignore
-                            get_pixmap = getattr(
-                                page_obj, "get_pixmap", None
-                            ) or getattr(page_obj, "getPixmap", None)
-                            if not callable(get_pixmap):
-                                continue
-                            pix = get_pixmap(matrix=matrix)  # type: ignore[call-arg]
-                            page_image_bytes: bytes = cast(bytes, pix.tobytes("png"))  # type: ignore[attr-defined]
-
-                            page_hash = hashlib.sha256(page_image_bytes).hexdigest()
-                            if page_hash in image_cache:
-                                page_description = image_cache[page_hash][0]
-                            else:
-                                agent_input = FilePart(
-                                    mime_type="image/png", data=page_image_bytes
+                    def _try_convert_docx_to_pdf_headless(
+                        input_path: str, out_dir: str
+                    ) -> str | None:
+                        pdf_out = os.path.join(out_dir, f"{Path(input_path).stem}.pdf")
+                        soffice = shutil.which("soffice") or shutil.which("libreoffice")
+                        if soffice:
+                            try:
+                                subprocess.run(
+                                    [
+                                        soffice,
+                                        "--headless",
+                                        "--convert-to",
+                                        "pdf",
+                                        "--outdir",
+                                        out_dir,
+                                        input_path,
+                                    ],
+                                    check=True,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    timeout=120,
                                 )
-                                agent_response = await self.visual_description_provider.generate_by_prompt_async(
-                                    agent_input,
-                                    developer_prompt=(
-                                        "You are a highly precise visual analyst. You are given a screenshot of a Word document page. "
-                                        "Only identify and describe the images/graphics/figures present on this page. "
-                                        "Do NOT transcribe or repeat the page's regular text content. "
-                                        "If an image contains important embedded text (e.g., labels in a chart), summarize it succinctly as part of the image description. "
-                                        "Output clear, concise descriptions suitable for a 'Visual Content' section."
-                                    ),
-                                    response_schema=VisualMediaDescription,
+                                if os.path.exists(pdf_out):
+                                    return pdf_out
+                            except Exception as e:
+                                logger.warning(
+                                    f"LibreOffice (soffice) conversion failed: {e}"
                                 )
-                                page_description = agent_response.parsed.md
-                                image_cache[page_hash] = (page_description, "")
 
-                            image_descriptions.append(
-                                f"Page Visual Content: {page_description}"
+                        pandoc = shutil.which("pandoc")
+                        if pandoc:
+                            try:
+                                subprocess.run(
+                                    [pandoc, input_path, "-o", pdf_out],
+                                    check=True,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    timeout=120,
+                                )
+                                if os.path.exists(pdf_out):
+                                    return pdf_out
+                            except Exception as e:
+                                logger.warning(f"pandoc conversion failed: {e}")
+
+                        return None
+
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        pdf_path = _try_convert_docx_to_pdf_headless(
+                            document_path, temp_dir
+                        )
+                        if not pdf_path:
+                            raise ValueError(
+                                "DOCX->PDF conversion failed or is unavailable. Install either 'libreoffice' (soffice) or 'pandoc' to enable page screenshot analysis."
                             )
-                    finally:
+
                         try:
-                            mu_doc.close()  # type: ignore[attr-defined]
-                        except Exception:
-                            pass
-            except Exception:
-                # Raise a clear error instead of falling back to per-image processing
-                raise
+                            mu_doc = pymupdf_module.open(pdf_path)  # type: ignore
+                        except Exception as e:
+                            raise ValueError(
+                                f"Failed to open converted PDF with PyMuPDF. Ensure the document is valid. Details: {e}"
+                            ) from e
 
-        if image_descriptions:
-            md_text += "\n" + "\n".join(
-                ["\n\n## Visual Content", *[f"- {desc}" for desc in image_descriptions]]
+                        try:
+                            for page_idx in range(mu_doc.page_count):  # type: ignore[attr-defined]
+                                page_obj = mu_doc[page_idx]  # type: ignore[index]
+
+                                # Heuristically check for images
+                                get_images = getattr(
+                                    page_obj, "get_images", None
+                                ) or getattr(page_obj, "getImages", None)
+                                page_has_images = False
+                                if callable(get_images):
+                                    try:
+                                        img_list = get_images(full=True)  # type: ignore[call-arg]
+                                        page_has_images = bool(img_list)
+                                    except Exception:
+                                        page_has_images = True
+                                if not page_has_images:
+                                    continue
+
+                                # Render page screenshot at 2x
+                                matrix = getattr(pymupdf_module, "Matrix")(2.0, 2.0)  # type: ignore
+                                get_pixmap = getattr(
+                                    page_obj, "get_pixmap", None
+                                ) or getattr(page_obj, "getPixmap", None)
+                                if not callable(get_pixmap):
+                                    continue
+                                raw_pix = get_pixmap(matrix=matrix)  # type: ignore[call-arg]
+                                pix: Any = raw_pix  # Help static analyzer; PyMuPDF provides tobytes
+                                if not hasattr(pix, "tobytes"):
+                                    raise ValueError(
+                                        "Pixmap object from PyMuPDF does not expose 'tobytes'. Check PyMuPDF version compatibility."
+                                    )
+                                # PyMuPDF Pixmap.tobytes("png") returns PNG bytes
+                                page_image_bytes: bytes = pix.tobytes("png")  # type: ignore[call-arg]
+
+                                page_hash = hashlib.sha256(page_image_bytes).hexdigest()
+                                if page_hash in image_cache:
+                                    page_description = image_cache[page_hash][0]
+                                else:
+                                    agent_input = FilePart(
+                                        mime_type="image/png", data=page_image_bytes
+                                    )
+                                    agent_response = await self.visual_description_provider.generate_by_prompt_async(
+                                        agent_input,
+                                        developer_prompt=(
+                                            "You are a highly precise visual analyst. You are given a screenshot of a Word document page. "
+                                            "Only identify and describe the images/graphics/figures present on this page. "
+                                            "Do NOT transcribe or repeat the page's regular text content. "
+                                            "If an image contains important embedded text (e.g., labels in a chart), summarize it succinctly as part of the image description. "
+                                            "Output clear, concise descriptions suitable for a 'Visual Content' section."
+                                        ),
+                                        response_schema=VisualMediaDescription,
+                                    )
+                                    page_description = agent_response.parsed.md
+                                    image_cache[page_hash] = (page_description, "")
+
+                                image_descriptions.append(
+                                    f"Page Visual Content: {page_description}"
+                                )
+                        finally:
+                            try:
+                                mu_doc.close()  # type: ignore[attr-defined]
+                            except Exception:
+                                pass
+                except Exception:
+                    # Raise a clear error instead of falling back to per-image processing
+                    raise
+
+            if image_descriptions:
+                md_text += "\n" + "\n".join(
+                    [
+                        "\n\n## Visual Content",
+                        *[f"- {desc}" for desc in image_descriptions],
+                    ]
+                )
+
+            return ParsedFile(
+                name=document_path,
+                sections=[
+                    SectionContent(
+                        number=1, text=md_text, md=md_text, images=final_images
+                    )
+                ],
             )
-
-        return ParsedFile(
-            name=document_path,
-            sections=[
-                SectionContent(number=1, text=md_text, md=md_text, images=final_images)
-            ],
-        )
+        finally:
+            if (
+                cleanup_converted
+                and converted_temp_file
+                and converted_temp_file.exists()
+            ):
+                try:
+                    converted_temp_file.unlink()
+                except Exception:
+                    pass
