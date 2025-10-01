@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import hashlib
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Literal, Any
 
@@ -144,10 +145,13 @@ class DocxFileParser(DocumentParser):
         cleanup_converted: bool = False
         converted_temp_file: Path | None = None
 
-        # If file is legacy .doc, attempt conversion to .docx using soffice or pandoc
-        if original_path.suffix.lower() == ".doc":
+        def _attempt_convert_to_docx(input_path: Path, reason: str) -> Path:
+            """Try to convert the given file to a valid .docx using soffice or pandoc.
+
+            Returns the path to a persistent temporary .docx on success, raises ValueError on failure.
+            """
             with tempfile.TemporaryDirectory() as tmpdir:
-                converted = None
+                converted: Path | None = None
                 soffice = shutil.which("soffice") or shutil.which("libreoffice")
                 if soffice:
                     try:
@@ -159,26 +163,26 @@ class DocxFileParser(DocumentParser):
                                 "docx",
                                 "--outdir",
                                 tmpdir,
-                                str(original_path),
+                                str(input_path),
                             ],
                             check=True,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE,
                             timeout=120,
                         )
-                        candidate = Path(tmpdir) / (original_path.stem + ".docx")
+                        candidate = Path(tmpdir) / (input_path.stem + ".docx")
                         if candidate.exists():
                             converted = candidate
-                    except Exception as e:
+                    except Exception as e:  # pragma: no cover - best effort
                         logger.debug(f"LibreOffice conversion to .docx failed: {e}")
 
                 if converted is None:
                     pandoc = shutil.which("pandoc")
                     if pandoc:
                         try:
-                            target = Path(tmpdir) / (original_path.stem + ".docx")
+                            target = Path(tmpdir) / (input_path.stem + ".docx")
                             subprocess.run(
-                                [pandoc, str(original_path), "-o", str(target)],
+                                [pandoc, str(input_path), "-o", str(target)],
                                 check=True,
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE,
@@ -186,31 +190,62 @@ class DocxFileParser(DocumentParser):
                             )
                             if target.exists():
                                 converted = target
-                        except Exception as e:
+                        except Exception as e:  # pragma: no cover - best effort
                             logger.debug(f"pandoc conversion to .docx failed: {e}")
 
                 if converted is None:
                     raise ValueError(
-                        "Failed to convert legacy .doc file to .docx. Install LibreOffice (soffice) or pandoc."
+                        (
+                            f"Failed to convert file '{input_path.name}' to a valid .docx while handling: {reason}. "
+                            "Install LibreOffice (soffice) or pandoc, or ensure the file is a valid Word document."
+                        )
                     )
 
-                # Copy converted file to a persistent temp file (outside context manager) for parsing
-                # Use a unique temp file so parallel parses don't clash
+                # Persist outside the context manager
                 persistent_tmp = (
                     Path(tempfile.gettempdir())
                     / f"agentle_docx_{uuid.uuid4().hex}.docx"
                 )
                 shutil.copyfile(converted, persistent_tmp)
-                working_path = persistent_tmp
-                converted_temp_file = persistent_tmp
-                cleanup_converted = True
+                return persistent_tmp
+
+        # 1. Legacy .doc -> convert
+        if original_path.suffix.lower() == ".doc":
+            converted_temp_file = _attempt_convert_to_docx(
+                original_path, "legacy .doc format"
+            )
+            working_path = converted_temp_file
+            cleanup_converted = True
+
+        # 2. File claims to be .docx but isn't a zip (common when a binary .doc is misnamed)
+        elif original_path.suffix.lower() == ".docx" and not zipfile.is_zipfile(
+            original_path
+        ):
+            logger.debug(
+                "File '%s' has .docx extension but is not a valid OPC zip; attempting conversion.",
+                original_path,
+            )
+            converted_temp_file = _attempt_convert_to_docx(
+                original_path, "invalid/misnamed .docx (not a zip archive)"
+            )
+            working_path = converted_temp_file
+            cleanup_converted = True
 
         try:
             try:
                 document = Document(str(working_path))
             except Exception as e:
+                # Provide a clearer error hint for misnamed or corrupt files
+                is_zip = zipfile.is_zipfile(working_path)
+                if not is_zip:
+                    hint = (
+                        "File is not a valid .docx (missing OPC structure). If this is an older binary .doc or another format, "
+                        "install LibreOffice (soffice) or pandoc for automatic conversion."
+                    )
+                else:
+                    hint = "File may be a damaged .docx archive. Try re-saving it in Word or exporting to a new .docx and retry."
                 raise ValueError(
-                    f"Failed to open Word document '{document_path}'. If this is a legacy .doc file, ensure conversion tools (LibreOffice or pandoc) are installed. Original error: {e}"
+                    f"Failed to open Word document '{document_path}'. {hint} Original error: {e}"
                 ) from e
             # Base Markdown via MarkItDown (best-effort)
             md_text: str | None = None
