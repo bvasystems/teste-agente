@@ -229,42 +229,71 @@ class CompressedFileParser(DocumentParser):
                                     pass
 
             case "rar":
-                with rarfile.RarFile(path, "r") as rar_ref:
-                    for info in rar_ref.infolist():
-                        try:
-                            is_dir = info.isdir()  # type: ignore[attr-defined]
-                        except Exception:
-                            # Best-effort; if attribute missing treat as file
-                            is_dir = False
-                        if is_dir:
-                            continue
-                        member_basename = Path(cast(str, info.filename)).name  # type: ignore
-                        if not member_basename or ".." in Path(member_basename).parts:
-                            continue
-
-                        with tempfile.NamedTemporaryFile(
-                            delete=False, suffix=Path(member_basename).suffix
-                        ) as child_tmp:
+                # Pre-flight: ensure rarfile found an external extraction utility.
+                # rarfile relies on one of: unrar, unar, bsdtar. If none present, give a clear error.
+                external_tools = [
+                    getattr(rarfile, "UNRAR_TOOL", None),
+                    getattr(rarfile, "UNAR_TOOL", None),
+                    getattr(rarfile, "BSDTAR_TOOL", None),
+                ]
+                if not any(t for t in external_tools):
+                    raise ValueError(
+                        "RAR archive parsing requires an external tool. Install one of: 'unrar' (non-free), 'unar' (The Unarchiver), or 'bsdtar'."
+                    )
+                try:
+                    with rarfile.RarFile(path, "r") as rar_ref:
+                        for info in rar_ref.infolist():
                             try:
-                                with rar_ref.open(info, "r") as src:  # type: ignore[arg-type]
-                                    data_bytes = src.read()
-                                    try:
-                                        child_tmp.write(data_bytes)  # type: ignore[arg-type]
-                                    except TypeError:
-                                        child_tmp.write(bytes(data_bytes))  # type: ignore[arg-type]
-                                child_tmp.flush()
-                                parser = FileParser(
-                                    visual_description_provider=self.visual_description_provider,
-                                    audio_description_provider=self.audio_description_provider,
-                                )
-                                child_parsed = await parser.parse_async(child_tmp.name)
-                                child_parsed.name = member_basename
-                                parsed_files.append(child_parsed)
-                            finally:
+                                is_dir = info.isdir()  # type: ignore[attr-defined]
+                            except Exception:
+                                # Best-effort; if attribute missing treat as file
+                                is_dir = False
+                            if is_dir:
+                                continue
+                            member_basename = Path(cast(str, info.filename)).name  # type: ignore
+                            if (
+                                not member_basename
+                                or ".." in Path(member_basename).parts
+                            ):
+                                continue
+
+                            with tempfile.NamedTemporaryFile(
+                                delete=False, suffix=Path(member_basename).suffix
+                            ) as child_tmp:
                                 try:
-                                    _os.unlink(child_tmp.name)
-                                except Exception:
-                                    pass
+                                    with rar_ref.open(info, "r") as src:  # type: ignore[arg-type]
+                                        data_bytes = src.read()
+                                        try:
+                                            child_tmp.write(data_bytes)  # type: ignore[arg-type]
+                                        except TypeError:
+                                            child_tmp.write(bytes(data_bytes))  # type: ignore[arg-type]
+                                    child_tmp.flush()
+                                    parser = FileParser(
+                                        visual_description_provider=self.visual_description_provider,
+                                        audio_description_provider=self.audio_description_provider,
+                                    )
+                                    child_parsed = await parser.parse_async(
+                                        child_tmp.name
+                                    )
+                                    child_parsed.name = member_basename
+                                    parsed_files.append(child_parsed)
+                                finally:
+                                    try:
+                                        _os.unlink(child_tmp.name)
+                                    except Exception:
+                                        pass
+                except rarfile.RarCannotExec as e:
+                    raise ValueError(
+                        "Failed to process RAR archive: no working extraction tool found. Install one of 'unrar', 'unar', or 'bsdtar' and ensure it is on PATH."
+                    ) from e
+                except rarfile.BadRarFile as e:  # type: ignore[attr-defined]
+                    raise ValueError(
+                        f"The file '{path.name}' is not a valid or is a corrupted RAR archive."
+                    ) from e
+                except rarfile.NeedFirstVolume as e:  # type: ignore[attr-defined]
+                    raise ValueError(
+                        f"The file '{path.name}' is part of a multi-volume RAR set. Provide the first volume (.part1.rar)."
+                    ) from e
 
             case _:
                 raise ValueError(
