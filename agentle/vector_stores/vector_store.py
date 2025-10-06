@@ -234,7 +234,7 @@ class VectorStore(abc.ABC):
         exists_behavior: Literal["override", "error", "ignore"] = "error",
     ) -> Sequence[ChunkID]:
         # Check if file was already ingested in the database.
-        possible_file_chunks = self.find_related_content(
+        possible_file_chunks = await self.find_related_content_async(
             collection_name=collection_name or self.default_collection_name,
             filter=Filter(
                 must=FieldCondition(
