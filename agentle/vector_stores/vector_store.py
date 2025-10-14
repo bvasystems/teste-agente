@@ -267,21 +267,23 @@ class VectorStore(abc.ABC):
             strategy=chunking_strategy, config=chunking_config
         )
 
-        embed_contents: Sequence[EmbedContent] = [
-            await self.embedding_provider.generate_embeddings_async(
-                c.text, metadata=c.metadata, id=c.id
+        # Use batch embedding generation for maximum efficiency
+        # This leverages native batch APIs (like Google's) or parallel processing
+        embed_contents: Sequence[EmbedContent] = (
+            await self.embedding_provider.generate_batch_embeddings_async(
+                contents=[c.text for c in chunks],
+                metadata=[c.metadata for c in chunks],
+                ids=[c.id for c in chunks],
             )
-            for c in chunks
-        ]
+        )
 
+        # Batch upsert all embeddings - this is more efficient than upserting one at a time
         ids: MutableSequence[str] = []
-
         for e in embed_contents:
             await self.upsert_async(
                 points=e.embeddings,
                 collection_name=collection_name,
             )
-
             ids.append(e.embeddings.id)
 
         return ids

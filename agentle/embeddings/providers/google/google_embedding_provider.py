@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, MutableSequence
+from collections.abc import Mapping, MutableSequence, Sequence
 from typing import TYPE_CHECKING, Any, Literal, override
 import uuid
 
@@ -93,6 +93,62 @@ class GoogleEmbeddingProvider(EmbeddingProvider):
                 metadata=metadata or {},
             )
         )
+
+    @override
+    async def generate_batch_embeddings_async(
+        self,
+        contents: Sequence[str],
+        metadata: Sequence[Mapping[str, Any] | None] | None = None,
+        ids: Sequence[str | None] | None = None,
+    ) -> Sequence[EmbedContent]:
+        """Generate embeddings for multiple texts using Google's native batch API.
+
+        This method uses Google's embed_content API with multiple contents,
+        which is more efficient than making individual API calls.
+
+        Args:
+            contents: A sequence of text strings to generate embeddings for
+            metadata: Optional sequence of metadata dicts, one per content item
+            ids: Optional sequence of IDs, one per content item
+
+        Returns:
+            A sequence of EmbedContent objects, one per input content
+        """
+        # Prepare metadata and ids lists with proper defaults
+        metadata_list = metadata if metadata else [None] * len(contents)
+        ids_list = ids if ids else [None] * len(contents)
+
+        # Use Google's native batch API - pass list of contents
+        embeddings_response = await self._client.aio.models.embed_content(
+            model=self.model, contents=list(contents), config=self.config
+        )
+
+        content_embeddings = embeddings_response.embeddings
+        if content_embeddings is None:
+            raise ValueError("Provided content embeddings is None.")
+
+        # Process each embedding and pair with metadata/id
+        results: MutableSequence[EmbedContent] = []
+        for i, content_embedding in enumerate(content_embeddings):
+            if not content_embedding.values:
+                raise ValueError(
+                    f"ERROR: No values found in content_embedding at index {i}. "
+                    + f"Content embeddings: {content_embeddings}"
+                )
+
+            vectors = content_embedding.values
+            results.append(
+                EmbedContent(
+                    embeddings=Embedding(
+                        id=ids_list[i] or str(uuid.uuid4()),
+                        value=vectors,
+                        original_text=contents[i],
+                        metadata=metadata_list[i] or {},
+                    )
+                )
+            )
+
+        return results
 
 
 if __name__ == "__main__":

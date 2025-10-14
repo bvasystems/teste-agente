@@ -155,6 +155,19 @@ class FileParser(DocumentParser):
     parse_timeout: float = Field(default=30)
     """The timeout for the parse operation in seconds."""
 
+    max_concurrent_provider_tasks: int = Field(default=4)
+    """Maximum number of concurrent provider API calls for visual/audio processing.
+    
+    This controls the concurrency level when making API calls to visual description
+    or audio transcription providers. Higher values can speed up processing of
+    documents with many images (e.g., PDFs) but may hit rate limits.
+    
+    Recommended values:
+    - 4-7 for most use cases
+    - 10+ for documents with many images and high rate limits
+    - 1-2 for conservative rate limit compliance
+    """
+
     async def parse_async(self, document_path: str) -> ParsedFile:
         """
         Asynchronously parse a document using the appropriate parser for its file type.
@@ -211,6 +224,7 @@ class FileParser(DocumentParser):
                     visual_description_provider=self.visual_description_provider,
                     audio_description_provider=self.audio_description_provider,
                     parse_timeout=self.parse_timeout,
+                    max_concurrent_provider_tasks=self.max_concurrent_provider_tasks,
                 ).parse_async(document_path=document_path)
 
             # For file paths, resolve and validate
@@ -248,6 +262,7 @@ class FileParser(DocumentParser):
                     visual_description_provider=self.visual_description_provider,
                     audio_description_provider=self.audio_description_provider,
                     parse_timeout=self.parse_timeout,
+                    max_concurrent_provider_tasks=self.max_concurrent_provider_tasks,
                 ).parse_async(document_path=document_path)
             else:
                 raise ValueError(
@@ -259,5 +274,6 @@ class FileParser(DocumentParser):
             visual_description_provider=self.visual_description_provider,
             audio_description_provider=self.audio_description_provider,
             parse_timeout=self.parse_timeout,
+            max_concurrent_provider_tasks=self.max_concurrent_provider_tasks,
             strategy=self.strategy,
         ).parse_async(document_path=str(resolved_path))

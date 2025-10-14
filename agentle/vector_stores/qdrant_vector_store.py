@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 class QdrantVectorStore(VectorStore):
     _client: AsyncQdrantClient
+    wait: bool
 
     def __init__(
         self,
@@ -48,6 +49,7 @@ class QdrantVectorStore(VectorStore):
         local_inference_batch_size: int | None = None,
         check_compatibility: bool = True,
         detailed_agent_description: str | None = None,
+        wait: bool = True,
     ) -> None:
         from qdrant_client.async_qdrant_client import AsyncQdrantClient
 
@@ -77,6 +79,8 @@ class QdrantVectorStore(VectorStore):
             local_inference_batch_size=local_inference_batch_size,
             check_compatibility=check_compatibility,
         )
+
+        self.wait = wait
 
     @override
     async def _find_related_content_async(
@@ -282,6 +286,7 @@ class QdrantVectorStore(VectorStore):
                     },
                 )
             ],
+            wait=self.wait,
         )
 
     @override

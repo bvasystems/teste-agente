@@ -365,10 +365,11 @@ class PDFFileParser(DocumentParser):
             except Exception as e:
                 logger.debug("Whole-document markdown extraction skipped (%s)", e)
 
-        # Global image tracking
+        # Global image tracking (use asyncio.Lock for thread-safe access)
         image_cache: dict[str, tuple[str, str]] = {}
+        image_cache_lock = asyncio.Lock()
         total_images_seen = 0
-        sections: MutableSequence[SectionContent] = []
+        images_seen_lock = asyncio.Lock()
 
         def progress(i: int):
             if self.progress_callback:
@@ -385,7 +386,14 @@ class PDFFileParser(DocumentParser):
         )
         semaphore = asyncio.Semaphore(self.max_concurrent_provider_tasks)
 
-        for page_index, page in enumerate(reader.pages):
+        # Process pages concurrently for significant speedup
+        async def process_page(page_index: int, page: Any) -> tuple[int, SectionContent | None, PageMetrics | None]:
+            """Process a single PDF page asynchronously.
+            
+            Returns:
+                Tuple of (page_index, section_content, metrics)
+            """
+            nonlocal total_images_seen  # Track global image count
             progress(page_index + 1)
             start_page = time.time()
             page_images: MutableSequence[Image] = []
@@ -403,12 +411,14 @@ class PDFFileParser(DocumentParser):
                         self.max_images_per_page,
                     )
                     break
-                if self.max_total_images and total_images_seen >= self.max_total_images:
-                    logger.info(
-                        "Global image limit reached (%d); skipping further images",
-                        self.max_total_images,
-                    )
-                    break
+                # Thread-safe check of global image limit
+                async with images_seen_lock:
+                    if self.max_total_images and total_images_seen >= self.max_total_images:
+                        logger.info(
+                            "Global image limit reached (%d); skipping further images",
+                            self.max_total_images,
+                        )
+                        break
                 img_bytes = img.data
                 if self.max_image_bytes and len(img_bytes) > self.max_image_bytes:
                     logger.debug(
@@ -426,7 +436,9 @@ class PDFFileParser(DocumentParser):
                         ocr_text=None,  # Not performing OCR here
                     )
                 )
-                total_images_seen += 1
+                # Thread-safe increment
+                async with images_seen_lock:
+                    total_images_seen += 1
 
             # Decide processing mode
             selected_mode = self.image_processing_mode
@@ -459,8 +471,13 @@ class PDFFileParser(DocumentParser):
                     if isinstance(png_bytes, bytearray):  # normalize
                         png_bytes = bytes(png_bytes)
                     page_hash = hashlib.sha256(png_bytes).hexdigest()
-                    if page_hash in image_cache:
-                        cached_md, _ = image_cache[page_hash]
+                    
+                    # Thread-safe cache check
+                    async with image_cache_lock:
+                        cached_result = image_cache.get(page_hash)
+                    
+                    if cached_result:
+                        cached_md, _ = cached_result
                         image_descriptions.append(f"Page Visual Content: {cached_md}")
                     else:
                         provider_result = await self._call_provider_with_retry(
@@ -477,7 +494,9 @@ class PDFFileParser(DocumentParser):
                             metrics=metrics,
                         )
                         if isinstance(provider_result, str) and provider_result:
-                            image_cache[page_hash] = (provider_result, "")
+                            # Thread-safe cache update
+                            async with image_cache_lock:
+                                image_cache[page_hash] = (provider_result, "")
                             image_descriptions.append(
                                 f"Page Visual Content: {provider_result}"
                             )
@@ -498,8 +517,13 @@ class PDFFileParser(DocumentParser):
                 tasks: list[Awaitable[tuple[int, str | None]]] = []
                 for img_idx, img_obj in enumerate(page_images, start=1):
                     img_hash_full = hashlib.sha256(img_obj.contents).hexdigest()
-                    if img_hash_full in image_cache:
-                        cached_md, _ = image_cache[img_hash_full]
+                    
+                    # Thread-safe cache check
+                    async with image_cache_lock:
+                        cached_result = image_cache.get(img_hash_full)
+                    
+                    if cached_result:
+                        cached_md, _ = cached_result
                         image_descriptions.append(
                             f"Page {page_index + 1} - Image {img_idx}: {cached_md}"
                         )
@@ -527,7 +551,9 @@ class PDFFileParser(DocumentParser):
                             img_hash_full = hashlib.sha256(
                                 page_images[img_idx - 1].contents
                             ).hexdigest()
-                            image_cache[img_hash_full] = (md, "")
+                            # Thread-safe cache update
+                            async with image_cache_lock:
+                                image_cache[img_hash_full] = (md, "")
                             image_descriptions.append(
                                 f"Page {page_index + 1} - Image {img_idx}: {md}"
                             )
@@ -547,7 +573,7 @@ class PDFFileParser(DocumentParser):
                 and not image_descriptions
             ):
                 logger.debug("Skipping empty page %d (no text/images)", page_index + 1)
-                continue
+                return (page_index, None, None)
 
             # Build markdown
             header = f"## Page {page_index + 1}"
@@ -570,20 +596,35 @@ class PDFFileParser(DocumentParser):
                 md=md_page,
                 images=page_images,
             )
-            sections.append(section)
 
-            # Metrics per page
-            if metrics.pages is not None:
-                metrics.pages.append(
-                    PageMetrics(
-                        page_number=page_index + 1,
-                        text_chars=len(raw_text),
-                        images_found=len(page_images),
-                        images_described=sum(1 for _ in image_descriptions),
-                        duration_s=time.time() - start_page,
-                        mode=mode_used,
-                    )
-                )
+            # Create metrics for this page
+            page_metrics = PageMetrics(
+                page_number=page_index + 1,
+                text_chars=len(raw_text),
+                images_found=len(page_images),
+                images_described=sum(1 for _ in image_descriptions),
+                duration_s=time.time() - start_page,
+                mode=mode_used,
+            ) if self.collect_metrics else None
+
+            return (page_index, section, page_metrics)
+
+        # Process all pages concurrently with asyncio.gather
+        logger.debug(f"Processing {total_pages} pages concurrently...")
+        page_tasks = [
+            process_page(page_index, page)
+            for page_index, page in enumerate(reader.pages)
+        ]
+        page_results = await asyncio.gather(*page_tasks, return_exceptions=False)
+
+        # Sort results by page index and collect sections/metrics
+        page_results_sorted = sorted(page_results, key=lambda x: x[0])
+        sections: MutableSequence[SectionContent] = []
+        for _, section, page_metrics in page_results_sorted:
+            if section is not None:
+                sections.append(section)
+            if page_metrics is not None and metrics.pages is not None:
+                metrics.pages.append(page_metrics)
 
         # Close PyMuPDF doc
         if mu_doc is not None:
