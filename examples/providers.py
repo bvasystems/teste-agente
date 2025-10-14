@@ -12,7 +12,6 @@ from agentle.generations.providers.base.generation_provider import GenerationPro
 from agentle.generations.providers.openrouter.openrouter_generation_provider import (
     OpenRouterGenerationProvider,
 )
-from agentle.generations.tools.tool import Tool
 
 load_dotenv()
 
