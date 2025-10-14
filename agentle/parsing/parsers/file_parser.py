@@ -184,6 +184,22 @@ class FileParser(DocumentParser):
     Example: 2 pages × 4 provider tasks = 8 concurrent API calls
     """
 
+    render_scale: float = Field(default=2.0)
+    """Rendering scale for PDF page screenshots (PDF parsing only).
+    
+    Controls the resolution/quality of page screenshots in PDF parsing.
+    Higher values produce better quality but use exponentially more memory.
+    
+    Recommended values:
+    - 1.0-1.25 for AWS instances with limited RAM (t2.micro, t2.small, t3.small)
+    - 1.5 for medium instances or when memory is constrained
+    - 2.0 for large instances or local development (default)
+    - 2.5-3.0 for high-quality analysis on powerful machines
+    
+    Memory impact: render_scale=2.0 can produce 4-8MB screenshots per page
+                  render_scale=1.0 produces ~1-2MB screenshots per page
+    """
+
     async def parse_async(self, document_path: str) -> ParsedFile:
         """
         Asynchronously parse a document using the appropriate parser for its file type.
@@ -242,6 +258,7 @@ class FileParser(DocumentParser):
                     parse_timeout=self.parse_timeout,
                     max_concurrent_provider_tasks=self.max_concurrent_provider_tasks,
                     max_concurrent_pages=self.max_concurrent_pages,
+                    render_scale=self.render_scale,
                 ).parse_async(document_path=document_path)
 
             # For file paths, resolve and validate
@@ -281,6 +298,7 @@ class FileParser(DocumentParser):
                     parse_timeout=self.parse_timeout,
                     max_concurrent_provider_tasks=self.max_concurrent_provider_tasks,
                     max_concurrent_pages=self.max_concurrent_pages,
+                    render_scale=self.render_scale,
                 ).parse_async(document_path=document_path)
             else:
                 raise ValueError(
@@ -294,5 +312,6 @@ class FileParser(DocumentParser):
             parse_timeout=self.parse_timeout,
             max_concurrent_provider_tasks=self.max_concurrent_provider_tasks,
             max_concurrent_pages=self.max_concurrent_pages,
+            render_scale=self.render_scale,
             strategy=self.strategy,
         ).parse_async(document_path=str(resolved_path))
