@@ -1,6 +1,5 @@
 # Changelog
 
-## v0.8.44
+## v0.8.45
 
-- fix(evolution): new input data formats
-
+- refactor(evolution): converting typed dicts to basemodels
