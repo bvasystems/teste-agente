@@ -1,4 +1,5 @@
 from rsb.models.base_model import BaseModel
+from rsb.models.field import Field
 
 
 class Key(BaseModel):
@@ -11,5 +12,6 @@ class Key(BaseModel):
     """
 
     remoteJid: str
+    senderPn: str | None = Field(default=None)
     fromMe: bool
     id: str

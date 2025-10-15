@@ -32,4 +32,11 @@ class WhatsAppWebhookPayload(BaseModel):
     status_code: int | None = Field(default=None)
 
     def model_post_init(self, context: Any, /) -> None:
-        self.phone_number_id = self.sender.split("@")[0] if self.sender else None
+        if self.phone_number_id or not self.data:
+            return
+
+        key = self.data.key
+        if key.senderPn:
+            self.phone_number_id = key.senderPn.split("@")[0]
+        elif key.remoteJid:
+            self.phone_number_id = key.remoteJid.split("@")[0]

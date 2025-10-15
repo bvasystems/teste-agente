@@ -2275,13 +2275,10 @@ class WhatsAppBot(BaseModel):
 
             logger.info("[MESSAGE_UPSERT] Parsing message from Evolution API data")
             # Parse message directly from data (which contains the message info)
-            sender = payload.sender
-            if sender is None:
-                raise RuntimeError("Sender is None. Cannot proceed.")
 
             message = self._parse_evolution_message_from_data(
                 data,
-                from_number=sender,
+                from_number=payload.data.key.senderPn or payload.data.key.remoteJid,
             )
 
             if message:
