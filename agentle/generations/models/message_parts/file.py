@@ -2,13 +2,15 @@
 Module for file-based message parts with enhanced validation.
 """
 
+from __future__ import annotations
+
 import base64 as b64
-import mimetypes
 import io
-import zipfile
-import tarfile
 import json
-from typing import Any, Literal, Protocol, TYPE_CHECKING, override
+import mimetypes
+import tarfile
+import zipfile
+from typing import TYPE_CHECKING, Any, Literal, Protocol, override
 
 from rsb.models.base_model import BaseModel
 from rsb.models.field import Field
@@ -62,7 +64,7 @@ class _OptionalDependencies:
         except ImportError:
             return None
 
-    def _try_import_magic(self) -> _MagicModule | None:            
+    def _try_import_magic(self) -> _MagicModule | None:
         try:
             import magic
 
@@ -157,6 +159,11 @@ class FilePart(BaseModel):
         self._validate_mime_type()
         self._validate_data_integrity()
         self._validate_mime_type_matches_data()
+
+    @classmethod
+    def from_local_file(cls, path: str, mime_type: str) -> FilePart:
+        with open(path, "rb") as file:
+            return FilePart(data=file.read(), mime_type=mime_type)
 
     def _get_bytes_data(self) -> bytes:
         """Convert data to bytes regardless of input format."""
