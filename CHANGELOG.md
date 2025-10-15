@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.8.45
+## v0.8.46
 
-- refactor(evolution): converting typed dicts to basemodels
+- fix(evolution) wrong usage of typed dicts
