@@ -196,6 +196,8 @@ class PDFFileParser(DocumentParser):
     type: Literal["pdf"] = "pdf"
     strategy: Literal["high", "low"] = Field(default="high")
     visual_description_provider: GenerationProvider | None = Field(default=None)
+    model: str | None = Field(default=None)
+    """Model to use for visual description generation. If not provided, uses the provider's default model."""
     # Feature toggles & configuration
     include_visuals: bool = Field(default=True)
     image_processing_mode: Literal["auto", "page_screenshot", "per_image"] = Field(
@@ -845,20 +847,36 @@ class PDFFileParser(DocumentParser):
                 raise RuntimeError("Visual description provider must not be None.")
 
             # Call the provider with the PDF and structured output schema
-            logger.debug("Sending PDF to AI provider for native processing")
+            logger.debug(
+                "Sending PDF to AI provider for native processing with model: %s",
+                self.model or "default",
+            )
             response = await self.visual_description_provider.generate_by_prompt_async(
                 prompt=[pdf_file_part, prompt],
                 response_schema=PDFPageExtraction,
                 generation_config=GenerationConfig(
                     timeout_s=300.0,
                 ),
+                model=self.model,
             )
 
             extraction: PDFPageExtraction = response.parsed
             if not extraction or not extraction.pages:
-                raise PDFProviderError(
-                    f"No extraction returned from provider. {response}"
+                # Extract text content to help debug
+                text_content = None
+                if response.choices and response.choices[0].message.parts:
+                    for part in response.choices[0].message.parts:
+                        if hasattr(part, "text"):
+                            text_content = part.text[:500]  # First 500 chars
+                            break
+
+                error_msg = (
+                    f"No structured extraction returned from provider. "
+                    f"Model: {response.model}, "
+                    f"Parsed: {extraction}, "
+                    f"Text preview: {text_content}"
                 )
+                raise PDFProviderError(error_msg)
 
             logger.debug(
                 "AI extracted %d pages from PDF in %.2fs",
@@ -867,9 +885,22 @@ class PDFFileParser(DocumentParser):
             )
 
         except Exception as e:
-            logger.error("Native PDF processing failed: %s", e)
+            logger.error(
+                "Native PDF processing failed: %s. Model used: %s, Provider: %s",
+                e,
+                self.model or "default",
+                type(self.visual_description_provider).__name__
+                if self.visual_description_provider
+                else "None",
+            )
+            model_name = self.model or "default"
+            provider_name = (
+                type(self.visual_description_provider).__name__
+                if self.visual_description_provider
+                else "None"
+            )
             raise PDFProviderError(
-                f"Failed to process PDF with AI provider: {e}"
+                f"Failed to process PDF with AI provider: {e}. Model: {model_name}, Provider: {provider_name}"
             ) from e
 
         # Convert the extraction to ParsedFile format
