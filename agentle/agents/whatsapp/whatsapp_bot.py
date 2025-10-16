@@ -1986,7 +1986,11 @@ class WhatsAppBot(BaseModel):
         return stripped.startswith("|") and stripped.endswith("|")
 
     def _format_table(self, table_lines: list[str]) -> list[str]:
-        """Convert a markdown table to WhatsApp-friendly formatted text."""
+        """Convert a markdown table to WhatsApp-friendly vertical list format.
+
+        Uses a consistent vertical format for all tables to ensure readability
+        on all screen sizes and prevent any horizontal overflow issues.
+        """
         if not table_lines:
             return []
 
@@ -2007,37 +2011,18 @@ class WhatsAppBot(BaseModel):
         if not rows:
             return []
 
-        # Calculate column widths
-        col_widths = [0] * len(rows[0])
-        for row in rows:
-            for i, cell in enumerate(row):
-                if i < len(col_widths):
-                    col_widths[i] = max(col_widths[i], len(cell))
-
-        # Format table
+        # Use vertical list format for all tables (mobile-friendly)
         result: list[str] = []
         result.append("")  # Empty line before table
 
-        # Add header row (first row) in bold
-        if rows:
-            header_cells: list[str] = []
-            for i, cell in enumerate(rows[0]):
-                if i < len(col_widths):
-                    header_cells.append(f"*{cell.ljust(col_widths[i])}*")
-                else:
-                    header_cells.append(f"*{cell}*")
-            result.append(" │ ".join(header_cells))
-            result.append("─" * (sum(col_widths) + 3 * (len(col_widths) - 1)))
+        headers = rows[0] if rows else []
 
-        # Add data rows
-        for row in rows[1:]:
-            row_cells: list[str] = []
-            for i, cell in enumerate(row):
-                if i < len(col_widths):
-                    row_cells.append(cell.ljust(col_widths[i]))
-                else:
-                    row_cells.append(cell)
-            result.append(" │ ".join(row_cells))
+        for row_idx, row in enumerate(rows[1:], start=1):
+            result.append(f"*Item {row_idx}:*")
+            for header, value in zip(headers, row):
+                result.append(f"  • {header}: {value}")
+            if row_idx < len(rows) - 1:  # Add spacing between items
+                result.append("")
 
         result.append("")  # Empty line after table
         return result
