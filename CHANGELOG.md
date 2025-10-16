@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.8.59
+## v0.8.60
 
-- feat(file_parser) add model field for visual description generation in FileParser
+- fix(generation_provider) normalize model names by removing 'google/' prefix
