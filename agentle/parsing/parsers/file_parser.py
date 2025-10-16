@@ -200,6 +200,9 @@ class FileParser(DocumentParser):
                   render_scale=1.0 produces ~1-2MB screenshots per page
     """
 
+    model: str | None = Field(default=None)
+    """Model to use for visual description generation. If not provided, uses the provider's default model."""
+
     use_native_pdf_processing: bool = Field(default=False)
     """Enable native PDF processing by sending the entire PDF to the AI provider (PDF parsing only).
     
@@ -353,4 +356,5 @@ class FileParser(DocumentParser):
             render_scale=self.render_scale,
             use_native_pdf_processing=self.use_native_pdf_processing,
             strategy=self.strategy,
+            model=self.model,
         ).parse_async(document_path=str(resolved_path))
