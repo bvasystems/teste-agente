@@ -1855,29 +1855,217 @@ class WhatsAppBot(BaseModel):
         - _italic_ for italic text
         - ~strikethrough~ for strikethrough text
         - ```code``` for monospace text
-        - No support for standard **bold** or __italic__ markdown
+        - No support for headers, tables, or complex markdown structures
+
+        This method converts:
+        - Headers (# ## ###) to bold text with separators
+        - Tables to formatted text
+        - Markdown lists to plain text lists
+        - Links to "text (url)" format
+        - Images to descriptive text
+        - Blockquotes to indented text
         """
         if not text:
             return text
 
-        # Convert **bold** to *bold* (WhatsApp format)
+        # Split text into lines for processing
+        lines = text.split("\n")
+        processed_lines: list[str] = []
+        in_code_block = False
+        in_table = False
+        table_lines: list[str] = []
 
-        # Handle **bold** -> *bold*
-        text = re.sub(r"\*\*([^*]+)\*\*", r"*\1*", text)
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+
+            # Track code blocks (preserve them as-is)
+            if line.strip().startswith("```"):
+                in_code_block = not in_code_block
+                processed_lines.append(line)
+                i += 1
+                continue
+
+            # If we're in a code block, don't process the line
+            if in_code_block:
+                processed_lines.append(line)
+                i += 1
+                continue
+
+            # Detect table start (header line followed by separator line)
+            if i + 1 < len(lines) and self._is_table_separator(lines[i + 1]):
+                in_table = True
+                table_lines = [line]
+                i += 1
+                continue
+
+            # Continue collecting table rows
+            if in_table:
+                if self._is_table_row(line):
+                    table_lines.append(line)
+                    i += 1
+                    continue
+                else:
+                    # End of table, process it
+                    processed_lines.extend(self._format_table(table_lines))
+                    in_table = False
+                    table_lines = []
+                    # Don't increment i, process current line
+
+            # Process headers
+            if line.strip().startswith("#"):
+                processed_lines.append(self._format_header(line))
+                i += 1
+                continue
+
+            # Process blockquotes
+            if line.strip().startswith(">"):
+                processed_lines.append(self._format_blockquote(line))
+                i += 1
+                continue
+
+            # Process horizontal rules
+            if re.match(r"^[\s]*(-{3,}|\*{3,}|_{3,})[\s]*$", line):
+                processed_lines.append("─" * 30)
+                i += 1
+                continue
+
+            # Process regular line
+            processed_lines.append(line)
+            i += 1
+
+        # If we ended while in a table, process it
+        if table_lines:
+            processed_lines.extend(self._format_table(table_lines))
+
+        # Rejoin lines
+        text = "\n".join(processed_lines)
+
+        # Handle inline markdown elements
+
+        # Handle images ![alt](url) -> [Image: alt]
+        text = re.sub(r"!\[([^\]]*)\]\([^\)]+\)", r"[Imagem: \1]", text)
+
+        # Handle links [text](url) -> text (url)
+        text = re.sub(r"\[([^\]]+)\]\(([^\)]+)\)", r"\1 (\2)", text)
+
+        # Handle **bold** -> *bold* (WhatsApp format)
+        # Use negative lookbehind and lookahead to avoid matching within code blocks
+        text = re.sub(r"(?<!`)\*\*([^*`]+)\*\*(?!`)", r"*\1*", text)
 
         # Handle __italic__ -> _italic_
-        text = re.sub(r"__([^_]+)__", r"_\1_", text)
+        text = re.sub(r"(?<!`)__([^_`]+)__(?!`)", r"_\1_", text)
 
         # Handle ~~strikethrough~~ -> ~strikethrough~
-        text = re.sub(r"~~([^~]+)~~", r"~\1~", text)
+        text = re.sub(r"(?<!`)~~([^~`]+)~~(?!`)", r"~\1~", text)
 
-        # Handle `code` -> ```code``` (WhatsApp monospace)
-        text = re.sub(r"`([^`]+)`", r"```\1```", text)
-
-        # Handle code blocks ```code``` (already WhatsApp compatible)
-        # No changes needed for code blocks
+        # Handle single backtick `code` -> ```code``` (WhatsApp monospace)
+        # But don't convert if already part of triple backticks
+        text = re.sub(r"(?<!`)(`(?!``)([^`]+)`)(?!`)", r"```\2```", text)
 
         return text
+
+    def _is_table_separator(self, line: str) -> bool:
+        """Check if a line is a markdown table separator (e.g., |---|---|)."""
+        stripped = line.strip()
+        if not stripped.startswith("|") or not stripped.endswith("|"):
+            return False
+        # Remove outer pipes and split
+        content = stripped[1:-1]
+        cells = content.split("|")
+        # Check if all cells are just dashes, colons, and spaces
+        for cell in cells:
+            cell = cell.strip()
+            if cell and not re.match(r"^:?-+:?$", cell):
+                return False
+        return True
+
+    def _is_table_row(self, line: str) -> bool:
+        """Check if a line is a table row."""
+        stripped = line.strip()
+        return stripped.startswith("|") and stripped.endswith("|")
+
+    def _format_table(self, table_lines: list[str]) -> list[str]:
+        """Convert a markdown table to WhatsApp-friendly formatted text."""
+        if not table_lines:
+            return []
+
+        # Parse table rows
+        rows: list[list[str]] = []
+        for line in table_lines:
+            if self._is_table_separator(line):
+                continue  # Skip separator line
+            # Remove outer pipes and split
+            stripped = line.strip()
+            if stripped.startswith("|"):
+                stripped = stripped[1:]
+            if stripped.endswith("|"):
+                stripped = stripped[:-1]
+            cells = [cell.strip() for cell in stripped.split("|")]
+            rows.append(cells)
+
+        if not rows:
+            return []
+
+        # Calculate column widths
+        col_widths = [0] * len(rows[0])
+        for row in rows:
+            for i, cell in enumerate(row):
+                if i < len(col_widths):
+                    col_widths[i] = max(col_widths[i], len(cell))
+
+        # Format table
+        result: list[str] = []
+        result.append("")  # Empty line before table
+
+        # Add header row (first row) in bold
+        if rows:
+            header_cells: list[str] = []
+            for i, cell in enumerate(rows[0]):
+                if i < len(col_widths):
+                    header_cells.append(f"*{cell.ljust(col_widths[i])}*")
+                else:
+                    header_cells.append(f"*{cell}*")
+            result.append(" │ ".join(header_cells))
+            result.append("─" * (sum(col_widths) + 3 * (len(col_widths) - 1)))
+
+        # Add data rows
+        for row in rows[1:]:
+            row_cells: list[str] = []
+            for i, cell in enumerate(row):
+                if i < len(col_widths):
+                    row_cells.append(cell.ljust(col_widths[i]))
+                else:
+                    row_cells.append(cell)
+            result.append(" │ ".join(row_cells))
+
+        result.append("")  # Empty line after table
+        return result
+
+    def _format_header(self, line: str) -> str:
+        """Convert markdown header to bold text with decorations."""
+        match = re.match(r"^(#+)\s+(.+)$", line.strip())
+        if not match:
+            return line
+
+        level = len(match.group(1))
+        text = match.group(2).strip()
+
+        if level == 1:
+            # H1: Bold text with double line separator
+            return f"\n*{text.upper()}*\n{'═' * min(len(text), 30)}"
+        elif level == 2:
+            # H2: Bold text with single line separator
+            return f"\n*{text}*\n{'─' * min(len(text), 30)}"
+        else:
+            # H3+: Just bold text
+            return f"\n*{text}*"
+
+    def _format_blockquote(self, line: str) -> str:
+        """Format blockquote by removing > and adding indentation."""
+        # Remove leading > and optional space
+        text = re.sub(r"^>\s?", "", line.strip())
+        return f"  ┃ {text}"
 
     async def _send_response(
         self,
