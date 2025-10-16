@@ -297,7 +297,15 @@ class OpenRouterGenerationProvider(GenerationProvider):
             **(self.default_headers or {}),
         }
 
-        client = self.http_client or httpx.AsyncClient()
+        # Configure timeout for httpx client
+        # Use the generation config timeout or default to 300 seconds (5 minutes) for vision/PDF tasks
+        timeout_seconds = _generation_config.timeout_in_seconds or 300.0
+        client = self.http_client or httpx.AsyncClient(
+            timeout=httpx.Timeout(
+                timeout=timeout_seconds,
+                connect=30.0,  # Keep connection timeout reasonable
+            )
+        )
         url = f"{self.base_url}/chat/completions"
 
         try:

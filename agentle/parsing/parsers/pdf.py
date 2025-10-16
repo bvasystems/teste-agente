@@ -30,6 +30,7 @@ from typing import Any, Callable, Literal, cast, Awaitable
 from rsb.functions.ext2mime import ext2mime
 from rsb.models.field import Field
 
+from agentle.generations.models.generation.generation_config import GenerationConfig
 from agentle.generations.models.message_parts.file import FilePart
 from agentle.generations.models.message_parts.text import TextPart
 from agentle.generations.models.structured_outputs_store.pdf_page_extraction import (
@@ -848,8 +849,11 @@ class PDFFileParser(DocumentParser):
             response = await self.visual_description_provider.generate_by_prompt_async(
                 prompt=[pdf_file_part, prompt],
                 response_schema=PDFPageExtraction,
+                generation_config=GenerationConfig(
+                    timeout_s=300.0,
+                ),
             )
- 
+
             extraction: PDFPageExtraction = response.parsed
             logger.debug(
                 "AI extracted %d pages from PDF in %.2fs",
