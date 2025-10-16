@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.8.55
+## v0.8.56
 
-- feat(whatsapp_bot) enhance message splitting by grouping list items and applying message limits
+- feat(openrouter) configure httpx client timeout for generation tasks; add GenerationConfig to PDF parser for timeout settings
