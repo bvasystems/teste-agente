@@ -496,7 +496,12 @@ class GenerationProvider(abc.ABC):
                 model_kind=cast(ModelKind, model)
             )
 
-        return model or self.default_model
+        _model = model or self.default_model
+
+        if _model.startswith("google/"):
+            _model = _model.replace("google/", "")
+
+        return _model
 
     def _normalize_generation_config(
         self, generation_config: GenerationConfig | GenerationConfigDict | None
