@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.8.54
+## v0.8.55
 
-- feat(static_knowledge) add from_text class method for creating StaticKnowledge instances from text
+- feat(whatsapp_bot) enhance message splitting by grouping list items and applying message limits
