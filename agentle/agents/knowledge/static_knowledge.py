@@ -37,6 +37,12 @@ class StaticKnowledge(BaseModel):
     """The timeout for the parse operation in seconds."""
 
     @classmethod
+    def from_text(
+        cls, text: str, cache: int | NoCache | Literal["infinite"] = NO_CACHE
+    ) -> StaticKnowledge:
+        return cls(content=text, cache=cache)
+
+    @classmethod
     def from_parsed_file(
         cls,
         parsed_file: ParsedFile,
