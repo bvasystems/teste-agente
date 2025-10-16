@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.8.56
+## v0.8.57
 
-- feat(openrouter) configure httpx client timeout for generation tasks; add GenerationConfig to PDF parser for timeout settings
+- fix(pdf) handle case where no extraction is returned from PDF provider
