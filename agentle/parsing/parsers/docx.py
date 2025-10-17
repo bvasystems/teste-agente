@@ -16,11 +16,17 @@ import uuid
 import zipfile
 from pathlib import Path
 from typing import Literal, Any
+from collections.abc import MutableSequence
 
 from rsb.models.field import Field
 
 
+from agentle.generations.models.generation.generation_config import GenerationConfig
 from agentle.generations.models.message_parts.file import FilePart
+from agentle.generations.models.message_parts.text import TextPart
+from agentle.generations.models.structured_outputs_store.pdf_page_extraction import (
+    PDFPageExtraction,
+)
 from agentle.generations.models.structured_outputs_store.visual_media_description import (
     VisualMediaDescription,
 )
@@ -30,8 +36,36 @@ from agentle.parsing.image import Image
 from agentle.parsing.parsed_file import ParsedFile
 from agentle.parsing.section_content import SectionContent
 from agentle.parsing.document_parser import DocumentParser
+from agentle.utils.file_validation import (
+    FileValidationError,
+    resolve_file_path,
+    validate_file_exists,
+)
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Exception Hierarchy
+# ---------------------------------------------------------------------------
+class DocxParserError(Exception):
+    """Base exception for DOCX parsing."""
+
+
+class DocxFileValidationError(DocxParserError):
+    """Raised when file validation fails."""
+
+
+class DocxEmptyFileError(DocxParserError):
+    """Raised when the DOCX file is empty."""
+
+
+class DocxReadError(DocxParserError):
+    """Raised on I/O read failures."""
+
+
+class DocxProviderError(DocxParserError):
+    """Raised on fatal provider (visual description) failures."""
 
 
 class DocxFileParser(DocumentParser):
@@ -131,6 +165,29 @@ class DocxFileParser(DocumentParser):
     Useful when you want to customize the prompt for the visual description.
     """
 
+    model: str | None = Field(default=None)
+    """Model to use for visual description generation. If not provided, uses the provider's default model."""
+
+    use_native_docx_processing: bool = Field(default=False)
+    """Enable native DOCX processing by sending the entire DOCX to the AI provider.
+    
+    When enabled, the parser will send the complete DOCX file directly to the AI provider
+    (if it supports native DOCX file processing) and request structured markdown extraction.
+    This completely eliminates backend processing and can run efficiently on AWS instances.
+    
+    Requirements:
+    - visual_description_provider must be set
+    - The provider must support FilePart with mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    
+    Benefits:
+    - No python-docx dependency required
+    - No LibreOffice/pandoc conversion needed
+    - Faster processing as AI handles everything
+    - Works well on small AWS instances
+    
+    Note: When this is enabled, most other configuration options are ignored as the AI handles all processing.
+    """
+
     async def parse_async(
         self,
         document_path: str,
@@ -138,6 +195,10 @@ class DocxFileParser(DocumentParser):
         """
         Parse a Word document into a single Markdown section and describe visuals without duplicating page OCR.
         """
+        # Check if native DOCX processing is enabled and we have a provider
+        if self.use_native_docx_processing and self.visual_description_provider:
+            return await self._parse_with_native_docx_processing(document_path)
+
         from docx import Document
 
         original_path = Path(document_path)
@@ -504,3 +565,164 @@ class DocxFileParser(DocumentParser):
                     converted_temp_file.unlink()
                 except Exception:
                     pass
+
+    async def _parse_with_native_docx_processing(self, document_path: str) -> ParsedFile:
+        """Parse DOCX using native AI provider processing.
+
+        This method sends the entire DOCX to the AI provider and requests structured
+        markdown extraction. This eliminates all backend processing.
+
+        Args:
+            document_path: Path to the DOCX file
+
+        Returns:
+            ParsedFile: Structured representation with AI-extracted content
+
+        Raises:
+            DocxFileValidationError: If file validation fails
+            DocxProviderError: If provider processing fails
+        """
+        # Validate path
+        try:
+            resolved_path = resolve_file_path(document_path)
+            validate_file_exists(resolved_path)
+        except FileValidationError as e:
+            logger.error("DOCX file validation failed: %s", e)
+            raise DocxFileValidationError(str(e)) from e
+
+        display_path = Path(resolved_path).name
+        logger.debug("Parsing DOCX with native AI processing: %s", display_path)
+
+        # Read the DOCX file
+        try:
+            with open(resolved_path, "rb") as f:
+                docx_bytes = f.read()
+        except PermissionError as e:
+            raise DocxReadError(f"Permission denied reading '{document_path}'") from e
+        except OSError as e:
+            raise DocxReadError(f"OS error reading '{document_path}': {e}") from e
+
+        if not docx_bytes:
+            raise DocxEmptyFileError(f"DOCX file '{document_path}' is empty")
+
+        # Create FilePart with the DOCX
+        docx_file_part = FilePart(
+            mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            data=docx_bytes,
+        )
+
+        # Create prompt for the AI
+        prompt_text = (
+            "You are a precise document extraction assistant. Extract the content from this Word document "
+            "and return it as structured markdown. For the document:\n\n"
+            "1. Extract all text content preserving the document structure\n"
+            "2. Use markdown formatting (headings, lists, tables, etc.)\n"
+            "3. For tables, use proper markdown table syntax\n"
+            "4. If the document contains images, charts, or diagrams, describe them inline\n"
+            "5. Maintain the original reading order and hierarchy\n\n"
+            "Return the content organized by page number if pages are distinguishable, otherwise as a single section."
+        )
+
+        prompt = TextPart(text=prompt_text)
+
+        try:
+            if self.visual_description_provider is None:
+                raise RuntimeError("Visual description provider must not be None.")
+
+            # Call the provider with the DOCX and structured output schema
+            logger.debug(
+                "Sending DOCX to AI provider for native processing with model: %s",
+                self.model or "default",
+            )
+            response = await self.visual_description_provider.generate_by_prompt_async(
+                prompt=[docx_file_part, prompt],
+                response_schema=PDFPageExtraction,  # Reuse PDF schema as it's generic
+                generation_config=GenerationConfig(
+                    timeout_s=300.0,
+                ),
+                model=self.model,
+            )
+
+            extraction: PDFPageExtraction = response.parsed
+            if not extraction or not extraction.pages:
+                # Extract text content to help debug
+                text_content = None
+                if response.choices and response.choices[0].message.parts:
+                    for part in response.choices[0].message.parts:
+                        if hasattr(part, "text"):
+                            text_content = part.text[:500]  # First 500 chars
+                            break
+
+                error_msg = (
+                    f"No structured extraction returned from provider. "
+                    f"Model: {response.model}, "
+                    f"Parsed: {extraction}, "
+                    f"Text preview: {text_content}"
+                )
+                raise DocxProviderError(error_msg)
+
+            logger.debug(
+                "AI extracted %d pages from DOCX",
+                extraction.total_pages,
+            )
+
+        except Exception as e:
+            logger.error(
+                "Native DOCX processing failed: %s. Model used: %s, Provider: %s",
+                e,
+                self.model or "default",
+                type(self.visual_description_provider).__name__
+                if self.visual_description_provider
+                else "None",
+            )
+            model_name = self.model or "default"
+            provider_name = (
+                type(self.visual_description_provider).__name__
+                if self.visual_description_provider
+                else "None"
+            )
+            raise DocxProviderError(
+                f"Failed to process DOCX with AI provider: {e}. Model: {model_name}, Provider: {provider_name}"
+            ) from e
+
+        # Convert the extraction to ParsedFile format
+        sections: MutableSequence[SectionContent] = []
+
+        for page_content in extraction.pages:
+            # Build the markdown for this page/section
+            page_md_parts = [f"## Page {page_content.page_number}"]
+
+            if page_content.markdown:
+                page_md_parts.append(page_content.markdown)
+
+            # Add image descriptions if present
+            if page_content.has_images and page_content.image_descriptions:
+                page_md_parts.append("\n### Visual Content")
+                for desc in page_content.image_descriptions:
+                    page_md_parts.append(f"- {desc}")
+
+            page_md = "\n\n".join(page_md_parts)
+
+            section = SectionContent(
+                number=page_content.page_number,
+                text=page_md,
+                md=page_md,
+                images=[],  # No raw image data with native processing
+            )
+            sections.append(section)
+
+        parsed = ParsedFile(name=Path(resolved_path).name, sections=sections)
+
+        if hasattr(parsed, "metadata") and isinstance(parsed.metadata, dict):
+            parsed.metadata.update(
+                {
+                    "parser": "docx",
+                    "pages": extraction.total_pages,
+                    "strategy": "native_ai_processing",
+                    "visuals": True,
+                    "processing_mode": "native_ai",
+                    "document_title": extraction.document_title,
+                }
+            )
+
+        return parsed
