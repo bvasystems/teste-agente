@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.8.65
+## v0.8.66
 
-- converted all TypedDict models in 
-models to BaseModel instances and updated all code that accesses them.
+- fix(agent): wrongly updating property "text"
+- fix(DocumentMessage): accessing inexistant property "caption"
