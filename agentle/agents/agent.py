@@ -1103,6 +1103,65 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             approval_data=approval_data,
         )
 
+    async def _validate_output_with_guardrails(
+        self, output_text: str, chat_id: str | None = None
+    ) -> str:
+        """
+        Validate output text with guardrails if configured.
+        
+        Args:
+            output_text: The text to validate
+            chat_id: Optional chat ID for context
+            
+        Returns:
+            The validated (possibly modified) text
+            
+        Raises:
+            Exception: If validation fails and fail_on_output_violation is True
+        """
+        if not self.guardrail_manager or not output_text:
+            return output_text
+            
+        _logger = Maybe(logger if self.debug else None)
+        
+        _logger.bind_optional(
+            lambda log: log.debug("Validating output with guardrails")
+        )
+        
+        try:
+            validation_result = await self.guardrail_manager.validate_output_async(
+                content=output_text,
+                context={"agent_name": self.name, "chat_id": chat_id},
+                raise_on_violation=self.guardrail_config.get(
+                    "fail_on_output_violation", False
+                ),
+            )
+            
+            # Log validation result
+            if self.guardrail_config.get("log_violations", True):
+                _logger.bind_optional(
+                    lambda log: log.info(
+                        "Output validation result: %s", validation_result
+                    )
+                )
+            
+            # If validation returned modified content, use it
+            if isinstance(validation_result, str):
+                return validation_result
+            
+            return output_text
+            
+        except Exception as e:
+            # Handle guardrail violations
+            _logger.bind_optional(
+                lambda log: log.error(
+                    "Output guardrail violation: %s", str(e)
+                )
+            )
+            if self.guardrail_config.get("fail_on_output_violation", False):
+                raise
+            return output_text
+
     @overload
     def run(
         self,
@@ -1515,6 +1574,52 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             )
         )
 
+        # Phase 2.5: Input Guardrail Validation
+        input_validation_start = time.perf_counter()
+        
+        if self.guardrail_manager:
+            _logger.bind_optional(
+                lambda log: log.debug("Validating input with guardrails")
+            )
+            
+            # Extract text from the current user message for validation
+            input_text = ""
+            if current_user_message and hasattr(current_user_message, "parts"):
+                for part in current_user_message.parts:
+                    if hasattr(part, "text") and part.text:
+                        input_text += part.text + " "
+            
+            input_text = input_text.strip()
+            
+            if input_text:
+                try:
+                    validation_result = await self.guardrail_manager.validate_input_async(
+                        content=input_text,
+                        context={"agent_name": self.name, "chat_id": chat_id},
+                        raise_on_violation=self.guardrail_config.get(
+                            "fail_on_input_violation", True
+                        ),
+                    )
+                    
+                    # Log validation result
+                    if self.guardrail_config.get("log_violations", True):
+                        _logger.bind_optional(
+                            lambda log: log.info(
+                                "Input validation result: %s", validation_result
+                            )
+                        )
+                except Exception as e:
+                    # Handle guardrail violations
+                    _logger.bind_optional(
+                        lambda log: log.error(
+                            "Input guardrail violation: %s", str(e)
+                        )
+                    )
+                    if self.guardrail_config.get("fail_on_input_violation", True):
+                        raise
+        
+        input_validation_time = (time.perf_counter() - input_validation_start) * 1000
+
         # Phase 3: MCP Tools Preparation
         mcp_tools_start = time.perf_counter()
 
@@ -1705,6 +1810,15 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                             shortest_step_duration_ms=step_duration,
                         )
 
+                        # Validate output with guardrails
+                        if final_generation.text:
+                            validated_text = await self._validate_output_with_guardrails(
+                                final_generation.text, chat_id
+                            )
+                            # Update generation text if modified by guardrails
+                            if validated_text != final_generation.text:
+                                final_generation.text = validated_text
+
                         # Save to conversation store after successful execution
                         if chat_id:
                             assert self.conversation_store is not None
@@ -1812,6 +1926,15 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 longest_step_duration_ms=step_duration,
                 shortest_step_duration_ms=step_duration,
             )
+
+            # Validate output with guardrails
+            if generation.text:
+                validated_text = await self._validate_output_with_guardrails(
+                    generation.text, chat_id
+                )
+                # Update generation text if modified by guardrails
+                if validated_text != generation.text:
+                    generation.text = validated_text
 
             # Save to conversation store after successful execution
             if chat_id:
@@ -2081,6 +2204,15 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                                     final_generation.usage.total_tokens
                                 )
 
+                                # Validate output with guardrails
+                                if final_generation.text:
+                                    validated_text = await self._validate_output_with_guardrails(
+                                        final_generation.text, chat_id
+                                    )
+                                    # Update generation text if modified by guardrails
+                                    if validated_text != final_generation.text:
+                                        final_generation.text = validated_text
+
                                 # Calculate final metrics
                                 total_execution_time = (
                                     time.perf_counter() - execution_start_time
@@ -2177,6 +2309,15 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
 
                         # Complete execution before returning
                         context.complete_execution()
+
+                        # Validate output with guardrails
+                        if final_tool_generation.text:
+                            validated_text = await self._validate_output_with_guardrails(
+                                final_tool_generation.text, chat_id
+                            )
+                            # Update generation text if modified by guardrails
+                            if validated_text != final_tool_generation.text:
+                                final_tool_generation.text = validated_text
 
                         # Calculate final metrics
                         total_execution_time = (
@@ -4297,6 +4438,15 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     context.update_token_usage(generation.usage)
                 else:
                     generation = cast(Generation[T_Schema], tool_call_generation)
+
+                # Validate output with guardrails
+                if generation.text:
+                    validated_text = await self._validate_output_with_guardrails(
+                        generation.text, None
+                    )
+                    # Update generation text if modified by guardrails
+                    if validated_text != generation.text:
+                        generation.text = validated_text
 
                 final_step.mark_completed()
                 context.add_step(final_step)
