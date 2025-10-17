@@ -567,10 +567,11 @@ class DocxFileParser(DocumentParser):
                     pass
 
     async def _parse_with_native_docx_processing(self, document_path: str) -> ParsedFile:
-        """Parse DOCX using native AI provider processing.
+        """Parse DOCX using native AI provider processing via PDF conversion.
 
-        This method sends the entire DOCX to the AI provider and requests structured
-        markdown extraction. This eliminates all backend processing.
+        This method converts the DOCX to PDF and then delegates to PDFFileParser
+        with native processing enabled. This leverages the PDF parser's native
+        AI processing capabilities.
 
         Args:
             document_path: Path to the DOCX file
@@ -580,7 +581,7 @@ class DocxFileParser(DocumentParser):
 
         Raises:
             DocxFileValidationError: If file validation fails
-            DocxProviderError: If provider processing fails
+            DocxProviderError: If conversion or processing fails
         """
         # Validate path
         try:
@@ -591,81 +592,96 @@ class DocxFileParser(DocumentParser):
             raise DocxFileValidationError(str(e)) from e
 
         display_path = Path(resolved_path).name
-        logger.debug("Parsing DOCX with native AI processing: %s", display_path)
+        logger.debug("Parsing DOCX with native AI processing (via PDF conversion): %s", display_path)
 
-        # Read the DOCX file
+        # Convert DOCX to PDF
+        def _convert_docx_to_pdf(input_path: str, out_dir: str) -> str | None:
+            """Convert DOCX to PDF using LibreOffice or pandoc."""
+            pdf_out = os.path.join(out_dir, f"{Path(input_path).stem}.pdf")
+            
+            # Try LibreOffice first
+            soffice = shutil.which("soffice") or shutil.which("libreoffice")
+            if soffice:
+                try:
+                    subprocess.run(
+                        [
+                            soffice,
+                            "--headless",
+                            "--convert-to",
+                            "pdf",
+                            "--outdir",
+                            out_dir,
+                            input_path,
+                        ],
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=120,
+                    )
+                    if os.path.exists(pdf_out):
+                        logger.debug("Successfully converted DOCX to PDF using LibreOffice")
+                        return pdf_out
+                except Exception as e:
+                    logger.warning(f"LibreOffice (soffice) conversion failed: {e}")
+
+            # Try pandoc as fallback
+            pandoc = shutil.which("pandoc")
+            if pandoc:
+                try:
+                    subprocess.run(
+                        [pandoc, input_path, "-o", pdf_out],
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=120,
+                    )
+                    if os.path.exists(pdf_out):
+                        logger.debug("Successfully converted DOCX to PDF using pandoc")
+                        return pdf_out
+                except Exception as e:
+                    logger.warning(f"pandoc conversion failed: {e}")
+
+            return None
+
+        # Create temporary directory for PDF conversion
+        temp_dir = tempfile.mkdtemp()
         try:
-            with open(resolved_path, "rb") as f:
-                docx_bytes = f.read()
-        except PermissionError as e:
-            raise DocxReadError(f"Permission denied reading '{document_path}'") from e
-        except OSError as e:
-            raise DocxReadError(f"OS error reading '{document_path}': {e}") from e
-
-        if not docx_bytes:
-            raise DocxEmptyFileError(f"DOCX file '{document_path}' is empty")
-
-        # Create FilePart with the DOCX
-        docx_file_part = FilePart(
-            mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            data=docx_bytes,
-        )
-
-        # Create prompt for the AI
-        prompt_text = (
-            "You are a precise document extraction assistant. Extract the content from this Word document "
-            "and return it as structured markdown. For the document:\n\n"
-            "1. Extract all text content preserving the document structure\n"
-            "2. Use markdown formatting (headings, lists, tables, etc.)\n"
-            "3. For tables, use proper markdown table syntax\n"
-            "4. If the document contains images, charts, or diagrams, describe them inline\n"
-            "5. Maintain the original reading order and hierarchy\n\n"
-            "Return the content organized by page number if pages are distinguishable, otherwise as a single section."
-        )
-
-        prompt = TextPart(text=prompt_text)
-
-        try:
-            if self.visual_description_provider is None:
-                raise RuntimeError("Visual description provider must not be None.")
-
-            # Call the provider with the DOCX and structured output schema
-            logger.debug(
-                "Sending DOCX to AI provider for native processing with model: %s",
-                self.model or "default",
-            )
-            response = await self.visual_description_provider.generate_by_prompt_async(
-                prompt=[docx_file_part, prompt],
-                response_schema=PDFPageExtraction,  # Reuse PDF schema as it's generic
-                generation_config=GenerationConfig(
-                    timeout_s=300.0,
-                ),
-                model=self.model,
-            )
-
-            extraction: PDFPageExtraction = response.parsed
-            if not extraction or not extraction.pages:
-                # Extract text content to help debug
-                text_content = None
-                if response.choices and response.choices[0].message.parts:
-                    for part in response.choices[0].message.parts:
-                        if hasattr(part, "text"):
-                            text_content = part.text[:500]  # First 500 chars
-                            break
-
-                error_msg = (
-                    f"No structured extraction returned from provider. "
-                    f"Model: {response.model}, "
-                    f"Parsed: {extraction}, "
-                    f"Text preview: {text_content}"
+            pdf_path = _convert_docx_to_pdf(resolved_path, temp_dir)
+            if not pdf_path:
+                raise DocxProviderError(
+                    "DOCX->PDF conversion failed. Install either 'libreoffice' (soffice) or 'pandoc' "
+                    "to enable native DOCX processing."
                 )
-                raise DocxProviderError(error_msg)
 
-            logger.debug(
-                "AI extracted %d pages from DOCX",
-                extraction.total_pages,
+            # Import PDFFileParser here to avoid circular imports
+            from agentle.parsing.parsers.pdf import PDFFileParser
+
+            # Create PDF parser with native processing enabled
+            pdf_parser = PDFFileParser(
+                visual_description_provider=self.visual_description_provider,
+                model=self.model,
+                use_native_pdf_processing=True,
+                strategy=self.strategy,
             )
 
+            logger.debug("Delegating to PDFFileParser with native processing")
+            
+            # Parse the PDF using native processing
+            parsed = await pdf_parser.parse_async(pdf_path)
+            
+            # Update metadata to reflect DOCX origin
+            if hasattr(parsed, "metadata") and isinstance(parsed.metadata, dict):
+                parsed.metadata["original_format"] = "docx"
+                parsed.metadata["parser"] = "docx"
+                parsed.metadata["conversion_method"] = "docx_to_pdf"
+            
+            # Update the name to reflect original DOCX file
+            parsed.name = Path(resolved_path).name
+            
+            return parsed
+
+        except DocxProviderError:
+            raise
         except Exception as e:
             logger.error(
                 "Native DOCX processing failed: %s. Model used: %s, Provider: %s",
@@ -675,54 +691,14 @@ class DocxFileParser(DocumentParser):
                 if self.visual_description_provider
                 else "None",
             )
-            model_name = self.model or "default"
-            provider_name = (
-                type(self.visual_description_provider).__name__
-                if self.visual_description_provider
-                else "None"
-            )
             raise DocxProviderError(
-                f"Failed to process DOCX with AI provider: {e}. Model: {model_name}, Provider: {provider_name}"
+                f"Failed to process DOCX with AI provider: {e}. "
+                f"Model: {self.model or 'default'}, "
+                f"Provider: {type(self.visual_description_provider).__name__ if self.visual_description_provider else 'None'}"
             ) from e
-
-        # Convert the extraction to ParsedFile format
-        sections: MutableSequence[SectionContent] = []
-
-        for page_content in extraction.pages:
-            # Build the markdown for this page/section
-            page_md_parts = [f"## Page {page_content.page_number}"]
-
-            if page_content.markdown:
-                page_md_parts.append(page_content.markdown)
-
-            # Add image descriptions if present
-            if page_content.has_images and page_content.image_descriptions:
-                page_md_parts.append("\n### Visual Content")
-                for desc in page_content.image_descriptions:
-                    page_md_parts.append(f"- {desc}")
-
-            page_md = "\n\n".join(page_md_parts)
-
-            section = SectionContent(
-                number=page_content.page_number,
-                text=page_md,
-                md=page_md,
-                images=[],  # No raw image data with native processing
-            )
-            sections.append(section)
-
-        parsed = ParsedFile(name=Path(resolved_path).name, sections=sections)
-
-        if hasattr(parsed, "metadata") and isinstance(parsed.metadata, dict):
-            parsed.metadata.update(
-                {
-                    "parser": "docx",
-                    "pages": extraction.total_pages,
-                    "strategy": "native_ai_processing",
-                    "visuals": True,
-                    "processing_mode": "native_ai",
-                    "document_title": extraction.document_title,
-                }
-            )
-
-        return parsed
+        finally:
+            # Clean up temporary directory
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception as e:
+                logger.debug(f"Failed to clean up temporary directory {temp_dir}: {e}")
