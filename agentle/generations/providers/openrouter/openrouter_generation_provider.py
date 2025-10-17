@@ -195,9 +195,6 @@ class OpenRouterGenerationProvider(GenerationProvider):
         """
         return "anthropic/claude-sonnet-4.5"
 
-    @override
-    @observe
-    @override_model_kind
     async def stream_async[T = WithoutStructuredOutput](
         self,
         *,
@@ -337,7 +334,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
                     # Use the streaming adapter to process the response
                     adapter = OpenRouterStreamToGenerationAdapter[WithoutStructuredOutput](
-                        response_schema=None,
+                        response_schema=response_schema,  # Pass schema for dynamic parsing
                         model=model or self.default_model,
                     )
 

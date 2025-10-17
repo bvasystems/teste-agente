@@ -27,6 +27,8 @@ from agentle.generations.providers.openrouter._types import (
     OpenRouterStreamResponse,
     OpenRouterStreamDelta,
 )
+from agentle.utils.parse_streaming_json import parse_streaming_json
+from agentle.utils.make_fields_optional import make_fields_optional
 
 logger = logging.getLogger(__name__)
 
@@ -216,15 +218,27 @@ class OpenRouterStreamToGenerationAdapter[T]:
                 )
             )
 
+        # Parse accumulated content if response_schema is provided
+        parsed_data: Any = None
+        if self.response_schema is not None:
+            try:
+                # Try to parse if it looks like a Pydantic/BaseModel class
+                if hasattr(self.response_schema, 'model_fields'):
+                    # Make fields optional for streaming partial results
+                    optional_model = make_fields_optional(self.response_schema)  # type: ignore
+                    parsed_data = parse_streaming_json(content, model=optional_model)
+            except Exception as e:
+                logger.warning(f"Failed to parse streaming JSON: {e}")
+
         # Create GeneratedAssistantMessage
-        message = GeneratedAssistantMessage[None](
+        message = GeneratedAssistantMessage[Any](
             parts=parts,
-            parsed=None,
+            parsed=parsed_data,
             reasoning=reasoning if reasoning else None,
         )
 
-        # Create Choice
-        choice = Choice[None](
+        # Create Choice with correct type
+        choice = Choice[Any](
             index=0,
             message=message,
         )
@@ -232,7 +246,7 @@ class OpenRouterStreamToGenerationAdapter[T]:
         # Create Generation
         # Note: Usage is not available during streaming, so we don't set it
         from agentle.generations.models.generation.usage import Usage
-        return Generation[None](
+        return Generation[Any](
             id=uuid.uuid4(),
             choices=[choice],
             object="chat.generation",
