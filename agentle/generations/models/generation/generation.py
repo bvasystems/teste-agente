@@ -421,6 +421,36 @@ class Generation[T](BaseModel):
         """
         return "".join([choice.message.text for choice in self.choices])
 
+    def update_text(self, new_text: str, choice: int = 0) -> None:
+        """
+        Update the text content of a specific choice by replacing text parts.
+
+        This method replaces all TextPart instances in the specified choice's
+        message parts with a single new TextPart containing the provided text.
+        Tool execution suggestions are preserved.
+
+        Args:
+            new_text: The new text content to set
+            choice: The index of the choice to update (default: 0)
+        """
+        if choice >= len(self.choices):
+            raise ValueError(
+                f"Choice index {choice} is out of range. Only {len(self.choices)} choices available."
+            )
+
+        # Get the current message parts
+        current_parts = self.choices[choice].message.parts
+
+        # Filter out all TextPart instances, keep only ToolExecutionSuggestion
+        tool_calls = [
+            part for part in current_parts if isinstance(part, ToolExecutionSuggestion)
+        ]
+
+        # Clear the parts list and add the new text part followed by tool calls
+        current_parts.clear()
+        current_parts.append(TextPart(text=new_text))
+        current_parts.extend(tool_calls)
+
     def get_parsed(self, choice: int) -> T:
         """
         Get the parsed structured data from a specific choice.

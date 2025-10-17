@@ -33,6 +33,7 @@ class DocumentMessage(BaseModel):
     directPath: str | None = Field(default=None)
     mediaKeyTimestamp: str | dict[str, Any] | None = Field(default=None)
     contactVcard: bool | None = Field(default=None)
+    caption: str | None = Field(default=None)
 
     @field_validator(
         "fileLength",

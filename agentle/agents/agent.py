@@ -1810,7 +1810,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                             )
                             # Update generation text if modified by guardrails
                             if validated_text != final_generation.text:
-                                final_generation.text = validated_text
+                                final_generation.update_text(validated_text)
 
                         # Save to conversation store after successful execution
                         if chat_id:
@@ -1927,7 +1927,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 )
                 # Update generation text if modified by guardrails
                 if validated_text != generation.text:
-                    generation.text = validated_text
+                    generation.update_text(validated_text)
 
             # Save to conversation store after successful execution
             if chat_id:
@@ -2206,7 +2206,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                                     )
                                     # Update generation text if modified by guardrails
                                     if validated_text != final_generation.text:
-                                        final_generation.text = validated_text
+                                        final_generation.update_text(validated_text)
 
                                 # Calculate final metrics
                                 total_execution_time = (
@@ -2314,7 +2314,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                             )
                             # Update generation text if modified by guardrails
                             if validated_text != final_tool_generation.text:
-                                final_tool_generation.text = validated_text
+                                final_tool_generation.update_text(validated_text)
 
                         # Calculate final metrics
                         total_execution_time = (
@@ -4443,7 +4443,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     )
                     # Update generation text if modified by guardrails
                     if validated_text != generation.text:
-                        generation.text = validated_text
+                        generation.update_text(validated_text)
 
                 final_step.mark_completed()
                 context.add_step(final_step)
