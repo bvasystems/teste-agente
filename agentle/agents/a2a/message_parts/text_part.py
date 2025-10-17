@@ -13,6 +13,7 @@ from typing import Literal
 from rsb.models.base_model import BaseModel
 from rsb.models.field import Field
 
+from agentle.agents.a2a.message_parts.cache_control_type import CacheControlType
 from agentle.prompts.models.prompt import Prompt
 
 
@@ -52,3 +53,6 @@ class TextPart(BaseModel):
 
     text: str | Prompt
     """The text content of the message part"""
+
+    cache_control: CacheControlType | None = Field(default=None)
+    """The cache control type of the message part"""

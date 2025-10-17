@@ -38,6 +38,11 @@ class AssistantMessage(BaseModel):
         description="The sequence of message parts that make up this assistant message.",
     )
 
+    reasoning: str | None = Field(
+        default=None,
+        description="The reasoning behind the assistant's message.",
+    )
+
     def append_part(
         self,
         parts: TextPart
@@ -82,5 +87,6 @@ class AssistantMessage(BaseModel):
                     ),
                     self.parts,
                 )
-            )
+            ),
+            reasoning=self.reasoning
         )
