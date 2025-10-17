@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.8.63
+## v0.8.64
 
-- feat(ui) native DOCX processing in docx.py
+- feat(parsers): add use_native_docx_processing to constructor and propagate that
