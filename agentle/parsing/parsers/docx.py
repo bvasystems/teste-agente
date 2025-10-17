@@ -16,17 +16,11 @@ import uuid
 import zipfile
 from pathlib import Path
 from typing import Literal, Any
-from collections.abc import MutableSequence
 
 from rsb.models.field import Field
 
 
-from agentle.generations.models.generation.generation_config import GenerationConfig
 from agentle.generations.models.message_parts.file import FilePart
-from agentle.generations.models.message_parts.text import TextPart
-from agentle.generations.models.structured_outputs_store.pdf_page_extraction import (
-    PDFPageExtraction,
-)
 from agentle.generations.models.structured_outputs_store.visual_media_description import (
     VisualMediaDescription,
 )
@@ -566,7 +560,9 @@ class DocxFileParser(DocumentParser):
                 except Exception:
                     pass
 
-    async def _parse_with_native_docx_processing(self, document_path: str) -> ParsedFile:
+    async def _parse_with_native_docx_processing(
+        self, document_path: str
+    ) -> ParsedFile:
         """Parse DOCX using native AI provider processing via PDF conversion.
 
         This method converts the DOCX to PDF and then delegates to PDFFileParser
@@ -592,13 +588,16 @@ class DocxFileParser(DocumentParser):
             raise DocxFileValidationError(str(e)) from e
 
         display_path = Path(resolved_path).name
-        logger.debug("Parsing DOCX with native AI processing (via PDF conversion): %s", display_path)
+        logger.debug(
+            "Parsing DOCX with native AI processing (via PDF conversion): %s",
+            display_path,
+        )
 
         # Convert DOCX to PDF
         def _convert_docx_to_pdf(input_path: str, out_dir: str) -> str | None:
             """Convert DOCX to PDF using LibreOffice or pandoc."""
             pdf_out = os.path.join(out_dir, f"{Path(input_path).stem}.pdf")
-            
+
             # Try LibreOffice first
             soffice = shutil.which("soffice") or shutil.which("libreoffice")
             if soffice:
@@ -619,7 +618,9 @@ class DocxFileParser(DocumentParser):
                         timeout=120,
                     )
                     if os.path.exists(pdf_out):
-                        logger.debug("Successfully converted DOCX to PDF using LibreOffice")
+                        logger.debug(
+                            "Successfully converted DOCX to PDF using LibreOffice"
+                        )
                         return pdf_out
                 except Exception as e:
                     logger.warning(f"LibreOffice (soffice) conversion failed: {e}")
@@ -650,7 +651,7 @@ class DocxFileParser(DocumentParser):
             if not pdf_path:
                 raise DocxProviderError(
                     "DOCX->PDF conversion failed. Install either 'libreoffice' (soffice) or 'pandoc' "
-                    "to enable native DOCX processing."
+                    + "to enable native DOCX processing."
                 )
 
             # Import PDFFileParser here to avoid circular imports
@@ -665,19 +666,19 @@ class DocxFileParser(DocumentParser):
             )
 
             logger.debug("Delegating to PDFFileParser with native processing")
-            
+
             # Parse the PDF using native processing
             parsed = await pdf_parser.parse_async(pdf_path)
-            
+
             # Update metadata to reflect DOCX origin
             if hasattr(parsed, "metadata") and isinstance(parsed.metadata, dict):
                 parsed.metadata["original_format"] = "docx"
                 parsed.metadata["parser"] = "docx"
                 parsed.metadata["conversion_method"] = "docx_to_pdf"
-            
+
             # Update the name to reflect original DOCX file
             parsed.name = Path(resolved_path).name
-            
+
             return parsed
 
         except DocxProviderError:
@@ -693,8 +694,8 @@ class DocxFileParser(DocumentParser):
             )
             raise DocxProviderError(
                 f"Failed to process DOCX with AI provider: {e}. "
-                f"Model: {self.model or 'default'}, "
-                f"Provider: {type(self.visual_description_provider).__name__ if self.visual_description_provider else 'None'}"
+                + f"Model: {self.model or 'default'}, "
+                + f"Provider: {type(self.visual_description_provider).__name__ if self.visual_description_provider else 'None'}"
             ) from e
         finally:
             # Clean up temporary directory
