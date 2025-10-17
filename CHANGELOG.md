@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.8.62
+## v0.8.63
 
-- fix(agent) ensure assistant message with tool calls is added to context before processing tools
+- feat(ui) native DOCX processing in docx.py
