@@ -41,7 +41,7 @@ class ImageMessage(BaseModel):
     mediaKeyTimestamp: str | dict[str, Any] | None = Field(default=None)
     jpegThumbnail: str | dict[str, Any] | None = Field(default=None)
     contextInfo: dict[str, Any] | None = Field(default=None)
-    firstScanSidecar: str | None = Field(default=None)
+    firstScanSidecar: str | dict[str, Any] | None = Field(default=None)
     firstScanLength: int | None = Field(default=None)
     scansSidecar: str | dict[str, Any] | None = Field(default=None)
     scanLengths: list[int] | None = Field(default=None)
@@ -74,6 +74,7 @@ class ImageMessage(BaseModel):
         "mediaKey",
         "fileEncSha256",
         "jpegThumbnail",
+        "firstScanSidecar",
         "scansSidecar",
         "midQualityFileSha256",
         mode="before",
