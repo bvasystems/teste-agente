@@ -22,6 +22,10 @@ class WhatsAppMessage(BaseModel):
     group_id: str | None = None
     quoted_message_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    remote_jid: str | None = Field(
+        default=None,
+        description="Actual WhatsApp JID for sending messages (critical for @lid numbers)"
+    )
 
     @override
     def model_post_init(self, context: Any, /) -> None:

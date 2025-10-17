@@ -749,8 +749,19 @@ class EvolutionAPIProvider(WhatsAppProvider):
             logger.debug(f"Message is quoting message ID: {quoted_message_id}")
 
         try:
-            normalized_to = self._normalize_phone(to)
-            logger.debug(f"Normalized phone number: {to} -> {normalized_to}")
+            # CRITICAL FIX: Check if there's a stored remoteJid for this contact
+            # This is essential for @lid numbers (Brazilian WhatsApp contacts)
+            session = await self.get_session(to)
+            remote_jid = session.context_data.get("remote_jid") if session else None
+            
+            if remote_jid:
+                logger.info(
+                    f"🔑 Using stored remoteJid for {to}: {remote_jid}"
+                )
+                normalized_to = remote_jid
+            else:
+                normalized_to = self._normalize_phone(to)
+                logger.debug(f"Normalized phone number: {to} -> {normalized_to}")
 
             payload: Mapping[str, Any] = {
                 "number": normalized_to,
@@ -943,7 +954,19 @@ class EvolutionAPIProvider(WhatsAppProvider):
         logger.debug(f"Sending typing indicator to {to} for {duration}s")
 
         try:
-            normalized_to = self._normalize_phone(to)
+            # CRITICAL FIX: Check if there's a stored remoteJid for this contact
+            # This is essential for @lid numbers (Brazilian WhatsApp contacts)
+            session = await self.get_session(to)
+            remote_jid = session.context_data.get("remote_jid") if session else None
+            
+            if remote_jid:
+                logger.debug(
+                    f"🔑 Using stored remoteJid for typing indicator to {to}: {remote_jid}"
+                )
+                normalized_to = remote_jid
+            else:
+                normalized_to = self._normalize_phone(to)
+            
             payload = {
                 "number": normalized_to,
                 "presence": "composing",

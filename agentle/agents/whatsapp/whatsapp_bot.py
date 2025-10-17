@@ -282,6 +282,13 @@ class WhatsAppBot(BaseModel):
                 logger.info(
                     f"[MESSAGE_HANDLER] Stored custom chat_id in session: {chat_id}"
                 )
+            
+            # CRITICAL FIX: Store remoteJid for @lid numbers
+            if message.remote_jid:
+                session.context_data["remote_jid"] = message.remote_jid
+                logger.info(
+                    f"[MESSAGE_HANDLER] 🔑 Stored remote_jid in session: {message.remote_jid} for phone: {message.from_number}"
+                )
 
             logger.info(
                 f"[SESSION_STATE] Session for {message.from_number}: is_processing={session.is_processing}, pending_messages={len(session.pending_messages)}, message_count={session.message_count}"
@@ -2589,6 +2596,15 @@ class WhatsAppBot(BaseModel):
                 logger.info(
                     f"[MESSAGE_UPSERT] ✅ Parsed message: {message.id} from {message.from_number}"
                 )
+                
+                # CRITICAL FIX: Store the actual remoteJid for @lid numbers
+                # This is needed to send messages back to the correct WhatsApp JID
+                if "@lid" in payload.data.key.remoteJid:
+                    logger.info(
+                        f"[MESSAGE_UPSERT] 🔑 Detected @lid number. Storing remoteJid: {payload.data.key.remoteJid} for phone: {message.from_number}"
+                    )
+                    message.remote_jid = payload.data.key.remoteJid
+                
                 logger.info(
                     f"[MESSAGE_UPSERT] About to call handle_message with {len(self._response_callbacks)} callbacks"
                 )
