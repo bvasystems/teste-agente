@@ -287,7 +287,7 @@ class OpenRouterStreamResponse(TypedDict):
 
 class OpenRouterRequest(TypedDict, total=False):
     """Complete request structure for OpenRouter API.
-    
+
     Note: Either 'model' (single) OR 'models' (multiple with fallbacks) must be provided.
     - Use 'model' for a single model: {"model": "openai/gpt-4o"}
     - Use 'models' for fallback routing: {"models": ["openai/gpt-4o", "anthropic/claude-3.5-sonnet"]}
@@ -296,10 +296,10 @@ class OpenRouterRequest(TypedDict, total=False):
     # Model selection (one of these is required)
     model: str  # Single model
     models: Sequence[str]  # Multiple models with fallback routing
-    
+
     # Required fields
     messages: Required[Sequence[OpenRouterMessage]]
-    
+
     # Optional parameters
     temperature: float
     max_tokens: int

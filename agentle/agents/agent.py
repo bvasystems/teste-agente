@@ -1516,9 +1516,9 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     )
 
             if knowledge_contents:
-                static_knowledge_prompt = "\n\n# KNOWLEDGE BASE\n\n" + "\n\n".join(
+                static_knowledge_prompt = "\n\n<knowledge_base>\n\n" + "\n\n".join(
                     knowledge_contents
-                )
+                ) + "\n\n</knowledge_base>"
 
         static_knowledge_time = (time.perf_counter() - static_knowledge_start) * 1000
 

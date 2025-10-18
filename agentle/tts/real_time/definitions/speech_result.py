@@ -1,4 +1,3 @@
-
 from rsb.models.base_model import BaseModel
 
 from agentle.tts.real_time.definitions.audio_data import AudioData

@@ -51,18 +51,28 @@ class InvalidPromptError(OpenRouterBadRequestError):
             "  • Check for JSON syntax errors\n"
             "  • Verify that all field types match the API requirements"
         )
-        super().__init__(message, status_code=400, error_code="invalid_prompt", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=400,
+            error_code="invalid_prompt",
+            response_body=response_body,
+        )
 
 
 class ContextLengthExceededError(OpenRouterBadRequestError):
     """The input exceeds the model's maximum context window."""
 
-    def __init__(self, max_tokens: int | None = None, requested_tokens: int | None = None, response_body: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        max_tokens: int | None = None,
+        requested_tokens: int | None = None,
+        response_body: dict[str, Any] | None = None,
+    ):
         if max_tokens and requested_tokens:
             token_info = f"Model supports {max_tokens:,} tokens, but you requested {requested_tokens:,} tokens."
         else:
             token_info = "The input exceeds the model's maximum context length."
-        
+
         message = (
             f"❌ Context Length Exceeded\n\n"
             f"{token_info}\n\n"
@@ -78,15 +88,26 @@ class ContextLengthExceededError(OpenRouterBadRequestError):
             "  • Use a model with a larger context window\n"
             "  • Compress or reduce the size of file contents and images"
         )
-        super().__init__(message, status_code=400, error_code="context_length_exceeded", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=400,
+            error_code="context_length_exceeded",
+            response_body=response_body,
+        )
 
 
 class ProviderInvalidRequestError(OpenRouterBadRequestError):
     """The upstream provider rejected the request as malformed."""
 
-    def __init__(self, provider_message: str | None = None, response_body: dict[str, Any] | None = None):
-        provider_info = f"\n\nProvider Error: {provider_message}" if provider_message else ""
-        
+    def __init__(
+        self,
+        provider_message: str | None = None,
+        response_body: dict[str, Any] | None = None,
+    ):
+        provider_info = (
+            f"\n\nProvider Error: {provider_message}" if provider_message else ""
+        )
+
         message = (
             f"❌ Provider Rejected Request{provider_info}\n\n"
             "OpenRouter forwarded your request, but the upstream provider rejected it as malformed.\n\n"
@@ -102,7 +123,12 @@ class ProviderInvalidRequestError(OpenRouterBadRequestError):
             "  • Check provider-specific documentation for parameter requirements\n"
             "  • Try a different model/provider to isolate the issue"
         )
-        super().__init__(message, status_code=400, error_code="provider_invalid_request", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=400,
+            error_code="provider_invalid_request",
+            response_body=response_body,
+        )
 
 
 # ==================== 401 Unauthorized ====================
@@ -128,7 +154,12 @@ class InvalidCredentialsError(OpenRouterError):
             "  • Generate a new API key if the current one is invalid\n"
             "  • Verify the OPENROUTER_API_KEY environment variable is set correctly"
         )
-        super().__init__(message, status_code=401, error_code="invalid_credentials", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=401,
+            error_code="invalid_credentials",
+            response_body=response_body,
+        )
 
 
 # ==================== 402 Payment Required ====================
@@ -137,9 +168,15 @@ class InvalidCredentialsError(OpenRouterError):
 class InsufficientCreditsError(OpenRouterError):
     """The account has insufficient credits to process the request."""
 
-    def __init__(self, required_credits: float | None = None, response_body: dict[str, Any] | None = None):
-        credit_info = f"\n\nRequired credits: ${required_credits:.6f}" if required_credits else ""
-        
+    def __init__(
+        self,
+        required_credits: float | None = None,
+        response_body: dict[str, Any] | None = None,
+    ):
+        credit_info = (
+            f"\n\nRequired credits: ${required_credits:.6f}" if required_credits else ""
+        )
+
         message = (
             f"❌ Insufficient Credits{credit_info}\n\n"
             "The cost of processing this request exceeds the available credits in your account.\n\n"
@@ -154,7 +191,12 @@ class InsufficientCreditsError(OpenRouterError):
             "  • Reduce the size of your requests to lower costs\n"
             "  • Use models with lower per-token pricing"
         )
-        super().__init__(message, status_code=402, error_code="insufficient_credits", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=402,
+            error_code="insufficient_credits",
+            response_body=response_body,
+        )
 
 
 # ==================== 403 Forbidden ====================
@@ -163,9 +205,15 @@ class InsufficientCreditsError(OpenRouterError):
 class ModerationError(OpenRouterError):
     """The input was flagged by moderation as violating safety policies."""
 
-    def __init__(self, moderation_reason: str | None = None, response_body: dict[str, Any] | None = None):
-        reason_info = f"\n\nModeration Reason: {moderation_reason}" if moderation_reason else ""
-        
+    def __init__(
+        self,
+        moderation_reason: str | None = None,
+        response_body: dict[str, Any] | None = None,
+    ):
+        reason_info = (
+            f"\n\nModeration Reason: {moderation_reason}" if moderation_reason else ""
+        )
+
         message = (
             f"❌ Content Moderation Violation{reason_info}\n\n"
             "Your input was flagged by the moderation service as potentially violating safety policies.\n\n"
@@ -180,7 +228,12 @@ class ModerationError(OpenRouterError):
             "  • Implement user-facing messaging explaining content restrictions\n"
             "  • Consider using a different model with different moderation policies"
         )
-        super().__init__(message, status_code=403, error_code="moderation_violation", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=403,
+            error_code="moderation_violation",
+            response_body=response_body,
+        )
 
 
 # ==================== 404 Not Found Errors ====================
@@ -195,9 +248,11 @@ class OpenRouterNotFoundError(OpenRouterError):
 class ModelNotFoundError(OpenRouterNotFoundError):
     """The specified model ID does not exist, is deprecated, or is misspelled."""
 
-    def __init__(self, model_id: str | None = None, response_body: dict[str, Any] | None = None):
+    def __init__(
+        self, model_id: str | None = None, response_body: dict[str, Any] | None = None
+    ):
         model_info = f" '{model_id}'" if model_id else ""
-        
+
         message = (
             f"❌ Model Not Found{model_info}\n\n"
             "The specified model ID does not exist, has been deprecated, or is misspelled.\n\n"
@@ -212,7 +267,12 @@ class ModelNotFoundError(OpenRouterNotFoundError):
             "  • Use the model search API to find available models\n"
             "  • Review OpenRouter's model deprecation announcements"
         )
-        super().__init__(message, status_code=404, error_code="model_not_found", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=404,
+            error_code="model_not_found",
+            response_body=response_body,
+        )
 
 
 class DataPolicyMismatchError(OpenRouterNotFoundError):
@@ -233,7 +293,12 @@ class DataPolicyMismatchError(OpenRouterNotFoundError):
             "  • Choose a different model with compatible privacy requirements\n"
             "  • Review the model's data policy on its details page"
         )
-        super().__init__(message, status_code=404, error_code="data_policy_mismatch", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=404,
+            error_code="data_policy_mismatch",
+            response_body=response_body,
+        )
 
 
 class NoAllowedProvidersError(OpenRouterNotFoundError):
@@ -254,7 +319,12 @@ class NoAllowedProvidersError(OpenRouterNotFoundError):
             "  • Check which providers serve your desired model on its details page\n"
             "  • Use a different model that's available through your allowed providers"
         )
-        super().__init__(message, status_code=404, error_code="no_allowed_providers", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=404,
+            error_code="no_allowed_providers",
+            response_body=response_body,
+        )
 
 
 # ==================== 408 Request Timeout ====================
@@ -280,7 +350,12 @@ class RequestTimeoutError(OpenRouterError):
             "  • Reduce request complexity or size\n"
             "  • Check OpenRouter status page for ongoing issues"
         )
-        super().__init__(message, status_code=408, error_code="request_timeout", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=408,
+            error_code="request_timeout",
+            response_body=response_body,
+        )
 
 
 # ==================== 413 Payload Too Large ====================
@@ -305,7 +380,12 @@ class PayloadTooLargeError(OpenRouterError):
             "  • Split large requests into smaller chunks\n"
             "  • Remove unnecessary metadata or verbose tool outputs"
         )
-        super().__init__(message, status_code=413, error_code="payload_too_large", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=413,
+            error_code="payload_too_large",
+            response_body=response_body,
+        )
 
 
 # ==================== 429 Rate Limit Errors ====================
@@ -320,9 +400,15 @@ class RateLimitError(OpenRouterError):
 class DailyRateLimitExceededError(RateLimitError):
     """The account has exceeded its daily request limit for free models."""
 
-    def __init__(self, reset_time: str | None = None, response_body: dict[str, Any] | None = None):
-        reset_info = f"\n\nRate limit resets at: {reset_time}" if reset_time else "\n\nRate limit typically resets at 12:00 AM UTC"
-        
+    def __init__(
+        self, reset_time: str | None = None, response_body: dict[str, Any] | None = None
+    ):
+        reset_info = (
+            f"\n\nRate limit resets at: {reset_time}"
+            if reset_time
+            else "\n\nRate limit typically resets at 12:00 AM UTC"
+        )
+
         message = (
             f"❌ Daily Rate Limit Exceeded{reset_info}\n\n"
             "Your account has exceeded its daily request limit for free models.\n\n"
@@ -337,15 +423,22 @@ class DailyRateLimitExceededError(RateLimitError):
             "  • Implement request queuing to stay within limits\n"
             "  • Cache responses to reduce redundant requests"
         )
-        super().__init__(message, status_code=429, error_code="rate_limit_exceeded", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=429,
+            error_code="rate_limit_exceeded",
+            response_body=response_body,
+        )
 
 
 class UpstreamRateLimitError(RateLimitError):
     """The model is experiencing high demand at the source provider."""
 
-    def __init__(self, model_id: str | None = None, response_body: dict[str, Any] | None = None):
+    def __init__(
+        self, model_id: str | None = None, response_body: dict[str, Any] | None = None
+    ):
         model_info = f" for {model_id}" if model_id else ""
-        
+
         message = (
             f"❌ Upstream Rate Limit{model_info}\n\n"
             "The model is experiencing high demand at the source provider.\n\n"
@@ -360,7 +453,12 @@ class UpstreamRateLimitError(RateLimitError):
             "  • Check model uptime statistics on OpenRouter\n"
             "  • Consider adding a dedicated provider API key via OpenRouter integrations"
         )
-        super().__init__(message, status_code=429, error_code="upstream_rate_limit", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=429,
+            error_code="upstream_rate_limit",
+            response_body=response_body,
+        )
 
 
 # ==================== 500 Internal Server Error ====================
@@ -384,7 +482,12 @@ class InternalServerError(OpenRouterError):
             "  • Join OpenRouter Discord for real-time updates\n"
             "  • If persistent, report the issue to OpenRouter support"
         )
-        super().__init__(message, status_code=500, error_code="server_error", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=500,
+            error_code="server_error",
+            response_body=response_body,
+        )
 
 
 # ==================== 502 Bad Gateway ====================
@@ -393,9 +496,15 @@ class InternalServerError(OpenRouterError):
 class ProviderError(OpenRouterError):
     """The upstream provider responded with an error or invalid response."""
 
-    def __init__(self, provider_message: str | None = None, response_body: dict[str, Any] | None = None):
-        provider_info = f"\n\nProvider Error: {provider_message}" if provider_message else ""
-        
+    def __init__(
+        self,
+        provider_message: str | None = None,
+        response_body: dict[str, Any] | None = None,
+    ):
+        provider_info = (
+            f"\n\nProvider Error: {provider_message}" if provider_message else ""
+        )
+
         message = (
             f"❌ Provider Error{provider_info}\n\n"
             "OpenRouter sent the request to the provider, but the provider responded with an error.\n\n"
@@ -412,7 +521,12 @@ class ProviderError(OpenRouterError):
             "  • Implement exponential backoff retry strategy\n"
             "  • Check provider status pages for known outages"
         )
-        super().__init__(message, status_code=502, error_code="provider_error", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=502,
+            error_code="provider_error",
+            response_body=response_body,
+        )
 
 
 # ==================== 503 Service Unavailable ====================
@@ -421,9 +535,11 @@ class ProviderError(OpenRouterError):
 class NoProvidersAvailableError(OpenRouterError):
     """All providers for the requested model are currently unavailable."""
 
-    def __init__(self, model_id: str | None = None, response_body: dict[str, Any] | None = None):
+    def __init__(
+        self, model_id: str | None = None, response_body: dict[str, Any] | None = None
+    ):
         model_info = f" for {model_id}" if model_id else ""
-        
+
         message = (
             f"❌ No Providers Available{model_info}\n\n"
             "All potential providers for this model are currently down or unavailable.\n\n"
@@ -439,4 +555,9 @@ class NoProvidersAvailableError(OpenRouterError):
             "  • Use OpenRouter's fallback models feature\n"
             "  • Monitor OpenRouter Discord for service updates"
         )
-        super().__init__(message, status_code=503, error_code="no_providers_available", response_body=response_body)
+        super().__init__(
+            message,
+            status_code=503,
+            error_code="no_providers_available",
+            response_body=response_body,
+        )

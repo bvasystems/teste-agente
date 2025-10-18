@@ -34,7 +34,9 @@ if TYPE_CHECKING:
         GenerateContentResponse,
         GenerateContentResponseUsageMetadata,
     )
-    from agentle.generations.providers.google.google_generation_provider import GoogleGenerationProvider
+    from agentle.generations.providers.google.google_generation_provider import (
+        GoogleGenerationProvider,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +109,7 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
             )
         else:
             return self._adapt_single(cast("GenerateContentResponse", _f))
-    
+
     async def adapt_async(self, _f: "GenerateContentResponse") -> Generation[T]:
         """
         Convert Google response to Agentle Generation object asynchronously with pricing.
@@ -145,8 +147,10 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
             choices=choices,
             usage=usage,
         )
-    
-    async def _adapt_single_async(self, response: "GenerateContentResponse") -> Generation[T]:
+
+    async def _adapt_single_async(
+        self, response: "GenerateContentResponse"
+    ) -> Generation[T]:
         """Adapt a single response (non-streaming) asynchronously with pricing."""
         from google.genai import types
 
@@ -162,7 +166,7 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
         )
 
         usage = self._extract_usage(response.usage_metadata)
-        
+
         # Calculate pricing if provider is available
         pricing = Pricing()
         if self.provider is not None:
@@ -171,25 +175,29 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
             try:
                 input_tokens = usage.prompt_tokens
                 output_tokens = usage.completion_tokens
-                
+
                 if input_tokens > 0 or output_tokens > 0:
-                    input_price_per_million = await provider.price_per_million_tokens_input(
-                        model, input_tokens
+                    input_price_per_million = (
+                        await provider.price_per_million_tokens_input(
+                            model, input_tokens
+                        )
                     )
-                    output_price_per_million = await provider.price_per_million_tokens_output(
-                        model, output_tokens
+                    output_price_per_million = (
+                        await provider.price_per_million_tokens_output(
+                            model, output_tokens
+                        )
                     )
-                    
+
                     input_cost = input_price_per_million * (input_tokens / 1_000_000)
                     output_cost = output_price_per_million * (output_tokens / 1_000_000)
                     total_cost = input_cost + output_cost
-                    
+
                     pricing = Pricing(
                         input_pricing=round(input_cost, 8),
                         output_pricing=round(output_cost, 8),
                         total_pricing=round(total_cost, 8),
                     )
-                    
+
             except Exception as e:
                 logger.warning(f"Failed to calculate pricing: {e}")
                 pricing = Pricing()

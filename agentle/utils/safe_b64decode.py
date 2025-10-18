@@ -13,19 +13,19 @@ from agentle.utils.fix_base64_padding import fix_base64_padding
 def safe_b64decode(data: str) -> bytes:
     """
     Safely decode base64 data with automatic padding fix.
-    
+
     This function attempts to decode base64 data, and if it fails due to
     padding issues, it will automatically fix the padding and try again.
-    
+
     Args:
         data: Base64 encoded string to decode
-        
+
     Returns:
         Decoded bytes
-        
+
     Raises:
         ValueError: If the data cannot be decoded even after padding fix
-        
+
     Example:
         >>> safe_b64decode("SGVsbG8gV29ybGQ")
         b'Hello World'

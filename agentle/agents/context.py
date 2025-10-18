@@ -168,18 +168,18 @@ class Context(BaseModel):
             developer_messages = [
                 m for m in self.message_history if isinstance(m, DeveloperMessage)
             ]
-            
+
             # Extract non-developer messages from the new history (conversation history)
             non_developer_new_messages = [
                 m for m in new_history if not isinstance(m, DeveloperMessage)
             ]
-            
+
             # Combine: developer messages first (instructions), then conversation history
             self.message_history = developer_messages + non_developer_new_messages
         else:
             # Simple replacement without preservation
             self.message_history = list(new_history)
-        
+
         self.execution_state.last_updated_at = datetime.now()
 
     @property

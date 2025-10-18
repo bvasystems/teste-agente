@@ -27,7 +27,7 @@ class ChatCompletionToGenerationAdapter[T](
 ):
     provider: "OpenaiGenerationProvider | None"
     model: str | None
-    
+
     def __init__(
         self,
         *,
@@ -35,14 +35,14 @@ class ChatCompletionToGenerationAdapter[T](
         model: str | None = None,
     ):
         """Initialize the adapter.
-        
+
         Args:
             provider: Optional provider instance for pricing calculation.
             model: Optional model identifier for pricing calculation.
         """
         self.provider = provider
         self.model = model
-    
+
     def adapt(self, _f: ChatCompletion | ParsedChatCompletion[T]) -> Generation[T]:
         from openai.types.completion_usage import CompletionUsage
 
@@ -64,13 +64,15 @@ class ChatCompletionToGenerationAdapter[T](
                 completion_tokens=usage.completion_tokens,
             ),
         )
-    
-    async def adapt_async(self, _f: ChatCompletion | ParsedChatCompletion[T]) -> Generation[T]:
+
+    async def adapt_async(
+        self, _f: ChatCompletion | ParsedChatCompletion[T]
+    ) -> Generation[T]:
         """Convert OpenAI completion to Generation asynchronously with pricing.
-        
+
         Args:
             _f: The OpenAI completion to convert.
-            
+
         Returns:
             Generation object with normalized data and pricing information.
         """
@@ -82,7 +84,7 @@ class ChatCompletionToGenerationAdapter[T](
         usage = completion.usage or CompletionUsage(
             completion_tokens=0, prompt_tokens=0, total_tokens=0
         )
-        
+
         # Calculate pricing if provider and model are available
         pricing = Pricing()
         if self.provider is not None and self.model is not None:
@@ -91,25 +93,29 @@ class ChatCompletionToGenerationAdapter[T](
             try:
                 input_tokens = usage.prompt_tokens
                 output_tokens = usage.completion_tokens
-                
+
                 if input_tokens > 0 or output_tokens > 0:
-                    input_price_per_million = await provider.price_per_million_tokens_input(
-                        model, input_tokens
+                    input_price_per_million = (
+                        await provider.price_per_million_tokens_input(
+                            model, input_tokens
+                        )
                     )
-                    output_price_per_million = await provider.price_per_million_tokens_output(
-                        model, output_tokens
+                    output_price_per_million = (
+                        await provider.price_per_million_tokens_output(
+                            model, output_tokens
+                        )
                     )
-                    
+
                     input_cost = input_price_per_million * (input_tokens / 1_000_000)
                     output_cost = output_price_per_million * (output_tokens / 1_000_000)
                     total_cost = input_cost + output_cost
-                    
+
                     pricing = Pricing(
                         input_pricing=round(input_cost, 8),
                         output_pricing=round(output_cost, 8),
                         total_pricing=round(total_cost, 8),
                     )
-                    
+
             except Exception as e:
                 logger.warning(f"Failed to calculate pricing: {e}")
                 pricing = Pricing()

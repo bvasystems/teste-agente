@@ -457,7 +457,7 @@ class GoogleGenerationProvider(GenerationProvider):
             model=used_model,
             provider=self,
         )
-        
+
         # Use async adapter if not streaming
         if hasattr(generate_content_response, "__aiter__"):
             response = adapter.adapt(generate_content_response)

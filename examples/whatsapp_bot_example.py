@@ -72,7 +72,7 @@ def create_bot() -> Application:
     whatsapp_bot.start()
     # Send a test message to the correct number
     # run_sync(whatsapp_bot.send_message(
-    #     to="553491107754", 
+    #     to="553491107754",
     #     message="Testando"
     # ))
     # exit()

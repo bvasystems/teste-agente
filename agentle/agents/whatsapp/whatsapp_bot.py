@@ -282,7 +282,7 @@ class WhatsAppBot(BaseModel):
                 logger.info(
                     f"[MESSAGE_HANDLER] Stored custom chat_id in session: {chat_id}"
                 )
-            
+
             # CRITICAL FIX: Store remoteJid for @lid numbers
             if message.remote_jid:
                 session.context_data["remote_jid"] = message.remote_jid
@@ -2596,7 +2596,7 @@ class WhatsAppBot(BaseModel):
                 logger.info(
                     f"[MESSAGE_UPSERT] ✅ Parsed message: {message.id} from {message.from_number}"
                 )
-                
+
                 # CRITICAL FIX: Store the actual remoteJid for @lid numbers
                 # This is needed to send messages back to the correct WhatsApp JID
                 if "@lid" in payload.data.key.remoteJid:
@@ -2604,7 +2604,7 @@ class WhatsAppBot(BaseModel):
                         f"[MESSAGE_UPSERT] 🔑 Detected @lid number. Storing remoteJid: {payload.data.key.remoteJid} for phone: {message.from_number}"
                     )
                     message.remote_jid = payload.data.key.remoteJid
-                
+
                 logger.info(
                     f"[MESSAGE_UPSERT] About to call handle_message with {len(self._response_callbacks)} callbacks"
                 )
@@ -2759,8 +2759,12 @@ class WhatsAppBot(BaseModel):
                             (data.messageTimestamp or 0) / 1000
                         ),
                         media_url=image_msg.url if image_msg else "",
-                        media_mime_type=image_msg.mimetype if image_msg and image_msg.mimetype else "image/jpeg",
-                        caption=image_msg.caption if image_msg and image_msg.caption else "",
+                        media_mime_type=image_msg.mimetype
+                        if image_msg and image_msg.mimetype
+                        else "image/jpeg",
+                        caption=image_msg.caption
+                        if image_msg and image_msg.caption
+                        else "",
                     )
 
                 # Handle document messages
@@ -2776,8 +2780,12 @@ class WhatsAppBot(BaseModel):
                             (data.messageTimestamp or 0) / 1000
                         ),
                         media_url=doc_msg.url if doc_msg else "",
-                        media_mime_type=doc_msg.mimetype if doc_msg and doc_msg.mimetype else "application/octet-stream",
-                        filename=doc_msg.fileName if doc_msg and doc_msg.fileName else "",
+                        media_mime_type=doc_msg.mimetype
+                        if doc_msg and doc_msg.mimetype
+                        else "application/octet-stream",
+                        filename=doc_msg.fileName
+                        if doc_msg and doc_msg.fileName
+                        else "",
                         caption=doc_msg.caption if doc_msg and doc_msg.caption else "",
                     )
 
@@ -2794,7 +2802,9 @@ class WhatsAppBot(BaseModel):
                             (data.messageTimestamp or 0) / 1000
                         ),
                         media_url=audio_msg.url if audio_msg else "",
-                        media_mime_type=audio_msg.mimetype if audio_msg and audio_msg.mimetype else "audio/ogg",
+                        media_mime_type=audio_msg.mimetype
+                        if audio_msg and audio_msg.mimetype
+                        else "audio/ogg",
                     )
                 elif msg_content.videoMessage:
                     logger.debug("[PARSE_EVOLUTION] Found video message")
@@ -2803,13 +2813,17 @@ class WhatsAppBot(BaseModel):
                         id=message_id,
                         from_number=from_number,
                         push_name=data.pushName or "Unknown",
-                        caption=video_msg.caption if video_msg and video_msg.caption else None,
+                        caption=video_msg.caption
+                        if video_msg and video_msg.caption
+                        else None,
                         to_number=self.provider.get_instance_identifier(),
                         timestamp=datetime.fromtimestamp(
                             (data.messageTimestamp or 0) / 1000
                         ),
                         media_url=video_msg.url if video_msg else "",
-                        media_mime_type=video_msg.mimetype if video_msg and video_msg.mimetype else "",
+                        media_mime_type=video_msg.mimetype
+                        if video_msg and video_msg.mimetype
+                        else "",
                     )
                 else:
                     logger.warning(

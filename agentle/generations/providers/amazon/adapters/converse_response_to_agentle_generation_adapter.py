@@ -20,7 +20,9 @@ from agentle.generations.providers.amazon.adapters.boto_message_to_agentle_messa
 
 if TYPE_CHECKING:
     from mypy_boto3_bedrock_runtime.type_defs import ConverseResponseTypeDef
-    from agentle.generations.providers.amazon.bedrock_generation_provider import BedrockGenerationProvider
+    from agentle.generations.providers.amazon.bedrock_generation_provider import (
+        BedrockGenerationProvider,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +68,13 @@ class ConverseResponseToAgentleGenerationAdapter[T](
             created=datetime.datetime.now(),
             usage=usage,
         )
-    
+
     async def adapt_async(self, _f: ConverseResponseTypeDef) -> Generation[T]:
         """Convert Bedrock response to Generation asynchronously with pricing.
-        
+
         Args:
             _f: The Bedrock response to convert.
-            
+
         Returns:
             Generation object with normalized data and pricing information.
         """
@@ -95,7 +97,7 @@ class ConverseResponseToAgentleGenerationAdapter[T](
                 "Could not get message from bedrock response."
                 + f"Bedrock response: {_f}"
             )
-        
+
         # Calculate pricing if provider is available
         pricing = Pricing()
         if self.provider is not None:
@@ -104,25 +106,29 @@ class ConverseResponseToAgentleGenerationAdapter[T](
             try:
                 input_tokens = usage.prompt_tokens
                 output_tokens = usage.completion_tokens
-                
+
                 if input_tokens > 0 or output_tokens > 0:
-                    input_price_per_million = await provider.price_per_million_tokens_input(
-                        model, input_tokens
+                    input_price_per_million = (
+                        await provider.price_per_million_tokens_input(
+                            model, input_tokens
+                        )
                     )
-                    output_price_per_million = await provider.price_per_million_tokens_output(
-                        model, output_tokens
+                    output_price_per_million = (
+                        await provider.price_per_million_tokens_output(
+                            model, output_tokens
+                        )
                     )
-                    
+
                     input_cost = input_price_per_million * (input_tokens / 1_000_000)
                     output_cost = output_price_per_million * (output_tokens / 1_000_000)
                     total_cost = input_cost + output_cost
-                    
+
                     pricing = Pricing(
                         input_pricing=round(input_cost, 8),
                         output_pricing=round(output_cost, 8),
                         total_pricing=round(total_cost, 8),
                     )
-                    
+
             except Exception as e:
                 logger.warning(f"Failed to calculate pricing: {e}")
                 pricing = Pricing()

@@ -125,11 +125,11 @@ class OpenRouterResponseToGenerationAdapter[T](
             model=openrouter_response["model"],
             usage=usage,
         )
-    
+
     async def adapt_async(self, _f: OpenRouterResponse) -> Generation[T]:
         """
         Convert an OpenRouter response to an Agentle Generation asynchronously.
-        
+
         This async version calculates pricing information if provider and model are available.
 
         Args:
@@ -164,25 +164,29 @@ class OpenRouterResponseToGenerationAdapter[T](
             try:
                 input_tokens = usage.prompt_tokens
                 output_tokens = usage.completion_tokens
-                
+
                 if input_tokens > 0 or output_tokens > 0:
-                    input_price_per_million = await provider.price_per_million_tokens_input(
-                        model, input_tokens
+                    input_price_per_million = (
+                        await provider.price_per_million_tokens_input(
+                            model, input_tokens
+                        )
                     )
-                    output_price_per_million = await provider.price_per_million_tokens_output(
-                        model, output_tokens
+                    output_price_per_million = (
+                        await provider.price_per_million_tokens_output(
+                            model, output_tokens
+                        )
                     )
-                    
+
                     input_cost = input_price_per_million * (input_tokens / 1_000_000)
                     output_cost = output_price_per_million * (output_tokens / 1_000_000)
                     total_cost = input_cost + output_cost
-                    
+
                     pricing = Pricing(
                         input_pricing=round(input_cost, 8),
                         output_pricing=round(output_cost, 8),
                         total_pricing=round(total_cost, 8),
                     )
-                    
+
             except Exception as e:
                 logger.warning(f"Failed to calculate pricing: {e}")
                 pricing = Pricing()

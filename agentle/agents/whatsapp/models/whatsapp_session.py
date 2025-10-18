@@ -82,10 +82,10 @@ class WhatsAppSession(BaseModel):
 
         current_time = datetime.now()
         self.pending_messages.append(message_data)
-        
+
         # CRITICAL FIX: Always update when last message was added
         self.last_message_added_at = current_time
-        
+
         # CRITICAL FIX: Reset batch timer when new messages arrive to existing batch
         # This ensures messages are properly accumulated instead of processed separately
         if self.is_processing and self.batch_started_at:
@@ -96,7 +96,7 @@ class WhatsAppSession(BaseModel):
                 + f"batch_started_at updated from {old_batch_started} to {self.batch_started_at} "
                 + f"due to new message arrival (queue size: {len(self.pending_messages)})"
             )
-        
+
         # Update last activity only if we're not in the middle of batch processing
         # This prevents race conditions with the batch timer
         if not self.is_processing:
@@ -243,7 +243,10 @@ class WhatsAppSession(BaseModel):
         # This ensures we wait for the full delay after the last message
         if self.batch_started_at:
             reference_time = self.batch_started_at
-            if self.last_message_added_at and self.last_message_added_at > self.batch_started_at:
+            if (
+                self.last_message_added_at
+                and self.last_message_added_at > self.batch_started_at
+            ):
                 reference_time = self.last_message_added_at
 
             time_since_reference = (now - reference_time).total_seconds()

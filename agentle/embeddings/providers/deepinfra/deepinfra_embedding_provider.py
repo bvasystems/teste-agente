@@ -185,18 +185,20 @@ class DeepinfraEmbeddingProvider(EmbeddingProvider):
         for embedding_data in result["data"]:
             index: int = embedding_data["index"]
             vectors: list[float] = embedding_data["embedding"]
-            
+
             current_id: str | None = ids_list[index]
             current_metadata: Mapping[str, Any] | None = metadata_list[index]
             current_text: str = contents[index]
-            
+
             results.append(
                 EmbedContent(
                     embeddings=Embedding(
                         id=current_id if current_id is not None else str(uuid.uuid4()),
                         value=vectors,
                         original_text=current_text,
-                        metadata=dict(current_metadata) if current_metadata is not None else {},
+                        metadata=dict(current_metadata)
+                        if current_metadata is not None
+                        else {},
                     )
                 )
             )

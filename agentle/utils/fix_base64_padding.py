@@ -9,17 +9,17 @@ or stored without proper padding characters.
 def fix_base64_padding(data: str) -> str:
     """
     Fix base64 padding by adding missing padding characters.
-    
+
     Base64 strings must be a multiple of 4 characters in length. If padding
     characters ('=') are missing, this function will add them to make the
     string valid for decoding.
-    
+
     Args:
         data: Base64 encoded string that may have incorrect padding
-        
+
     Returns:
         Base64 string with correct padding
-        
+
     Example:
         >>> fix_base64_padding("SGVsbG8gV29ybGQ")
         'SGVsbG8gV29ybGQ='
@@ -32,5 +32,5 @@ def fix_base64_padding(data: str) -> str:
     # Add padding if needed
     missing_padding = len(data) % 4
     if missing_padding:
-        data += '=' * (4 - missing_padding)
+        data += "=" * (4 - missing_padding)
     return data

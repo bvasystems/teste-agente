@@ -192,23 +192,23 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
     async def _fetch_models(self) -> dict[str, OpenRouterModel]:
         """Fetch available models from OpenRouter API and cache them.
-        
+
         Returns:
             Dictionary mapping model IDs to model information
         """
         if self._models_cache is not None:
             return self._models_cache
-        
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        
+
         if self.default_headers:
             headers.update(self.default_headers)
-        
+
         client = self.http_client or httpx.AsyncClient()
-        
+
         try:
             response = await client.get(
                 f"{self.base_url}/models",
@@ -216,10 +216,12 @@ class OpenRouterGenerationProvider(GenerationProvider):
                 timeout=30.0,
             )
             response.raise_for_status()
-            
+
             models_response: OpenRouterModelsResponse = response.json()
-            self._models_cache = {model["id"]: model for model in models_response["data"]}
-            
+            self._models_cache = {
+                model["id"]: model for model in models_response["data"]
+            }
+
             return self._models_cache
         except Exception as e:
             logger.warning(f"Failed to fetch models from OpenRouter: {e}")
@@ -231,58 +233,60 @@ class OpenRouterGenerationProvider(GenerationProvider):
                 await client.aclose()
 
     def _build_model_param(
-        self, 
+        self,
         model: str | ModelKind | None,
-        fallback_models: Sequence[str] | None = None
+        fallback_models: Sequence[str] | None = None,
     ) -> str | Sequence[str]:
         """Build the model parameter with fallbacks if provided.
-        
+
         Args:
             model: Primary model to use
             fallback_models: Optional list of fallback models to try if primary fails
-            
+
         Returns:
             Model string or list of models with fallbacks
         """
         primary_model = model or self.default_model
-        
+
         # Prefer parameter fallbacks over instance fallbacks
-        fallbacks = fallback_models if fallback_models is not None else self.fallback_models
-        
+        fallbacks = (
+            fallback_models if fallback_models is not None else self.fallback_models
+        )
+
         # If fallback models are provided, return as array
         if fallbacks:
             return [primary_model, *fallbacks]
-        
+
         return primary_model
 
     def _build_request_with_model(
         self,
         base_request: OpenRouterRequest,
         model: str | ModelKind | None,
-        fallback_models: Sequence[str] | None = None
+        fallback_models: Sequence[str] | None = None,
     ) -> OpenRouterRequest:
         """Build request body with correct model/models key.
-        
+
         OpenRouter API requires:
         - "model": "string" for single model
         - "models": ["model1", "model2"] for multiple models with fallbacks
-        
+
         Args:
             base_request: Base request dictionary
             model: Primary model to use
             fallback_models: Optional list of fallback models
-            
+
         Returns:
             Request dictionary with correct model/models key
         """
         model_param = self._build_model_param(model, fallback_models)
-        
+
         # Use "models" (plural) for arrays, "model" (singular) for strings
         if isinstance(model_param, list):
             base_request["models"] = model_param  # type: ignore[typeddict-item]
         else:
             base_request["model"] = model_param  # type: ignore[typeddict-item]
-            
+
         return base_request
 
     # ==================== Factory Methods ====================
@@ -303,9 +307,9 @@ class OpenRouterGenerationProvider(GenerationProvider):
         tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
     ) -> "OpenRouterGenerationProvider":
         """Create provider configured to always use the cheapest available provider.
-        
+
         Equivalent to setting provider_preferences with sort="price".
-        
+
         Args:
             api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
             otel_clients: Optional OpenTelemetry clients for tracing
@@ -318,7 +322,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
             transforms: Optional transforms (middle-out compression)
             message_adapter: Optional custom message adapter
             tool_adapter: Optional custom tool adapter
-            
+
         Returns:
             Configured OpenRouterGenerationProvider instance
         """
@@ -354,9 +358,9 @@ class OpenRouterGenerationProvider(GenerationProvider):
         tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
     ) -> "OpenRouterGenerationProvider":
         """Create provider configured to prioritize highest throughput (Nitro mode).
-        
+
         Equivalent to setting provider_preferences with sort="throughput".
-        
+
         Args:
             api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
             otel_clients: Optional OpenTelemetry clients for tracing
@@ -369,7 +373,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
             transforms: Optional transforms (middle-out compression)
             message_adapter: Optional custom message adapter
             tool_adapter: Optional custom tool adapter
-            
+
         Returns:
             Configured OpenRouterGenerationProvider instance
         """
@@ -405,9 +409,9 @@ class OpenRouterGenerationProvider(GenerationProvider):
         tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
     ) -> "OpenRouterGenerationProvider":
         """Create provider configured to prioritize lowest latency.
-        
+
         Equivalent to setting provider_preferences with sort="latency".
-        
+
         Args:
             api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
             otel_clients: Optional OpenTelemetry clients for tracing
@@ -420,7 +424,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
             transforms: Optional transforms (middle-out compression)
             message_adapter: Optional custom message adapter
             tool_adapter: Optional custom tool adapter
-            
+
         Returns:
             Configured OpenRouterGenerationProvider instance
         """
@@ -456,9 +460,9 @@ class OpenRouterGenerationProvider(GenerationProvider):
         tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
     ) -> "OpenRouterGenerationProvider":
         """Create provider with Zero Data Retention enforcement.
-        
+
         Only routes to endpoints that do not retain prompts.
-        
+
         Args:
             api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
             otel_clients: Optional OpenTelemetry clients for tracing
@@ -471,7 +475,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
             transforms: Optional transforms (middle-out compression)
             message_adapter: Optional custom message adapter
             tool_adapter: Optional custom tool adapter
-            
+
         Returns:
             Configured OpenRouterGenerationProvider instance
         """
@@ -507,9 +511,9 @@ class OpenRouterGenerationProvider(GenerationProvider):
         tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
     ) -> "OpenRouterGenerationProvider":
         """Create provider that only uses providers which don't collect user data.
-        
+
         Combines ZDR enforcement with data_collection="deny".
-        
+
         Args:
             api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
             otel_clients: Optional OpenTelemetry clients for tracing
@@ -522,7 +526,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
             transforms: Optional transforms (middle-out compression)
             message_adapter: Optional custom message adapter
             tool_adapter: Optional custom tool adapter
-            
+
         Returns:
             Configured OpenRouterGenerationProvider instance
         """
@@ -563,7 +567,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
         tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
     ) -> "OpenRouterGenerationProvider":
         """Create provider that tries specific providers in order.
-        
+
         Args:
             providers: List of provider slugs to try (e.g., ["anthropic", "openai"])
             allow_fallbacks: Whether to allow other providers if specified ones fail
@@ -578,10 +582,10 @@ class OpenRouterGenerationProvider(GenerationProvider):
             transforms: Optional transforms (middle-out compression)
             message_adapter: Optional custom message adapter
             tool_adapter: Optional custom tool adapter
-            
+
         Returns:
             Configured OpenRouterGenerationProvider instance
-            
+
         Example:
             >>> provider = OpenRouterGenerationProvider.with_specific_providers(
             ...     providers=["anthropic", "openai"],
@@ -624,7 +628,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
         tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
     ) -> "OpenRouterGenerationProvider":
         """Create provider with web search plugin enabled.
-        
+
         Args:
             api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
             max_results: Maximum number of search results to return
@@ -638,7 +642,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
             transforms: Optional transforms (middle-out compression)
             message_adapter: Optional custom message adapter
             tool_adapter: Optional custom tool adapter
-            
+
         Returns:
             Configured OpenRouterGenerationProvider instance
         """
@@ -676,9 +680,9 @@ class OpenRouterGenerationProvider(GenerationProvider):
         tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
     ) -> "OpenRouterGenerationProvider":
         """Create provider with middle-out context compression enabled.
-        
+
         Useful for long contexts that exceed model limits.
-        
+
         Args:
             api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
             otel_clients: Optional OpenTelemetry clients for tracing
@@ -691,7 +695,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
             plugins: Optional plugins (web search, file parser)
             message_adapter: Optional custom message adapter
             tool_adapter: Optional custom tool adapter
-            
+
         Returns:
             Configured OpenRouterGenerationProvider instance
         """
@@ -727,10 +731,10 @@ class OpenRouterGenerationProvider(GenerationProvider):
         tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
     ) -> "OpenRouterGenerationProvider":
         """Create provider using OpenRouter's Auto Router.
-        
+
         The Auto Router automatically selects between high-quality models based on
         your prompt, powered by NotDiamond.
-        
+
         Args:
             api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
             otel_clients: Optional OpenTelemetry clients for tracing
@@ -744,10 +748,10 @@ class OpenRouterGenerationProvider(GenerationProvider):
             transforms: Optional transforms (middle-out compression)
             message_adapter: Optional custom message adapter
             tool_adapter: Optional custom tool adapter
-            
+
         Returns:
             Configured OpenRouterGenerationProvider instance with Auto Router
-            
+
         Example:
             >>> provider = OpenRouterGenerationProvider.with_auto_router()
             >>> # Will automatically select the best model for each request
@@ -788,10 +792,10 @@ class OpenRouterGenerationProvider(GenerationProvider):
         tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
     ) -> "OpenRouterGenerationProvider":
         """Create provider with automatic fallback models.
-        
+
         If the primary model fails (downtime, rate-limiting, moderation, etc.),
         OpenRouter will automatically try the fallback models in order.
-        
+
         Args:
             fallback_models: Single model ID or list of model IDs to use as fallbacks
             api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
@@ -806,10 +810,10 @@ class OpenRouterGenerationProvider(GenerationProvider):
             transforms: Optional transforms (middle-out compression)
             message_adapter: Optional custom message adapter
             tool_adapter: Optional custom tool adapter
-            
+
         Returns:
             Configured OpenRouterGenerationProvider instance with fallbacks
-            
+
         Example:
             >>> provider = OpenRouterGenerationProvider.with_fallback_models(
             ...     fallback_models=["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"]
@@ -820,8 +824,10 @@ class OpenRouterGenerationProvider(GenerationProvider):
             ... )
         """
         # Convert single string to list
-        fallback_list = [fallback_models] if isinstance(fallback_models, str) else fallback_models
-        
+        fallback_list = (
+            [fallback_models] if isinstance(fallback_models, str) else fallback_models
+        )
+
         return cls(
             api_key=api_key,
             otel_clients=otel_clients,
@@ -840,15 +846,17 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
     # ==================== Builder-Style Methods ====================
 
-    def set_fallback_models(self, models: Sequence[str]) -> "OpenRouterGenerationProvider":
+    def set_fallback_models(
+        self, models: Sequence[str]
+    ) -> "OpenRouterGenerationProvider":
         """Set fallback models to try if primary model fails.
-        
+
         Args:
             models: List of model IDs to use as fallbacks
-            
+
         Returns:
             Self for method chaining
-            
+
         Example:
             >>> provider.set_fallback_models([
             ...     "anthropic/claude-3.5-sonnet",
@@ -860,10 +868,10 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
     def use_auto_router(self) -> "OpenRouterGenerationProvider":
         """Configure to use OpenRouter's Auto Router.
-        
+
         The Auto Router automatically selects between high-quality models
         based on your prompt, powered by NotDiamond.
-        
+
         Returns:
             Self for method chaining
         """
@@ -872,7 +880,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
     def order_by_cheapest(self) -> "OpenRouterGenerationProvider":
         """Configure to always use the cheapest provider (floor pricing).
-        
+
         Returns:
             Self for method chaining
         """
@@ -883,7 +891,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
     def order_by_fastest(self) -> "OpenRouterGenerationProvider":
         """Configure to prioritize highest throughput (Nitro mode).
-        
+
         Returns:
             Self for method chaining
         """
@@ -894,7 +902,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
     def order_by_lowest_latency(self) -> "OpenRouterGenerationProvider":
         """Configure to prioritize lowest latency.
-        
+
         Returns:
             Self for method chaining
         """
@@ -905,9 +913,9 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
     def enable_zdr(self) -> "OpenRouterGenerationProvider":
         """Enable Zero Data Retention enforcement.
-        
+
         Only routes to endpoints that do not retain prompts.
-        
+
         Returns:
             Self for method chaining
         """
@@ -918,7 +926,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
     def deny_data_collection(self) -> "OpenRouterGenerationProvider":
         """Only use providers that don't collect user data.
-        
+
         Returns:
             Self for method chaining
         """
@@ -929,7 +937,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
     def allow_data_collection(self) -> "OpenRouterGenerationProvider":
         """Allow providers that may collect user data (default).
-        
+
         Returns:
             Self for method chaining
         """
@@ -938,12 +946,14 @@ class OpenRouterGenerationProvider(GenerationProvider):
         self.provider_preferences["data_collection"] = "allow"
         return self
 
-    def set_provider_order(self, providers: Sequence[str]) -> "OpenRouterGenerationProvider":
+    def set_provider_order(
+        self, providers: Sequence[str]
+    ) -> "OpenRouterGenerationProvider":
         """Set the order of providers to try.
-        
+
         Args:
             providers: List of provider slugs (e.g., ["anthropic", "openai"])
-            
+
         Returns:
             Self for method chaining
         """
@@ -952,12 +962,14 @@ class OpenRouterGenerationProvider(GenerationProvider):
         self.provider_preferences["order"] = providers
         return self
 
-    def allow_only_providers(self, providers: Sequence[str]) -> "OpenRouterGenerationProvider":
+    def allow_only_providers(
+        self, providers: Sequence[str]
+    ) -> "OpenRouterGenerationProvider":
         """Only allow specific providers for requests.
-        
+
         Args:
             providers: List of provider slugs to allow
-            
+
         Returns:
             Self for method chaining
         """
@@ -966,12 +978,14 @@ class OpenRouterGenerationProvider(GenerationProvider):
         self.provider_preferences["only"] = providers
         return self
 
-    def ignore_providers(self, providers: Sequence[str]) -> "OpenRouterGenerationProvider":
+    def ignore_providers(
+        self, providers: Sequence[str]
+    ) -> "OpenRouterGenerationProvider":
         """Ignore specific providers for requests.
-        
+
         Args:
             providers: List of provider slugs to ignore
-            
+
         Returns:
             Self for method chaining
         """
@@ -982,9 +996,9 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
     def disable_fallbacks(self) -> "OpenRouterGenerationProvider":
         """Disable fallback providers.
-        
+
         Request will fail if primary provider is unavailable.
-        
+
         Returns:
             Self for method chaining
         """
@@ -995,7 +1009,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
     def enable_fallbacks(self) -> "OpenRouterGenerationProvider":
         """Enable fallback providers (default).
-        
+
         Returns:
             Self for method chaining
         """
@@ -1006,7 +1020,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
     def require_all_parameters(self) -> "OpenRouterGenerationProvider":
         """Only use providers that support all request parameters.
-        
+
         Returns:
             Self for method chaining
         """
@@ -1023,22 +1037,22 @@ class OpenRouterGenerationProvider(GenerationProvider):
         image: float | None = None,
     ) -> "OpenRouterGenerationProvider":
         """Set maximum pricing constraints.
-        
+
         Args:
             prompt: Max price per million prompt tokens
             completion: Max price per million completion tokens
             request: Max price per request
             image: Max price per image
-            
+
         Returns:
             Self for method chaining
-            
+
         Example:
             >>> provider.set_max_price(prompt=1.0, completion=2.0)
         """
         if self.provider_preferences is None:
             self.provider_preferences = {}
-        
+
         max_price: OpenRouterMaxPrice = {}
         if prompt is not None:
             max_price["prompt"] = prompt
@@ -1048,17 +1062,19 @@ class OpenRouterGenerationProvider(GenerationProvider):
             max_price["request"] = request
         if image is not None:
             max_price["image"] = image
-            
+
         self.provider_preferences["max_price"] = max_price
         return self
 
-    def filter_by_quantization(self, quantizations: Sequence[str]) -> "OpenRouterGenerationProvider":
+    def filter_by_quantization(
+        self, quantizations: Sequence[str]
+    ) -> "OpenRouterGenerationProvider":
         """Filter providers by quantization levels.
-        
+
         Args:
             quantizations: List of quantization levels (e.g., ["fp8", "int4"])
                 Valid values: int4, int8, fp4, fp6, fp8, fp16, bf16, fp32, unknown
-            
+
         Returns:
             Self for method chaining
         """
@@ -1067,13 +1083,15 @@ class OpenRouterGenerationProvider(GenerationProvider):
         self.provider_preferences["quantizations"] = quantizations
         return self
 
-    def enable_web_search(self, max_results: int = 5, engine: Literal["native", "exa"] = "exa") -> "OpenRouterGenerationProvider":
+    def enable_web_search(
+        self, max_results: int = 5, engine: Literal["native", "exa"] = "exa"
+    ) -> "OpenRouterGenerationProvider":
         """Enable web search plugin.
-        
+
         Args:
             max_results: Maximum number of search results
             engine: Search engine to use ("native" or "exa")
-            
+
         Returns:
             Self for method chaining
         """
@@ -1091,14 +1109,13 @@ class OpenRouterGenerationProvider(GenerationProvider):
         return self
 
     def enable_pdf_parsing(
-        self,
-        engine: Literal["pdf-text", "mistral-ocr", "native"] = "native"
+        self, engine: Literal["pdf-text", "mistral-ocr", "native"] = "native"
     ) -> "OpenRouterGenerationProvider":
         """Enable PDF parsing plugin.
-        
+
         Args:
             engine: PDF parsing engine to use
-            
+
         Returns:
             Self for method chaining
         """
@@ -1116,9 +1133,9 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
     def enable_context_compression(self) -> "OpenRouterGenerationProvider":
         """Enable middle-out context compression.
-        
+
         Useful for long contexts that exceed model limits.
-        
+
         Returns:
             Self for method chaining
         """
@@ -1208,15 +1225,26 @@ class OpenRouterGenerationProvider(GenerationProvider):
                 # Append to existing system instruction
                 existing_instruction = messages_list[0].text
                 messages_list[0] = DeveloperMessage(
-                    parts=[TextPart(text=existing_instruction + dedent(f"""\n\n{instruction_text}"""))]
+                    parts=[
+                        TextPart(
+                            text=existing_instruction
+                            + dedent(f"""\n\n{instruction_text}""")
+                        )
+                    ]
                 )
             else:
                 # Prepend new DeveloperMessage
                 messages_list.insert(
                     0,
                     DeveloperMessage(
-                        parts=[TextPart(text=dedent(f"""You are a helpful assistant. {instruction_text}"""))]
-                    )
+                        parts=[
+                            TextPart(
+                                text=dedent(
+                                    f"""You are a helpful assistant. {instruction_text}"""
+                                )
+                            )
+                        ]
+                    ),
                 )
 
         # Convert messages
@@ -1234,7 +1262,9 @@ class OpenRouterGenerationProvider(GenerationProvider):
             "messages": openrouter_messages,
             "stream": True,
         }
-        request_body = self._build_request_with_model(request_body, model, fallback_models)
+        request_body = self._build_request_with_model(
+            request_body, model, fallback_models
+        )
 
         # Add optional parameters
         if openrouter_tools:
@@ -1290,22 +1320,29 @@ class OpenRouterGenerationProvider(GenerationProvider):
                         error_body_dict = None
                         error_text = None
                         error_body_bytes = b""
-                        
+
                         try:
                             error_body_bytes = await response.aread()
-                            error_json = error_body_bytes.decode('utf-8')
+                            error_json = error_body_bytes.decode("utf-8")
                             import json
+
                             error_body_dict = json.loads(error_json)
                         except Exception:
-                            error_text = error_body_bytes.decode('utf-8') if error_body_bytes else None
-                        
+                            error_text = (
+                                error_body_bytes.decode("utf-8")
+                                if error_body_bytes
+                                else None
+                            )
+
                         # Log the error for debugging
                         logger.error(
                             f"OpenRouter API error ({response.status_code})\nRequest body: {request_body}\nResponse: {error_body_dict or error_text}"
                         )
-                        
+
                         # Raise appropriate custom exception
-                        parse_and_raise_openrouter_error(response.status_code, error_body_dict, error_text)
+                        parse_and_raise_openrouter_error(
+                            response.status_code, error_body_dict, error_text
+                        )
 
                     # Create async generator from response content
                     async def content_generator() -> AsyncGenerator[bytes, None]:
@@ -1313,8 +1350,10 @@ class OpenRouterGenerationProvider(GenerationProvider):
                             yield chunk
 
                     # Use the streaming adapter to process the response
-                    adapter = OpenRouterStreamToGenerationAdapter[T](
-                        response_schema=response_schema,  # Pass schema for dynamic parsing 
+                    adapter = OpenRouterStreamToGenerationAdapter[
+                        T
+                    ](
+                        response_schema=response_schema,  # Pass schema for dynamic parsing
                         model=model or self.default_model,
                     )
 
@@ -1396,7 +1435,9 @@ class OpenRouterGenerationProvider(GenerationProvider):
         request_body: OpenRouterRequest = {
             "messages": openrouter_messages,
         }
-        request_body = self._build_request_with_model(request_body, model, fallback_models)
+        request_body = self._build_request_with_model(
+            request_body, model, fallback_models
+        )
 
         # Add optional parameters
         if openrouter_tools:
@@ -1451,25 +1492,27 @@ class OpenRouterGenerationProvider(GenerationProvider):
                     json=request_body,
                     headers=headers,
                 )
-                
+
                 # Check for errors and raise custom exceptions
                 if response.status_code >= 400:
                     error_body = None
                     error_text = None
-                    
+
                     try:
                         error_body = response.json()
                     except Exception:
                         error_text = response.text
-                    
+
                     # Log the error for debugging
                     logger.error(
                         f"OpenRouter API error ({response.status_code})\nRequest body: {request_body}\nResponse: {error_body or error_text}"
                     )
-                    
+
                     # Raise appropriate custom exception
-                    parse_and_raise_openrouter_error(response.status_code, error_body, error_text)
-                
+                    parse_and_raise_openrouter_error(
+                        response.status_code, error_body, error_text
+                    )
+
                 openrouter_response: OpenRouterResponse = response.json()
 
         except asyncio.TimeoutError as e:
@@ -1546,17 +1589,17 @@ class OpenRouterGenerationProvider(GenerationProvider):
         """
         try:
             models = await self._fetch_models()
-            
+
             if model not in models:
                 logger.warning(
                     f"OpenRouter model '{model}' not found in models list. Returning 0.0. Available models: {len(models)}"
                 )
                 return 0.0
-            
+
             model_info = models[model]
             pricing = model_info.get("pricing", {})
             prompt_price = pricing.get("prompt", 0.0)
-            
+
             # Convert string prices to float if needed
             if isinstance(prompt_price, str):
                 try:
@@ -1566,10 +1609,10 @@ class OpenRouterGenerationProvider(GenerationProvider):
                         f"Could not parse prompt price '{prompt_price}' for model {model}"
                     )
                     return 0.0
-            
+
             # OpenRouter returns price per token, convert to price per million tokens
             return float(prompt_price) * 1_000_000
-            
+
         except Exception as e:
             logger.error(
                 f"Error fetching pricing for model {model}: {e}. Returning 0.0"
@@ -1595,17 +1638,17 @@ class OpenRouterGenerationProvider(GenerationProvider):
         """
         try:
             models = await self._fetch_models()
-            
+
             if model not in models:
                 logger.warning(
                     f"OpenRouter model '{model}' not found in models list. Returning 0.0. Available models: {len(models)}"
                 )
                 return 0.0
-            
+
             model_info = models[model]
             pricing = model_info.get("pricing", {})
             completion_price = pricing.get("completion", 0.0)
-            
+
             # Convert string prices to float if needed
             if isinstance(completion_price, str):
                 try:
@@ -1615,10 +1658,10 @@ class OpenRouterGenerationProvider(GenerationProvider):
                         f"Could not parse completion price '{completion_price}' for model {model}"
                     )
                     return 0.0
-            
+
             # OpenRouter returns price per token, convert to price per million tokens
             return float(completion_price) * 1_000_000
-            
+
         except Exception as e:
             logger.error(
                 f"Error fetching pricing for model {model}: {e}. Returning 0.0"

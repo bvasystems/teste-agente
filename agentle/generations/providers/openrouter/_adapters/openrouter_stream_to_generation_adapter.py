@@ -113,10 +113,12 @@ class OpenRouterStreamToGenerationAdapter[T]:
 
                     try:
                         chunk_data: OpenRouterStreamResponse = json.loads(data)
-                        
+
                         # Check for errors in the chunk
                         if "error" in chunk_data:
-                            error_msg = chunk_data.get("error", {}).get("message", "Unknown error")
+                            error_msg = chunk_data.get("error", {}).get(
+                                "message", "Unknown error"
+                            )
                             logger.error(f"Stream error: {error_msg}")
                             raise RuntimeError(f"OpenRouter stream error: {error_msg}")
 
@@ -146,12 +148,16 @@ class OpenRouterStreamToGenerationAdapter[T]:
                                                 "arguments": "",
                                             },
                                         }
-                                    
+
                                     function = tool_call.get("function", {})
                                     if "name" in function:
-                                        accumulated_tool_calls[tool_id]["function"]["name"] = function["name"]
+                                        accumulated_tool_calls[tool_id]["function"][
+                                            "name"
+                                        ] = function["name"]
                                     if "arguments" in function:
-                                        accumulated_tool_calls[tool_id]["function"]["arguments"] += function["arguments"]
+                                        accumulated_tool_calls[tool_id]["function"][
+                                            "arguments"
+                                        ] += function["arguments"]
 
                             # Check for finish_reason
                             finish_reason = choice.get("finish_reason")
@@ -197,7 +203,7 @@ class OpenRouterStreamToGenerationAdapter[T]:
 
         # Build message parts
         parts: list[TextPart | ToolExecutionSuggestion] = []
-        
+
         if content:
             parts.append(TextPart(text=content))
 
@@ -209,7 +215,7 @@ class OpenRouterStreamToGenerationAdapter[T]:
                 args = json.loads(args_str)
             except json.JSONDecodeError:
                 args = {}
-            
+
             parts.append(
                 ToolExecutionSuggestion(
                     id=str(tool_call_data.get("id", "")),
@@ -223,7 +229,7 @@ class OpenRouterStreamToGenerationAdapter[T]:
         if self.response_schema is not None:
             try:
                 # Try to parse if it looks like a Pydantic/BaseModel class
-                if hasattr(self.response_schema, 'model_fields'):
+                if hasattr(self.response_schema, "model_fields"):
                     # Make fields optional for streaming partial results
                     optional_model = make_fields_optional(self.response_schema)  # type: ignore
                     parsed_data = parse_streaming_json(content, model=optional_model)
@@ -246,11 +252,14 @@ class OpenRouterStreamToGenerationAdapter[T]:
         # Create Generation
         # Note: Usage is not available during streaming, so we don't set it
         from agentle.generations.models.generation.usage import Usage
+
         return Generation[Any](
             id=uuid.uuid4(),
             choices=[choice],
             object="chat.generation",
             created=datetime.datetime.now(),
             model=self.model,
-            usage=Usage(prompt_tokens=0, completion_tokens=0),  # Placeholder since usage not available during streaming
+            usage=Usage(
+                prompt_tokens=0, completion_tokens=0
+            ),  # Placeholder since usage not available during streaming
         )

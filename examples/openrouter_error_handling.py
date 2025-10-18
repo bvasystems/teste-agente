@@ -27,12 +27,12 @@ load_dotenv()
 
 async def test_model_not_found():
     """Test error handling for non-existent model."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("TEST 1: Model Not Found Error")
-    print("="*80)
-    
+    print("=" * 80)
+
     provider = OpenRouterGenerationProvider()
-    
+
     try:
         await provider.generate_async(
             model="this-model-does-not-exist",
@@ -46,12 +46,12 @@ async def test_model_not_found():
 
 async def test_invalid_credentials():
     """Test error handling for invalid API key."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("TEST 2: Invalid Credentials Error")
-    print("="*80)
-    
+    print("=" * 80)
+
     provider = OpenRouterGenerationProvider(api_key="invalid-key-12345")
-    
+
     try:
         await provider.generate_async(
             model="openai/gpt-4o-mini",
@@ -65,15 +65,15 @@ async def test_invalid_credentials():
 
 async def test_context_length():
     """Test error handling for context length exceeded."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("TEST 3: Context Length Exceeded Error")
-    print("="*80)
-    
+    print("=" * 80)
+
     provider = OpenRouterGenerationProvider()
-    
+
     # Create a very long message to exceed context
     very_long_text = "Hello " * 50000  # This should exceed most model contexts
-    
+
     try:
         await provider.generate_async(
             model="openai/gpt-4o-mini",
@@ -87,16 +87,18 @@ async def test_context_length():
 
 async def test_successful_request():
     """Test a successful request (no error)."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("TEST 4: Successful Request (No Error)")
-    print("="*80)
-    
+    print("=" * 80)
+
     provider = OpenRouterGenerationProvider()
-    
+
     try:
         generation = await provider.generate_async(
             model="openai/gpt-4o-mini",
-            messages=[UserMessage(parts=[TextPart(text="Say 'Hello, World!' in one word")])],
+            messages=[
+                UserMessage(parts=[TextPart(text="Say 'Hello, World!' in one word")])
+            ],
         )
         print(f"\n✅ Success! Response: {generation.choices[0].message.parts[0].text}")
     except OpenRouterError as e:
@@ -112,22 +114,22 @@ async def main():
     print("  • Possible causes")
     print("  • Actionable solutions")
     print("=" * 80)
-    
+
     # Test 1: Model not found
     await test_model_not_found()
-    
+
     # Test 2: Invalid credentials (uncomment to test)
     # await test_invalid_credentials()
-    
+
     # Test 3: Context length exceeded (uncomment to test - may take time/credits)
     # await test_context_length()
-    
+
     # Test 4: Successful request
     await test_successful_request()
-    
-    print("\n" + "="*80)
+
+    print("\n" + "=" * 80)
     print("✅ All tests completed!")
-    print("="*80)
+    print("=" * 80)
 
 
 if __name__ == "__main__":

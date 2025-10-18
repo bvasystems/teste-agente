@@ -34,7 +34,6 @@ agent = Agent(
     model="gemini-2.0-flash-exp",
     instructions="You are a helpful assistant. Never expose internal tool information.",
     tools=my_tools,
-    
     # Add the tool leakage validator - just pass the same tools!
     output_guardrails=[
         ToolLeakageValidator(
@@ -43,21 +42,20 @@ agent = Agent(
             redact_leakage=False,
         ),
     ],
-    
     guardrail_config=GuardrailConfig(
         fail_on_output_violation=True,
         log_violations=True,
-    )
+    ),
 )
 
 # Use the agent
 if __name__ == "__main__":
     print("🛡️  Simple Tool Leakage Protection\n")
-    
+
     # This will work fine
     result = agent.run("What's the weather like in Tokyo?")
     print(f"✓ Response: {result.generation.text[:150]}...\n")
-    
+
     # If the AI accidentally leaks tool info, it will be blocked
     print("✓ Tool leakage protection is active!")
     print(f"✓ Monitoring: {[tool.__name__ for tool in my_tools]}")

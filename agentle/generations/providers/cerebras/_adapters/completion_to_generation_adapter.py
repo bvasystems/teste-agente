@@ -32,7 +32,9 @@ from rsb.adapters.adapter import Adapter
 
 if TYPE_CHECKING:
     from cerebras.cloud.sdk.types.chat.chat_completion import ChatCompletionResponse
-    from agentle.generations.providers.cerebras.cerebras_generation_provider import CerebrasGenerationProvider
+    from agentle.generations.providers.cerebras.cerebras_generation_provider import (
+        CerebrasGenerationProvider,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -147,11 +149,11 @@ class CerebrasCompletionToGenerationAdapter[T](
             model=_f.model,
             usage=usage,
         )
-    
+
     async def adapt_async(self, _f: ChatCompletionResponse) -> Generation[T]:
         """
         Convert a Cerebras ChatCompletionResponse to an Agentle Generation object asynchronously.
-        
+
         This async version calculates pricing information if provider is available.
 
         Args:
@@ -174,7 +176,7 @@ class CerebrasCompletionToGenerationAdapter[T](
             prompt_tokens=_f.usage.prompt_tokens or 0,
             completion_tokens=_f.usage.completion_tokens or 0,
         )
-        
+
         # Calculate pricing if provider is available
         pricing = Pricing()
         if self.provider is not None:
@@ -183,25 +185,29 @@ class CerebrasCompletionToGenerationAdapter[T](
             try:
                 input_tokens = usage.prompt_tokens
                 output_tokens = usage.completion_tokens
-                
+
                 if input_tokens > 0 or output_tokens > 0:
-                    input_price_per_million = await provider.price_per_million_tokens_input(
-                        model, input_tokens
+                    input_price_per_million = (
+                        await provider.price_per_million_tokens_input(
+                            model, input_tokens
+                        )
                     )
-                    output_price_per_million = await provider.price_per_million_tokens_output(
-                        model, output_tokens
+                    output_price_per_million = (
+                        await provider.price_per_million_tokens_output(
+                            model, output_tokens
+                        )
                     )
-                    
+
                     input_cost = input_price_per_million * (input_tokens / 1_000_000)
                     output_cost = output_price_per_million * (output_tokens / 1_000_000)
                     total_cost = input_cost + output_cost
-                    
+
                     pricing = Pricing(
                         input_pricing=round(input_cost, 8),
                         output_pricing=round(output_cost, 8),
                         total_pricing=round(total_cost, 8),
                     )
-                    
+
             except Exception as e:
                 logger.warning(f"Failed to calculate pricing: {e}")
                 pricing = Pricing()

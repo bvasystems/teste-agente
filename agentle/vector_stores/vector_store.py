@@ -269,12 +269,12 @@ class VectorStore(abc.ABC):
 
         # Use batch embedding generation for maximum efficiency
         # This leverages native batch APIs (like Google's) or parallel processing
-        embed_contents: Sequence[EmbedContent] = (
-            await self.embedding_provider.generate_batch_embeddings_async(
-                contents=[c.text for c in chunks],
-                metadata=[c.metadata for c in chunks],
-                ids=[c.id for c in chunks],
-            )
+        embed_contents: Sequence[
+            EmbedContent
+        ] = await self.embedding_provider.generate_batch_embeddings_async(
+            contents=[c.text for c in chunks],
+            metadata=[c.metadata for c in chunks],
+            ids=[c.id for c in chunks],
         )
 
         # Batch upsert all embeddings - this is more efficient than upserting one at a time

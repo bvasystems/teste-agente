@@ -88,5 +88,5 @@ class AssistantMessage(BaseModel):
                     self.parts,
                 )
             ),
-            reasoning=self.reasoning
+            reasoning=self.reasoning,
         )

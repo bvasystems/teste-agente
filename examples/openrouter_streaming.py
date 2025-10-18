@@ -3,15 +3,19 @@ from pydantic import BaseModel
 
 from agentle.generations.models.message_parts.text import TextPart
 from agentle.generations.models.messages.user_message import UserMessage
-from agentle.generations.providers.openrouter.openrouter_generation_provider import OpenRouterGenerationProvider
+from agentle.generations.providers.openrouter.openrouter_generation_provider import (
+    OpenRouterGenerationProvider,
+)
 from dotenv import load_dotenv
 
 load_dotenv()
+
 
 class Answer(BaseModel):
     reasoning: str
     answer: str
     confidence: float
+
 
 provider = OpenRouterGenerationProvider()
 
@@ -25,5 +29,6 @@ async def main():
         # Stream the JSON as it's generated
         print(generation)
         print(generation.parsed)
+
 
 asyncio.run(main())

@@ -158,7 +158,7 @@ class PartToGooglePartAdapter(
                     decoded_data = safe_b64decode(data)
                 else:
                     decoded_data = data
-                    
+
                 return GooglePart(
                     inline_data=Blob(
                         data=decoded_data,
