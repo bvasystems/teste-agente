@@ -6,7 +6,7 @@ This module defines TypedDicts for all OpenRouter-specific structures,
 ensuring type safety throughout the provider implementation.
 """
 
-from typing import TypedDict, Literal, NotRequired, Sequence
+from typing import TypedDict, Literal, NotRequired, Required, Sequence
 
 
 class OpenRouterImageUrl(TypedDict):
@@ -285,24 +285,35 @@ class OpenRouterStreamResponse(TypedDict):
     choices: Sequence[OpenRouterStreamChoice]
 
 
-class OpenRouterRequest(TypedDict):
-    """Complete request structure for OpenRouter API."""
+class OpenRouterRequest(TypedDict, total=False):
+    """Complete request structure for OpenRouter API.
+    
+    Note: Either 'model' (single) OR 'models' (multiple with fallbacks) must be provided.
+    - Use 'model' for a single model: {"model": "openai/gpt-4o"}
+    - Use 'models' for fallback routing: {"models": ["openai/gpt-4o", "anthropic/claude-3.5-sonnet"]}
+    """
 
-    model: str | Sequence[str]
-    messages: Sequence[OpenRouterMessage]
-    temperature: NotRequired[float]
-    max_tokens: NotRequired[int]
-    top_p: NotRequired[float]
-    top_k: NotRequired[float]
-    frequency_penalty: NotRequired[float]
-    presence_penalty: NotRequired[float]
-    stream: NotRequired[bool]
-    tools: NotRequired[Sequence[OpenRouterTool]]
-    tool_choice: NotRequired[Literal["auto", "none"] | dict[str, object]]
-    response_format: NotRequired[OpenRouterResponseFormat]
-    provider: NotRequired[OpenRouterProviderPreferences]
-    plugins: NotRequired[Sequence[OpenRouterPlugin]]
-    transforms: NotRequired[Sequence[Literal["middle-out"]]]  # Context compression
+    # Model selection (one of these is required)
+    model: str  # Single model
+    models: Sequence[str]  # Multiple models with fallback routing
+    
+    # Required fields
+    messages: Required[Sequence[OpenRouterMessage]]
+    
+    # Optional parameters
+    temperature: float
+    max_tokens: int
+    top_p: float
+    top_k: float
+    frequency_penalty: float
+    presence_penalty: float
+    stream: bool
+    tools: Sequence[OpenRouterTool]
+    tool_choice: Literal["auto", "none"] | dict[str, object]
+    response_format: OpenRouterResponseFormat
+    provider: OpenRouterProviderPreferences
+    plugins: Sequence[OpenRouterPlugin]
+    transforms: Sequence[Literal["middle-out"]]  # Context compression
 
 
 # OpenRouter Models API types

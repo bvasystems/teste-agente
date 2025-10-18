@@ -252,6 +252,36 @@ class OpenRouterGenerationProvider(GenerationProvider):
         
         return primary_model
 
+    def _build_request_with_model(
+        self,
+        base_request: OpenRouterRequest,
+        model: str | ModelKind | None,
+        fallback_models: Sequence[str] | None = None
+    ) -> OpenRouterRequest:
+        """Build request body with correct model/models key.
+        
+        OpenRouter API requires:
+        - "model": "string" for single model
+        - "models": ["model1", "model2"] for multiple models with fallbacks
+        
+        Args:
+            base_request: Base request dictionary
+            model: Primary model to use
+            fallback_models: Optional list of fallback models
+            
+        Returns:
+            Request dictionary with correct model/models key
+        """
+        model_param = self._build_model_param(model, fallback_models)
+        
+        # Use "models" (plural) for arrays, "model" (singular) for strings
+        if isinstance(model_param, list):
+            base_request["models"] = model_param  # type: ignore[typeddict-item]
+        else:
+            base_request["model"] = model_param  # type: ignore[typeddict-item]
+            
+        return base_request
+
     # ==================== Factory Methods ====================
 
     @classmethod
@@ -740,7 +770,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
     @classmethod
     def with_fallback_models(
         cls,
-        fallback_models: Sequence[str],
+        fallback_models: str | Sequence[str],
         api_key: str | None = None,
         otel_clients: Sequence[OtelClient] | None = None,
         provider_id: str | None = None,
@@ -760,7 +790,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
         OpenRouter will automatically try the fallback models in order.
         
         Args:
-            fallback_models: List of model IDs to use as fallbacks
+            fallback_models: Single model ID or list of model IDs to use as fallbacks
             api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
             otel_clients: Optional OpenTelemetry clients for tracing
             provider_id: Optional provider identifier for tracing
@@ -781,7 +811,14 @@ class OpenRouterGenerationProvider(GenerationProvider):
             >>> provider = OpenRouterGenerationProvider.with_fallback_models(
             ...     fallback_models=["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"]
             ... )
+            >>> # Or with a single model:
+            >>> provider = OpenRouterGenerationProvider.with_fallback_models(
+            ...     fallback_models="anthropic/claude-3.5-sonnet"
+            ... )
         """
+        # Convert single string to list
+        fallback_list = [fallback_models] if isinstance(fallback_models, str) else fallback_models
+        
         return cls(
             api_key=api_key,
             otel_clients=otel_clients,
@@ -793,7 +830,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
             provider_preferences=provider_preferences,
             plugins=plugins,
             transforms=transforms,
-            fallback_models=fallback_models,
+            fallback_models=fallback_list,
             message_adapter=message_adapter,
             tool_adapter=tool_adapter,
         )
@@ -1191,10 +1228,10 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
         # Build the request with model routing support
         request_body: OpenRouterRequest = {
-            "model": self._build_model_param(model, fallback_models),
             "messages": openrouter_messages,
             "stream": True,
         }
+        request_body = self._build_request_with_model(request_body, model, fallback_models)
 
         # Add optional parameters
         if openrouter_tools:
@@ -1245,7 +1282,31 @@ class OpenRouterGenerationProvider(GenerationProvider):
                     json=request_body,
                     headers=headers,
                 ) as response:
-                    response.raise_for_status()
+                    # Check for errors and provide detailed error messages
+                    if response.status_code >= 400:
+                        error_detail = "No error details provided"
+                        error_body = b""
+                        try:
+                            error_body = await response.aread()
+                            error_json = error_body.decode('utf-8')
+                            import json
+                            error_data = json.loads(error_json)
+                            error_detail = error_data.get("error", {})
+                            if isinstance(error_detail, dict):
+                                error_message = error_detail.get("message", "Unknown error")
+                                error_code = error_detail.get("code", "unknown")
+                                error_detail = f"{error_code}: {error_message}"
+                            elif isinstance(error_detail, str):
+                                error_detail = error_detail
+                            else:
+                                error_detail = str(error_data)
+                        except Exception:
+                            error_detail = error_body.decode('utf-8') if error_body else "Unable to parse error response"
+                        
+                        logger.error(
+                            f"OpenRouter API error ({response.status_code}): {error_detail}\nRequest body: {request_body}"
+                        )
+                        response.raise_for_status()
 
                     # Create async generator from response content
                     async def content_generator() -> AsyncGenerator[bytes, None]:
@@ -1334,9 +1395,9 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
         # Build the request with model routing support
         request_body: OpenRouterRequest = {
-            "model": self._build_model_param(model, fallback_models),
             "messages": openrouter_messages,
         }
+        request_body = self._build_request_with_model(request_body, model, fallback_models)
 
         # Add optional parameters
         if openrouter_tools:
@@ -1391,7 +1452,29 @@ class OpenRouterGenerationProvider(GenerationProvider):
                     json=request_body,
                     headers=headers,
                 )
-                response.raise_for_status()
+                
+                # Check for errors and provide detailed error messages
+                if response.status_code >= 400:
+                    error_detail = "No error details provided"
+                    try:
+                        error_body = response.json()
+                        error_detail = error_body.get("error", {})
+                        if isinstance(error_detail, dict):
+                            error_message = error_detail.get("message", "Unknown error")
+                            error_code = error_detail.get("code", "unknown")
+                            error_detail = f"{error_code}: {error_message}"
+                        elif isinstance(error_detail, str):
+                            error_detail = error_detail
+                        else:
+                            error_detail = str(error_body)
+                    except Exception:
+                        error_detail = response.text or "Unable to parse error response"
+                    
+                    logger.error(
+                        f"OpenRouter API error ({response.status_code}): {error_detail}\nRequest body: {request_body}"
+                    )
+                    response.raise_for_status()
+                
                 openrouter_response: OpenRouterResponse = response.json()
 
         except asyncio.TimeoutError as e:

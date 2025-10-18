@@ -4,6 +4,7 @@ Providers Example
 This example demonstrates how to use different model providers with the Agentle framework.
 """
 
+import logging
 from dotenv import load_dotenv
 
 from agentle.generations.models.message_parts.file import FilePart
@@ -16,13 +17,17 @@ from agentle.generations.providers.openrouter.openrouter_generation_provider imp
 
 load_dotenv()
 
+logging.basicConfig(level=logging.DEBUG)
+
 
 def add_numbers(a: float, b: float) -> float:
     return a + b
 
 
 # Example 1: Create an agent with Google's Gemini model
-provider: GenerationProvider = OpenRouterGenerationProvider()
+provider: GenerationProvider = OpenRouterGenerationProvider().with_fallback_models(
+    "openai/gpt-5-nano"
+)
 
 example_file = FilePart.from_local_file(
     "/Users/arthurbrenno/Documents/Dev/Paragon/agentle/examples/dog.jpeg",
