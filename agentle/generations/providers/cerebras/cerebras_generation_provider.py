@@ -263,7 +263,7 @@ class CerebrasGenerationProvider(GenerationProvider):
                     "name": "json_schema",
                     "strict": True,
                     "schema": JsonSchemaBuilder(
-                        cast(type[Any], response_schema),
+                        cast(type[Any], response_schema), # type: ignore
                         use_defs_instead_of_definitions=True,
                         clean_output=True,
                         strict_mode=True,

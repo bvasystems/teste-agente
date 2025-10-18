@@ -293,6 +293,7 @@ class OpenRouterRequest(TypedDict):
     temperature: NotRequired[float]
     max_tokens: NotRequired[int]
     top_p: NotRequired[float]
+    top_k: NotRequired[float]
     frequency_penalty: NotRequired[float]
     presence_penalty: NotRequired[float]
     stream: NotRequired[bool]
@@ -302,3 +303,78 @@ class OpenRouterRequest(TypedDict):
     provider: NotRequired[OpenRouterProviderPreferences]
     plugins: NotRequired[Sequence[OpenRouterPlugin]]
     transforms: NotRequired[Sequence[Literal["middle-out"]]]  # Context compression
+
+
+# OpenRouter Models API types
+
+
+class OpenRouterModelPricing(TypedDict):
+    """Pricing information for a model."""
+
+    prompt: float | str  # Price per million tokens
+    completion: float | str  # Price per million tokens
+    request: NotRequired[float | str | None]  # Price per request
+    image: NotRequired[float | str | None]  # Price per image
+    image_output: NotRequired[float | str | None]  # Price per output image
+    audio: NotRequired[float | str | None]  # Price per audio
+    input_audio_cache: NotRequired[float | str | None]  # Price per cached audio
+    web_search: NotRequired[float | str | None]  # Price per web search
+    internal_reasoning: NotRequired[float | str | None]  # Price per reasoning token
+    input_cache_read: NotRequired[float | str | None]  # Price per cache read
+    input_cache_write: NotRequired[float | str | None]  # Price per cache write
+    discount: NotRequired[float | None]  # Discount multiplier
+
+
+class OpenRouterModelArchitecture(TypedDict):
+    """Model architecture information."""
+
+    modality: NotRequired[str]
+    tokenizer: NotRequired[str]
+    instruct_type: NotRequired[str | None]
+
+
+class OpenRouterModelTopProvider(TypedDict):
+    """Information about the top provider."""
+
+    context_length: NotRequired[int | None]
+    max_completion_tokens: NotRequired[int | None]
+    is_moderated: NotRequired[bool]
+
+
+class OpenRouterModelPerRequestLimits(TypedDict):
+    """Per-request token limits."""
+
+    prompt_tokens: NotRequired[int | str | None]
+    completion_tokens: NotRequired[int | str | None]
+
+
+class OpenRouterModelDefaultParams(TypedDict):
+    """Default parameters for the model."""
+
+    temperature: NotRequired[float]
+    top_p: NotRequired[float]
+    top_k: NotRequired[int]
+
+
+class OpenRouterModel(TypedDict):
+    """Model information from OpenRouter /models endpoint."""
+
+    id: str
+    canonical_slug: NotRequired[str]
+    name: str
+    created: NotRequired[float]
+    pricing: OpenRouterModelPricing
+    context_length: NotRequired[int | None]
+    architecture: NotRequired[OpenRouterModelArchitecture]
+    top_provider: NotRequired[OpenRouterModelTopProvider]
+    per_request_limits: NotRequired[OpenRouterModelPerRequestLimits | None]
+    supported_parameters: NotRequired[Sequence[str]]
+    default_parameters: NotRequired[OpenRouterModelDefaultParams]
+    hugging_face_id: NotRequired[str | None]
+    description: NotRequired[str | None]
+
+
+class OpenRouterModelsResponse(TypedDict):
+    """Response from OpenRouter /models endpoint."""
+
+    data: Sequence[OpenRouterModel]

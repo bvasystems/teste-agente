@@ -69,6 +69,8 @@ from agentle.generations.providers.openrouter._types import (
     OpenRouterMaxPrice,
     OpenRouterWebSearchPlugin,
     OpenRouterFileParserPlugin,
+    OpenRouterModelsResponse,
+    OpenRouterModel,
 )
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
@@ -124,6 +126,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
     fallback_models: Sequence[str] | None
     message_adapter: AgentleMessageToOpenRouterMessageAdapter
     tool_adapter: AgentleToolToOpenRouterToolAdapter
+    _models_cache: dict[str, OpenRouterModel] | None
 
     def __init__(
         self,
@@ -180,23 +183,72 @@ class OpenRouterGenerationProvider(GenerationProvider):
             message_adapter or AgentleMessageToOpenRouterMessageAdapter()
         )
         self.tool_adapter = tool_adapter or AgentleToolToOpenRouterToolAdapter()
+        self._models_cache = None  # Lazy-loaded on first pricing request
 
     # ==================== Helper Methods ====================
 
-    def _build_model_param(self, model: str | ModelKind | None) -> str | Sequence[str]:
-        """Build the model parameter with fallbacks if configured.
+    async def _fetch_models(self) -> dict[str, OpenRouterModel]:
+        """Fetch available models from OpenRouter API and cache them.
+        
+        Returns:
+            Dictionary mapping model IDs to model information
+        """
+        if self._models_cache is not None:
+            return self._models_cache
+        
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        
+        if self.default_headers:
+            headers.update(self.default_headers)
+        
+        client = self.http_client or httpx.AsyncClient()
+        
+        try:
+            response = await client.get(
+                f"{self.base_url}/models",
+                headers=headers,
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            
+            models_response: OpenRouterModelsResponse = response.json()
+            self._models_cache = {model["id"]: model for model in models_response["data"]}
+            
+            return self._models_cache
+        except Exception as e:
+            logger.warning(f"Failed to fetch models from OpenRouter: {e}")
+            # Return empty cache on failure
+            self._models_cache = {}
+            return self._models_cache
+        finally:
+            if self.http_client is None:
+                await client.aclose()
+
+    def _build_model_param(
+        self, 
+        model: str | ModelKind | None,
+        fallback_models: Sequence[str] | None = None
+    ) -> str | Sequence[str]:
+        """Build the model parameter with fallbacks if provided.
         
         Args:
             model: Primary model to use
+            fallback_models: Optional list of fallback models to try if primary fails
             
         Returns:
             Model string or list of models with fallbacks
         """
         primary_model = model or self.default_model
         
-        # If fallback models are configured, return as array
-        if self.fallback_models:
-            return [primary_model, *self.fallback_models]
+        # Prefer parameter fallbacks over instance fallbacks
+        fallbacks = fallback_models if fallback_models is not None else self.fallback_models
+        
+        # If fallback models are provided, return as array
+        if fallbacks:
+            return [primary_model, *fallbacks]
         
         return primary_model
 
@@ -1066,6 +1118,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
         response_schema: type[T] | None = None,
         generation_config: GenerationConfig | GenerationConfigDict | None = None,
         tools: Sequence[Tool] | None = None,
+        fallback_models: Sequence[str] | None = None,
     ) -> AsyncGenerator[Generation[WithoutStructuredOutput], None]:
         """
         Stream generations asynchronously from OpenRouter.
@@ -1083,6 +1136,8 @@ class OpenRouterGenerationProvider(GenerationProvider):
             response_schema: Optional schema for structured output (via prompt instruction).
             generation_config: Optional generation configuration.
             tools: Optional tools for function calling.
+            fallback_models: Optional list of fallback models to try if primary fails.
+                Overrides instance fallback_models if provided.
 
         Yields:
             Generation objects as they are produced.
@@ -1136,7 +1191,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
         # Build the request with model routing support
         request_body: OpenRouterRequest = {
-            "model": self._build_model_param(model),
+            "model": self._build_model_param(model, fallback_models),
             "messages": openrouter_messages,
             "stream": True,
         }
@@ -1155,6 +1210,8 @@ class OpenRouterGenerationProvider(GenerationProvider):
             request_body["max_tokens"] = _generation_config.max_output_tokens
         if _generation_config.top_p is not None:
             request_body["top_p"] = _generation_config.top_p
+        if _generation_config.top_k is not None:
+            request_body["top_k"] = _generation_config.top_k
 
         # Add plugins if configured
         if self.plugins:
@@ -1224,6 +1281,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
         response_schema: type[T] | None = None,
         generation_config: GenerationConfig | GenerationConfigDict | None = None,
         tools: Sequence[Tool] | None = None,
+        fallback_models: Sequence[str] | None = None,
     ) -> Generation[T]:
         """
         Create a generation asynchronously using OpenRouter.
@@ -1238,6 +1296,8 @@ class OpenRouterGenerationProvider(GenerationProvider):
             response_schema: Optional Pydantic model for structured output parsing.
             generation_config: Optional configuration for the generation request.
             tools: Optional sequence of Tool objects for function calling.
+            fallback_models: Optional list of fallback models to try if primary fails.
+                Overrides instance fallback_models if provided.
 
         Returns:
             Generation[T]: An Agentle Generation object containing the model's response,
@@ -1274,7 +1334,7 @@ class OpenRouterGenerationProvider(GenerationProvider):
 
         # Build the request with model routing support
         request_body: OpenRouterRequest = {
-            "model": self._build_model_param(model),
+            "model": self._build_model_param(model, fallback_models),
             "messages": openrouter_messages,
         }
 
@@ -1295,6 +1355,8 @@ class OpenRouterGenerationProvider(GenerationProvider):
             request_body["max_tokens"] = _generation_config.max_output_tokens
         if _generation_config.top_p is not None:
             request_body["top_p"] = _generation_config.top_p
+        if _generation_config.top_k is not None:
+            request_body["top_k"] = _generation_config.top_k
 
         # Add plugins if configured
         if self.plugins:
@@ -1391,38 +1453,46 @@ class OpenRouterGenerationProvider(GenerationProvider):
         """
         Get the price per million tokens for input/prompt tokens.
 
-        Note: OpenRouter pricing varies by provider and model. This provides
-        approximate pricing for common models. For exact pricing, check
-        https://openrouter.ai/models
+        Dynamically fetches pricing from OpenRouter's /models API endpoint.
+        Pricing is cached after the first request for performance.
 
         Args:
             model: The model identifier.
             estimate_tokens: Optional estimate of token count (not used).
 
         Returns:
-            float: The approximate price per million input tokens.
+            float: The price per million input tokens from OpenRouter.
         """
-        # Sample pricing for common models
-        # Actual pricing may vary and should be checked on OpenRouter
-        input_prices: Mapping[str, float] = {
-            "anthropic/claude-opus-4.1": 15.0,
-            "anthropic/claude-sonnet-4.5": 3.0,
-            "anthropic/claude-3.5-haiku": 1.0,
-            "google/gemini-2.5-flash-preview-09-2025": 0.075,
-            "google/gemini-2.5-flash-lite-preview-09-2025": 0.0375,
-            "deepseek/deepseek-v3.2-exp": 0.27,
-            "openai/gpt-4o": 2.5,
-            "openai/gpt-4o-mini": 0.15,
-        }
-
-        price = input_prices.get(model)
-        if price is None:
-            logger.warning(
-                f"OpenRouter model {model} not found in pricing table. "
-                + "Returning 0.0. Check https://openrouter.ai/models for actual pricing."
+        try:
+            models = await self._fetch_models()
+            
+            if model not in models:
+                logger.warning(
+                    f"OpenRouter model '{model}' not found in models list. Returning 0.0. Available models: {len(models)}"
+                )
+                return 0.0
+            
+            model_info = models[model]
+            pricing = model_info.get("pricing", {})
+            prompt_price = pricing.get("prompt", 0.0)
+            
+            # Convert string prices to float if needed
+            if isinstance(prompt_price, str):
+                try:
+                    prompt_price = float(prompt_price)
+                except ValueError:
+                    logger.warning(
+                        f"Could not parse prompt price '{prompt_price}' for model {model}"
+                    )
+                    return 0.0
+            
+            return float(prompt_price)
+            
+        except Exception as e:
+            logger.error(
+                f"Error fetching pricing for model {model}: {e}. Returning 0.0"
             )
             return 0.0
-        return price
 
     @override
     async def price_per_million_tokens_output(
@@ -1431,35 +1501,43 @@ class OpenRouterGenerationProvider(GenerationProvider):
         """
         Get the price per million tokens for output/completion tokens.
 
-        Note: OpenRouter pricing varies by provider and model. This provides
-        approximate pricing for common models. For exact pricing, check
-        https://openrouter.ai/models
+        Dynamically fetches pricing from OpenRouter's /models API endpoint.
+        Pricing is cached after the first request for performance.
 
         Args:
             model: The model identifier.
             estimate_tokens: Optional estimate of token count (not used).
 
         Returns:
-            float: The approximate price per million output tokens.
+            float: The price per million output tokens from OpenRouter.
         """
-        # Sample pricing for common models
-        # Actual pricing may vary and should be checked on OpenRouter
-        output_prices: Mapping[str, float] = {
-            "anthropic/claude-opus-4.1": 75.0,
-            "anthropic/claude-sonnet-4.5": 15.0,
-            "anthropic/claude-3.5-haiku": 5.0,
-            "google/gemini-2.5-flash-preview-09-2025": 0.3,
-            "google/gemini-2.5-flash-lite-preview-09-2025": 0.15,
-            "deepseek/deepseek-v3.2-exp": 1.10,
-            "openai/gpt-4o": 10.0,
-            "openai/gpt-4o-mini": 0.6,
-        }
-
-        price = output_prices.get(model)
-        if price is None:
-            logger.warning(
-                f"OpenRouter model {model} not found in pricing table. "
-                + "Returning 0.0. Check https://openrouter.ai/models for actual pricing."
+        try:
+            models = await self._fetch_models()
+            
+            if model not in models:
+                logger.warning(
+                    f"OpenRouter model '{model}' not found in models list. Returning 0.0. Available models: {len(models)}"
+                )
+                return 0.0
+            
+            model_info = models[model]
+            pricing = model_info.get("pricing", {})
+            completion_price = pricing.get("completion", 0.0)
+            
+            # Convert string prices to float if needed
+            if isinstance(completion_price, str):
+                try:
+                    completion_price = float(completion_price)
+                except ValueError:
+                    logger.warning(
+                        f"Could not parse completion price '{completion_price}' for model {model}"
+                    )
+                    return 0.0
+            
+            return float(completion_price)
+            
+        except Exception as e:
+            logger.error(
+                f"Error fetching pricing for model {model}: {e}. Returning 0.0"
             )
             return 0.0
-        return price
