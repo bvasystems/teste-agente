@@ -25,19 +25,19 @@ def add_numbers(a: float, b: float) -> float:
 provider: GenerationProvider = OpenRouterGenerationProvider()
 
 example_file = FilePart.from_local_file(
-    "/Users/arthurbrenno/Documents/Dev/Paragon/agentle/examples/curriculum.pdf",
-    "application/pdf",
+    "/Users/arthurbrenno/Documents/Dev/Paragon/agentle/examples/dog.jpeg",
+    "image/jpeg",
 )
 
 # Run the Google agent
 generation = provider.generate(
-    model="google/gemini-2.5-flash",
+    model="openai/gpt-oss-120b",
     messages=[
         UserMessage(
             parts=[
                 example_file,
                 TextPart(
-                    text="Sobre o que este PDF fala?",
+                    text="O que essa imagem representa?",
                 ),
             ]
         )
