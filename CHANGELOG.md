@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.9.1
+- fix(openrouter): when fallback models are used, use "models" in the requests, not "model"
+
 ## v0.9.0 🚀
 
 **Release Date:** October 18, 2024
