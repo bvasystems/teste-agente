@@ -66,6 +66,9 @@ from agentle.generations.providers.openrouter._types import (
     OpenRouterProviderPreferences,
     OpenRouterResponseFormat,
     OpenRouterPlugin,
+    OpenRouterMaxPrice,
+    OpenRouterWebSearchPlugin,
+    OpenRouterFileParserPlugin,
 )
 from agentle.generations.providers.types.model_kind import ModelKind
 from agentle.generations.tools.tool import Tool
@@ -172,6 +175,691 @@ class OpenRouterGenerationProvider(GenerationProvider):
             message_adapter or AgentleMessageToOpenRouterMessageAdapter()
         )
         self.tool_adapter = tool_adapter or AgentleToolToOpenRouterToolAdapter()
+
+    # ==================== Factory Methods ====================
+
+    @classmethod
+    def with_cheapest_routing(
+        cls,
+        api_key: str | None = None,
+        otel_clients: Sequence[OtelClient] | None = None,
+        provider_id: str | None = None,
+        base_url: str = "https://openrouter.ai/api/v1",
+        max_retries: int = 2,
+        default_headers: dict[str, str] | None = None,
+        http_client: httpx.AsyncClient | None = None,
+        plugins: Sequence[OpenRouterPlugin] | None = None,
+        transforms: Sequence[Literal["middle-out"]] | None = None,
+        message_adapter: AgentleMessageToOpenRouterMessageAdapter | None = None,
+        tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
+    ) -> "OpenRouterGenerationProvider":
+        """Create provider configured to always use the cheapest available provider.
+        
+        Equivalent to setting provider_preferences with sort="price".
+        
+        Args:
+            api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
+            otel_clients: Optional OpenTelemetry clients for tracing
+            provider_id: Optional provider identifier for tracing
+            base_url: Base URL for OpenRouter API
+            max_retries: Maximum number of retries for failed requests
+            default_headers: Default headers to include in all requests
+            http_client: Optional httpx client to reuse
+            plugins: Optional plugins (web search, file parser)
+            transforms: Optional transforms (middle-out compression)
+            message_adapter: Optional custom message adapter
+            tool_adapter: Optional custom tool adapter
+            
+        Returns:
+            Configured OpenRouterGenerationProvider instance
+        """
+        preferences: OpenRouterProviderPreferences = {"sort": "price"}
+        return cls(
+            api_key=api_key,
+            otel_clients=otel_clients,
+            provider_id=provider_id,
+            base_url=base_url,
+            max_retries=max_retries,
+            default_headers=default_headers,
+            http_client=http_client,
+            provider_preferences=preferences,
+            plugins=plugins,
+            transforms=transforms,
+            message_adapter=message_adapter,
+            tool_adapter=tool_adapter,
+        )
+
+    @classmethod
+    def with_fastest_routing(
+        cls,
+        api_key: str | None = None,
+        otel_clients: Sequence[OtelClient] | None = None,
+        provider_id: str | None = None,
+        base_url: str = "https://openrouter.ai/api/v1",
+        max_retries: int = 2,
+        default_headers: dict[str, str] | None = None,
+        http_client: httpx.AsyncClient | None = None,
+        plugins: Sequence[OpenRouterPlugin] | None = None,
+        transforms: Sequence[Literal["middle-out"]] | None = None,
+        message_adapter: AgentleMessageToOpenRouterMessageAdapter | None = None,
+        tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
+    ) -> "OpenRouterGenerationProvider":
+        """Create provider configured to prioritize highest throughput (Nitro mode).
+        
+        Equivalent to setting provider_preferences with sort="throughput".
+        
+        Args:
+            api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
+            otel_clients: Optional OpenTelemetry clients for tracing
+            provider_id: Optional provider identifier for tracing
+            base_url: Base URL for OpenRouter API
+            max_retries: Maximum number of retries for failed requests
+            default_headers: Default headers to include in all requests
+            http_client: Optional httpx client to reuse
+            plugins: Optional plugins (web search, file parser)
+            transforms: Optional transforms (middle-out compression)
+            message_adapter: Optional custom message adapter
+            tool_adapter: Optional custom tool adapter
+            
+        Returns:
+            Configured OpenRouterGenerationProvider instance
+        """
+        preferences: OpenRouterProviderPreferences = {"sort": "throughput"}
+        return cls(
+            api_key=api_key,
+            otel_clients=otel_clients,
+            provider_id=provider_id,
+            base_url=base_url,
+            max_retries=max_retries,
+            default_headers=default_headers,
+            http_client=http_client,
+            provider_preferences=preferences,
+            plugins=plugins,
+            transforms=transforms,
+            message_adapter=message_adapter,
+            tool_adapter=tool_adapter,
+        )
+
+    @classmethod
+    def with_lowest_latency(
+        cls,
+        api_key: str | None = None,
+        otel_clients: Sequence[OtelClient] | None = None,
+        provider_id: str | None = None,
+        base_url: str = "https://openrouter.ai/api/v1",
+        max_retries: int = 2,
+        default_headers: dict[str, str] | None = None,
+        http_client: httpx.AsyncClient | None = None,
+        plugins: Sequence[OpenRouterPlugin] | None = None,
+        transforms: Sequence[Literal["middle-out"]] | None = None,
+        message_adapter: AgentleMessageToOpenRouterMessageAdapter | None = None,
+        tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
+    ) -> "OpenRouterGenerationProvider":
+        """Create provider configured to prioritize lowest latency.
+        
+        Equivalent to setting provider_preferences with sort="latency".
+        
+        Args:
+            api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
+            otel_clients: Optional OpenTelemetry clients for tracing
+            provider_id: Optional provider identifier for tracing
+            base_url: Base URL for OpenRouter API
+            max_retries: Maximum number of retries for failed requests
+            default_headers: Default headers to include in all requests
+            http_client: Optional httpx client to reuse
+            plugins: Optional plugins (web search, file parser)
+            transforms: Optional transforms (middle-out compression)
+            message_adapter: Optional custom message adapter
+            tool_adapter: Optional custom tool adapter
+            
+        Returns:
+            Configured OpenRouterGenerationProvider instance
+        """
+        preferences: OpenRouterProviderPreferences = {"sort": "latency"}
+        return cls(
+            api_key=api_key,
+            otel_clients=otel_clients,
+            provider_id=provider_id,
+            base_url=base_url,
+            max_retries=max_retries,
+            default_headers=default_headers,
+            http_client=http_client,
+            provider_preferences=preferences,
+            plugins=plugins,
+            transforms=transforms,
+            message_adapter=message_adapter,
+            tool_adapter=tool_adapter,
+        )
+
+    @classmethod
+    def with_zdr_enforcement(
+        cls,
+        api_key: str | None = None,
+        otel_clients: Sequence[OtelClient] | None = None,
+        provider_id: str | None = None,
+        base_url: str = "https://openrouter.ai/api/v1",
+        max_retries: int = 2,
+        default_headers: dict[str, str] | None = None,
+        http_client: httpx.AsyncClient | None = None,
+        plugins: Sequence[OpenRouterPlugin] | None = None,
+        transforms: Sequence[Literal["middle-out"]] | None = None,
+        message_adapter: AgentleMessageToOpenRouterMessageAdapter | None = None,
+        tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
+    ) -> "OpenRouterGenerationProvider":
+        """Create provider with Zero Data Retention enforcement.
+        
+        Only routes to endpoints that do not retain prompts.
+        
+        Args:
+            api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
+            otel_clients: Optional OpenTelemetry clients for tracing
+            provider_id: Optional provider identifier for tracing
+            base_url: Base URL for OpenRouter API
+            max_retries: Maximum number of retries for failed requests
+            default_headers: Default headers to include in all requests
+            http_client: Optional httpx client to reuse
+            plugins: Optional plugins (web search, file parser)
+            transforms: Optional transforms (middle-out compression)
+            message_adapter: Optional custom message adapter
+            tool_adapter: Optional custom tool adapter
+            
+        Returns:
+            Configured OpenRouterGenerationProvider instance
+        """
+        preferences: OpenRouterProviderPreferences = {"zdr": True}
+        return cls(
+            api_key=api_key,
+            otel_clients=otel_clients,
+            provider_id=provider_id,
+            base_url=base_url,
+            max_retries=max_retries,
+            default_headers=default_headers,
+            http_client=http_client,
+            provider_preferences=preferences,
+            plugins=plugins,
+            transforms=transforms,
+            message_adapter=message_adapter,
+            tool_adapter=tool_adapter,
+        )
+
+    @classmethod
+    def with_privacy_mode(
+        cls,
+        api_key: str | None = None,
+        otel_clients: Sequence[OtelClient] | None = None,
+        provider_id: str | None = None,
+        base_url: str = "https://openrouter.ai/api/v1",
+        max_retries: int = 2,
+        default_headers: dict[str, str] | None = None,
+        http_client: httpx.AsyncClient | None = None,
+        plugins: Sequence[OpenRouterPlugin] | None = None,
+        transforms: Sequence[Literal["middle-out"]] | None = None,
+        message_adapter: AgentleMessageToOpenRouterMessageAdapter | None = None,
+        tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
+    ) -> "OpenRouterGenerationProvider":
+        """Create provider that only uses providers which don't collect user data.
+        
+        Combines ZDR enforcement with data_collection="deny".
+        
+        Args:
+            api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
+            otel_clients: Optional OpenTelemetry clients for tracing
+            provider_id: Optional provider identifier for tracing
+            base_url: Base URL for OpenRouter API
+            max_retries: Maximum number of retries for failed requests
+            default_headers: Default headers to include in all requests
+            http_client: Optional httpx client to reuse
+            plugins: Optional plugins (web search, file parser)
+            transforms: Optional transforms (middle-out compression)
+            message_adapter: Optional custom message adapter
+            tool_adapter: Optional custom tool adapter
+            
+        Returns:
+            Configured OpenRouterGenerationProvider instance
+        """
+        preferences: OpenRouterProviderPreferences = {
+            "zdr": True,
+            "data_collection": "deny",
+        }
+        return cls(
+            api_key=api_key,
+            otel_clients=otel_clients,
+            provider_id=provider_id,
+            base_url=base_url,
+            max_retries=max_retries,
+            default_headers=default_headers,
+            http_client=http_client,
+            provider_preferences=preferences,
+            plugins=plugins,
+            transforms=transforms,
+            message_adapter=message_adapter,
+            tool_adapter=tool_adapter,
+        )
+
+    @classmethod
+    def with_specific_providers(
+        cls,
+        providers: Sequence[str],
+        allow_fallbacks: bool = True,
+        api_key: str | None = None,
+        otel_clients: Sequence[OtelClient] | None = None,
+        provider_id: str | None = None,
+        base_url: str = "https://openrouter.ai/api/v1",
+        max_retries: int = 2,
+        default_headers: dict[str, str] | None = None,
+        http_client: httpx.AsyncClient | None = None,
+        plugins: Sequence[OpenRouterPlugin] | None = None,
+        transforms: Sequence[Literal["middle-out"]] | None = None,
+        message_adapter: AgentleMessageToOpenRouterMessageAdapter | None = None,
+        tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
+    ) -> "OpenRouterGenerationProvider":
+        """Create provider that tries specific providers in order.
+        
+        Args:
+            providers: List of provider slugs to try (e.g., ["anthropic", "openai"])
+            allow_fallbacks: Whether to allow other providers if specified ones fail
+            api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
+            otel_clients: Optional OpenTelemetry clients for tracing
+            provider_id: Optional provider identifier for tracing
+            base_url: Base URL for OpenRouter API
+            max_retries: Maximum number of retries for failed requests
+            default_headers: Default headers to include in all requests
+            http_client: Optional httpx client to reuse
+            plugins: Optional plugins (web search, file parser)
+            transforms: Optional transforms (middle-out compression)
+            message_adapter: Optional custom message adapter
+            tool_adapter: Optional custom tool adapter
+            
+        Returns:
+            Configured OpenRouterGenerationProvider instance
+            
+        Example:
+            >>> provider = OpenRouterGenerationProvider.with_specific_providers(
+            ...     providers=["anthropic", "openai"],
+            ...     allow_fallbacks=False
+            ... )
+        """
+        preferences: OpenRouterProviderPreferences = {
+            "order": providers,
+            "allow_fallbacks": allow_fallbacks,
+        }
+        return cls(
+            api_key=api_key,
+            otel_clients=otel_clients,
+            provider_id=provider_id,
+            base_url=base_url,
+            max_retries=max_retries,
+            default_headers=default_headers,
+            http_client=http_client,
+            provider_preferences=preferences,
+            plugins=plugins,
+            transforms=transforms,
+            message_adapter=message_adapter,
+            tool_adapter=tool_adapter,
+        )
+
+    @classmethod
+    def with_web_search(
+        cls,
+        api_key: str | None = None,
+        max_results: int = 5,
+        otel_clients: Sequence[OtelClient] | None = None,
+        provider_id: str | None = None,
+        base_url: str = "https://openrouter.ai/api/v1",
+        max_retries: int = 2,
+        default_headers: dict[str, str] | None = None,
+        http_client: httpx.AsyncClient | None = None,
+        provider_preferences: OpenRouterProviderPreferences | None = None,
+        transforms: Sequence[Literal["middle-out"]] | None = None,
+        message_adapter: AgentleMessageToOpenRouterMessageAdapter | None = None,
+        tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
+    ) -> "OpenRouterGenerationProvider":
+        """Create provider with web search plugin enabled.
+        
+        Args:
+            api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
+            max_results: Maximum number of search results to return
+            otel_clients: Optional OpenTelemetry clients for tracing
+            provider_id: Optional provider identifier for tracing
+            base_url: Base URL for OpenRouter API
+            max_retries: Maximum number of retries for failed requests
+            default_headers: Default headers to include in all requests
+            http_client: Optional httpx client to reuse
+            provider_preferences: Optional provider routing preferences
+            transforms: Optional transforms (middle-out compression)
+            message_adapter: Optional custom message adapter
+            tool_adapter: Optional custom tool adapter
+            
+        Returns:
+            Configured OpenRouterGenerationProvider instance
+        """
+        plugins: list[OpenRouterPlugin] = [
+            {"id": "web", "max_results": max_results}  # type: ignore
+        ]
+        return cls(
+            api_key=api_key,
+            otel_clients=otel_clients,
+            provider_id=provider_id,
+            base_url=base_url,
+            max_retries=max_retries,
+            default_headers=default_headers,
+            http_client=http_client,
+            provider_preferences=provider_preferences,
+            plugins=plugins,
+            transforms=transforms,
+            message_adapter=message_adapter,
+            tool_adapter=tool_adapter,
+        )
+
+    @classmethod
+    def with_context_compression(
+        cls,
+        api_key: str | None = None,
+        otel_clients: Sequence[OtelClient] | None = None,
+        provider_id: str | None = None,
+        base_url: str = "https://openrouter.ai/api/v1",
+        max_retries: int = 2,
+        default_headers: dict[str, str] | None = None,
+        http_client: httpx.AsyncClient | None = None,
+        provider_preferences: OpenRouterProviderPreferences | None = None,
+        plugins: Sequence[OpenRouterPlugin] | None = None,
+        message_adapter: AgentleMessageToOpenRouterMessageAdapter | None = None,
+        tool_adapter: AgentleToolToOpenRouterToolAdapter | None = None,
+    ) -> "OpenRouterGenerationProvider":
+        """Create provider with middle-out context compression enabled.
+        
+        Useful for long contexts that exceed model limits.
+        
+        Args:
+            api_key: Optional API key (uses OPENROUTER_API_KEY env var if not provided)
+            otel_clients: Optional OpenTelemetry clients for tracing
+            provider_id: Optional provider identifier for tracing
+            base_url: Base URL for OpenRouter API
+            max_retries: Maximum number of retries for failed requests
+            default_headers: Default headers to include in all requests
+            http_client: Optional httpx client to reuse
+            provider_preferences: Optional provider routing preferences
+            plugins: Optional plugins (web search, file parser)
+            message_adapter: Optional custom message adapter
+            tool_adapter: Optional custom tool adapter
+            
+        Returns:
+            Configured OpenRouterGenerationProvider instance
+        """
+        return cls(
+            api_key=api_key,
+            otel_clients=otel_clients,
+            provider_id=provider_id,
+            base_url=base_url,
+            max_retries=max_retries,
+            default_headers=default_headers,
+            http_client=http_client,
+            provider_preferences=provider_preferences,
+            plugins=plugins,
+            transforms=["middle-out"],
+            message_adapter=message_adapter,
+            tool_adapter=tool_adapter,
+        )
+
+    # ==================== Builder-Style Methods ====================
+
+    def order_by_cheapest(self) -> "OpenRouterGenerationProvider":
+        """Configure to always use the cheapest provider (floor pricing).
+        
+        Returns:
+            Self for method chaining
+        """
+        if self.provider_preferences is None:
+            self.provider_preferences = {}
+        self.provider_preferences["sort"] = "price"
+        return self
+
+    def order_by_fastest(self) -> "OpenRouterGenerationProvider":
+        """Configure to prioritize highest throughput (Nitro mode).
+        
+        Returns:
+            Self for method chaining
+        """
+        if self.provider_preferences is None:
+            self.provider_preferences = {}
+        self.provider_preferences["sort"] = "throughput"
+        return self
+
+    def order_by_lowest_latency(self) -> "OpenRouterGenerationProvider":
+        """Configure to prioritize lowest latency.
+        
+        Returns:
+            Self for method chaining
+        """
+        if self.provider_preferences is None:
+            self.provider_preferences = {}
+        self.provider_preferences["sort"] = "latency"
+        return self
+
+    def enable_zdr(self) -> "OpenRouterGenerationProvider":
+        """Enable Zero Data Retention enforcement.
+        
+        Only routes to endpoints that do not retain prompts.
+        
+        Returns:
+            Self for method chaining
+        """
+        if self.provider_preferences is None:
+            self.provider_preferences = {}
+        self.provider_preferences["zdr"] = True
+        return self
+
+    def deny_data_collection(self) -> "OpenRouterGenerationProvider":
+        """Only use providers that don't collect user data.
+        
+        Returns:
+            Self for method chaining
+        """
+        if self.provider_preferences is None:
+            self.provider_preferences = {}
+        self.provider_preferences["data_collection"] = "deny"
+        return self
+
+    def allow_data_collection(self) -> "OpenRouterGenerationProvider":
+        """Allow providers that may collect user data (default).
+        
+        Returns:
+            Self for method chaining
+        """
+        if self.provider_preferences is None:
+            self.provider_preferences = {}
+        self.provider_preferences["data_collection"] = "allow"
+        return self
+
+    def set_provider_order(self, providers: Sequence[str]) -> "OpenRouterGenerationProvider":
+        """Set the order of providers to try.
+        
+        Args:
+            providers: List of provider slugs (e.g., ["anthropic", "openai"])
+            
+        Returns:
+            Self for method chaining
+        """
+        if self.provider_preferences is None:
+            self.provider_preferences = {}
+        self.provider_preferences["order"] = providers
+        return self
+
+    def allow_only_providers(self, providers: Sequence[str]) -> "OpenRouterGenerationProvider":
+        """Only allow specific providers for requests.
+        
+        Args:
+            providers: List of provider slugs to allow
+            
+        Returns:
+            Self for method chaining
+        """
+        if self.provider_preferences is None:
+            self.provider_preferences = {}
+        self.provider_preferences["only"] = providers
+        return self
+
+    def ignore_providers(self, providers: Sequence[str]) -> "OpenRouterGenerationProvider":
+        """Ignore specific providers for requests.
+        
+        Args:
+            providers: List of provider slugs to ignore
+            
+        Returns:
+            Self for method chaining
+        """
+        if self.provider_preferences is None:
+            self.provider_preferences = {}
+        self.provider_preferences["ignore"] = providers
+        return self
+
+    def disable_fallbacks(self) -> "OpenRouterGenerationProvider":
+        """Disable fallback providers.
+        
+        Request will fail if primary provider is unavailable.
+        
+        Returns:
+            Self for method chaining
+        """
+        if self.provider_preferences is None:
+            self.provider_preferences = {}
+        self.provider_preferences["allow_fallbacks"] = False
+        return self
+
+    def enable_fallbacks(self) -> "OpenRouterGenerationProvider":
+        """Enable fallback providers (default).
+        
+        Returns:
+            Self for method chaining
+        """
+        if self.provider_preferences is None:
+            self.provider_preferences = {}
+        self.provider_preferences["allow_fallbacks"] = True
+        return self
+
+    def require_all_parameters(self) -> "OpenRouterGenerationProvider":
+        """Only use providers that support all request parameters.
+        
+        Returns:
+            Self for method chaining
+        """
+        if self.provider_preferences is None:
+            self.provider_preferences = {}
+        self.provider_preferences["require_parameters"] = True
+        return self
+
+    def set_max_price(
+        self,
+        prompt: float | None = None,
+        completion: float | None = None,
+        request: float | None = None,
+        image: float | None = None,
+    ) -> "OpenRouterGenerationProvider":
+        """Set maximum pricing constraints.
+        
+        Args:
+            prompt: Max price per million prompt tokens
+            completion: Max price per million completion tokens
+            request: Max price per request
+            image: Max price per image
+            
+        Returns:
+            Self for method chaining
+            
+        Example:
+            >>> provider.set_max_price(prompt=1.0, completion=2.0)
+        """
+        if self.provider_preferences is None:
+            self.provider_preferences = {}
+        
+        max_price: OpenRouterMaxPrice = {}
+        if prompt is not None:
+            max_price["prompt"] = prompt
+        if completion is not None:
+            max_price["completion"] = completion
+        if request is not None:
+            max_price["request"] = request
+        if image is not None:
+            max_price["image"] = image
+            
+        self.provider_preferences["max_price"] = max_price
+        return self
+
+    def filter_by_quantization(self, quantizations: Sequence[str]) -> "OpenRouterGenerationProvider":
+        """Filter providers by quantization levels.
+        
+        Args:
+            quantizations: List of quantization levels (e.g., ["fp8", "int4"])
+                Valid values: int4, int8, fp4, fp6, fp8, fp16, bf16, fp32, unknown
+            
+        Returns:
+            Self for method chaining
+        """
+        if self.provider_preferences is None:
+            self.provider_preferences = {}
+        self.provider_preferences["quantizations"] = quantizations
+        return self
+
+    def enable_web_search(self, max_results: int = 5, engine: Literal["native", "exa"] = "exa") -> "OpenRouterGenerationProvider":
+        """Enable web search plugin.
+        
+        Args:
+            max_results: Maximum number of search results
+            engine: Search engine to use ("native" or "exa")
+            
+        Returns:
+            Self for method chaining
+        """
+        plugin: OpenRouterWebSearchPlugin = {
+            "id": "web",
+            "max_results": max_results,
+            "engine": engine,
+        }
+        if self.plugins is None:
+            self.plugins = [plugin]  # type: ignore
+        else:
+            # Remove existing web search plugin if any
+            self.plugins = [p for p in self.plugins if p.get("id") != "web"]  # type: ignore
+            self.plugins.append(plugin)  # type: ignore
+        return self
+
+    def enable_pdf_parsing(
+        self,
+        engine: Literal["pdf-text", "mistral-ocr", "native"] = "native"
+    ) -> "OpenRouterGenerationProvider":
+        """Enable PDF parsing plugin.
+        
+        Args:
+            engine: PDF parsing engine to use
+            
+        Returns:
+            Self for method chaining
+        """
+        plugin: OpenRouterFileParserPlugin = {
+            "id": "file-parser",
+            "pdf": {"engine": engine},
+        }
+        if self.plugins is None:
+            self.plugins = [plugin]  # type: ignore
+        else:
+            # Remove existing file parser plugin if any
+            self.plugins = [p for p in self.plugins if p.get("id") != "file-parser"]  # type: ignore
+            self.plugins.append(plugin)  # type: ignore
+        return self
+
+    def enable_context_compression(self) -> "OpenRouterGenerationProvider":
+        """Enable middle-out context compression.
+        
+        Useful for long contexts that exceed model limits.
+        
+        Returns:
+            Self for method chaining
+        """
+        if self.transforms is None:
+            self.transforms = ["middle-out"]
+        elif "middle-out" not in self.transforms:
+            self.transforms = list(self.transforms) + ["middle-out"]
+        return self
 
     @property
     @override
