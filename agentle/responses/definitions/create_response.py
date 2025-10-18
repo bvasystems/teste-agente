@@ -10,6 +10,8 @@ from typing import List, Optional, Union
 
 from pydantic import Field
 
+from openai import OpenAI
+OpenAI().responses.parse
 
 # Model dependencies
 from .conversation_param import ConversationParam

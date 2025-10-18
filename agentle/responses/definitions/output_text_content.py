@@ -10,14 +10,17 @@ from __future__ import annotations
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
+from openai import OpenAI
 
+client = OpenAI()
+client.responses.parse
 
 # Model dependencies
 from .annotation import Annotation
 from .log_prob import LogProb
 
 
-class OutputTextContent(BaseModel):
+class OutputTextContent[TextFormatT](BaseModel):
     type: Literal["OutputTextContent"] = Field(
         ..., description="The type of the output text. Always `output_text`."
     )
@@ -26,3 +29,4 @@ class OutputTextContent(BaseModel):
         ..., description="The annotations of the text output."
     )
     logprobs: Optional[List[LogProb]] = None
+    parsed: Optional[TextFormatT] = Field(default=None)

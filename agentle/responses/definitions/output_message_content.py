@@ -16,5 +16,7 @@ from .output_text_content import OutputTextContent
 from .refusal_content import RefusalContent
 
 
-class OutputMessageContent(RootModel[Union[OutputTextContent, RefusalContent]]):
+class OutputMessageContent[TextFormatT](
+    RootModel[Union[OutputTextContent[TextFormatT], RefusalContent]]
+):
     pass

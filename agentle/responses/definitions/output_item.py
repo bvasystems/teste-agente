@@ -27,10 +27,10 @@ from .reasoning_item import ReasoningItem
 from .web_search_tool_call import WebSearchToolCall
 
 
-class OutputItem(
+class OutputItem[TextFormatT](
     RootModel[
         Union[
-            OutputMessage,
+            OutputMessage[TextFormatT],
             FileSearchToolCall,
             FunctionToolCall,
             WebSearchToolCall,

@@ -17,7 +17,7 @@ from .role2 import Role2
 from .status5 import Status5
 
 
-class OutputMessage(BaseModel):
+class OutputMessage[TextFormatT](BaseModel):
     id: str = Field(..., description="The unique ID of the output message.\n")
     type: Literal["OutputMessage"] = Field(
         ..., description="The type of the output message. Always `message`.\n"
@@ -25,7 +25,7 @@ class OutputMessage(BaseModel):
     role: Role2 = Field(
         ..., description="The role of the output message. Always `assistant`.\n"
     )
-    content: List[OutputMessageContent] = Field(
+    content: List[OutputMessageContent[TextFormatT]] = Field(
         ..., description="The content of the output message.\n"
     )
     status: Status5 = Field(
