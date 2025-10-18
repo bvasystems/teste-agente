@@ -241,6 +241,7 @@ class FailoverGenerationProvider(GenerationProvider):
         response_schema: type[T] | None = None,
         generation_config: GenerationConfig | GenerationConfigDict | None = None,
         tools: Sequence[Tool] | None = None,
+        fallback_models: Sequence[str] | None = None,
     ) -> Generation[T]:
         """
         Create a generation with failover across multiple providers.
@@ -257,6 +258,7 @@ class FailoverGenerationProvider(GenerationProvider):
             messages: A sequence of Message objects to send to the model.
             response_schema: Optional Pydantic model for structured output parsing.
             generation_config: Optional configuration for the generation request.
+            fallback_models: Optional list of fallback models passed to underlying providers.
             tools: Optional sequence of Tool objects for function calling.
 
         Returns:
@@ -328,6 +330,7 @@ class FailoverGenerationProvider(GenerationProvider):
                     response_schema=response_schema,
                     generation_config=generation_config,
                     tools=tools,
+                    fallback_models=fallback_models,
                 )
 
                 # Success - record it if circuit breaker is configured

@@ -117,7 +117,9 @@ class BedrockGenerationProvider(GenerationProvider):
         response_schema: type[T] | None = None,
         generation_config: GenerationConfig | GenerationConfigDict | None = None,
         tools: Sequence[Tool[Any]] | None = None,
+        fallback_models: Sequence[str] | None = None,
     ) -> Generation[T]:
+        """Note: AWS Bedrock does not support fallback models. Parameter ignored."""
         message_adapter = AgentleMessageToBotoMessage()
 
         message_sequence = MessageSequence(messages)

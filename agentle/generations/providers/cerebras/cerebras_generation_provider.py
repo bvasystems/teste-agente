@@ -209,6 +209,7 @@ class CerebrasGenerationProvider(GenerationProvider):
         response_schema: type[T] | None = None,
         generation_config: GenerationConfig | GenerationConfigDict | None = None,
         tools: Sequence[Tool] | None = None,
+        fallback_models: Sequence[str] | None = None,
     ) -> Generation[T]:
         """
         Create a generation asynchronously using a Cerebras AI model.
@@ -217,6 +218,9 @@ class CerebrasGenerationProvider(GenerationProvider):
         sends the request to Cerebras's API, and processes the response into Agentle's
         standardized Generation format.
 
+        Note: Cerebras API does not natively support fallback models. The fallback_models
+        parameter is accepted for API compatibility but ignored.
+
         Args:
             model: The Cerebras model identifier to use for generation.
             messages: A sequence of Agentle messages to send to the model.
@@ -224,6 +228,7 @@ class CerebrasGenerationProvider(GenerationProvider):
             generation_config: Optional configuration for the generation request.
             tools: Optional sequence of Tool objects for function calling (not yet
                 supported by Cerebras).
+            fallback_models: Optional sequence of fallback model identifiers (ignored).
 
         Returns:
             Generation[T]: An Agentle Generation object containing the model's response,

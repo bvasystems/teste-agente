@@ -178,6 +178,7 @@ class GenerationProvider(abc.ABC):
         response_schema: type[T] | None = None,
         generation_config: GenerationConfig | GenerationConfigDict | None = None,
         tools: Sequence[Tool] | None = None,
+        fallback_models: Sequence[str] | None = None,
     ) -> AsyncGenerator[Generation[T], None]:
         # This is an abstract-like placeholder; subclasses should implement.
         # Include an unreachable yield so the function is treated as an async generator by type checkers.
@@ -356,6 +357,7 @@ class GenerationProvider(abc.ABC):
         response_schema: type[T] | None = None,
         generation_config: GenerationConfig | GenerationConfigDict | None = None,
         tools: Sequence[Tool] | None = None,
+        fallback_models: Sequence[str] | None = None,
     ) -> Generation[T]:
         """
         Create a generation from a message sequence synchronously.
@@ -369,6 +371,7 @@ class GenerationProvider(abc.ABC):
             response_schema: Optional Pydantic model for structured output parsing.
             generation_config: Optional configuration for the generation request.
             tools: Optional sequence of Tool objects for function calling.
+            fallback_models: Optional list of fallback models to try if primary fails.
 
         Returns:
             Generation[T]: An Agentle Generation object containing the model's response,
@@ -390,6 +393,7 @@ class GenerationProvider(abc.ABC):
             response_schema=response_schema,
             generation_config=generation_config,
             tools=tools,
+            fallback_models=fallback_models,
         )
 
     @abc.abstractmethod
@@ -401,6 +405,7 @@ class GenerationProvider(abc.ABC):
         response_schema: type[T] | None = None,
         generation_config: GenerationConfig | GenerationConfigDict | None = None,
         tools: Sequence[Tool[Any]] | None = None,
+        fallback_models: Sequence[str] | None = None,
     ) -> Generation[T]:
         """
         Create a generation from a message sequence asynchronously.
@@ -415,6 +420,8 @@ class GenerationProvider(abc.ABC):
             response_schema: Optional Pydantic model for structured output parsing.
             generation_config: Optional configuration for the generation request.
             tools: Optional sequence of Tool objects for function calling.
+            fallback_models: Optional list of fallback models to try if primary fails.
+                Provider-specific implementation may vary.
 
         Returns:
             Generation[T]: An Agentle Generation object containing the model's response,

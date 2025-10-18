@@ -87,7 +87,9 @@ class OllamaGenerationProvider(GenerationProvider):
         response_schema: type[T] | None = None,
         generation_config: GenerationConfig | GenerationConfigDict | None = None,
         tools: Sequence[Tool[Any]] | None = None,
+        fallback_models: Sequence[str] | None = None,
     ) -> Generation[T]:
+        """Note: Ollama does not support fallback models. Parameter ignored."""
         from pydantic import BaseModel
 
         tool_adapter = ToolToOllamaToolAdapter()

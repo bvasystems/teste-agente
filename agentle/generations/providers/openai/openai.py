@@ -115,6 +115,7 @@ class OpenaiGenerationProvider(GenerationProvider):
         response_schema: type[T] | None = None,
         generation_config: GenerationConfig | GenerationConfigDict | None = None,
         tools: Sequence[Tool[Any]] | None = None,
+        fallback_models: Sequence[str] | None = None,
     ) -> Generation[T]:
         """
         Create a generation asynchronously using an OpenAI model.
@@ -123,13 +124,15 @@ class OpenaiGenerationProvider(GenerationProvider):
         the response. With the @observe decorator, all the observability and tracing
         is handled automatically.
 
+        Note: OpenAI API does not natively support fallback models. The fallback_models
+        parameter is accepted for API compatibility but ignored.
+
         Args:
             model: The OpenAI model to use for generation (e.g., "gpt-4o")
             messages: The sequence of messages to send to the model
             response_schema: Optional schema for structured output parsing
             generation_config: Optional configuration for the generation
             tools: Optional tools for function calling
-
         Returns:
             Generation[T]: An Agentle Generation object containing the response
         """

@@ -314,6 +314,7 @@ class GoogleGenerationProvider(GenerationProvider):
         messages: Sequence[Message],
         response_schema: type[T],
         generation_config: GenerationConfig | GenerationConfigDict | None = None,
+        fallback_models: Sequence[str] | None = None,
     ) -> Generation[T]: ...
 
     @overload
@@ -324,6 +325,7 @@ class GoogleGenerationProvider(GenerationProvider):
         messages: Sequence[Message],
         generation_config: GenerationConfig | GenerationConfigDict | None = None,
         tools: Sequence[Tool],
+        fallback_models: Sequence[str] | None = None,
     ) -> Generation[WithoutStructuredOutput]: ...
 
     @overload
@@ -333,6 +335,7 @@ class GoogleGenerationProvider(GenerationProvider):
         model: str | ModelKind | None = None,
         messages: Sequence[Message],
         generation_config: GenerationConfig | GenerationConfigDict | None = None,
+        fallback_models: Sequence[str] | None = None,
     ) -> Generation[WithoutStructuredOutput]: ...
 
     @observe
@@ -346,6 +349,7 @@ class GoogleGenerationProvider(GenerationProvider):
         response_schema: type[T] | None = None,
         generation_config: GenerationConfig | GenerationConfigDict | None = None,
         tools: Sequence[Tool] | None = None,
+        fallback_models: Sequence[str] | None = None,
     ) -> Generation[T]:
         """
         Create a generation asynchronously using a Google AI model.
@@ -354,6 +358,9 @@ class GoogleGenerationProvider(GenerationProvider):
         format, sends the request to Google's API, and processes the response into
         Agentle's standardized Generation format. With the @observe decorator, all
         observability and tracing is handled automatically.
+
+        Note: Google AI API does not natively support fallback models. The fallback_models
+        parameter is accepted for API compatibility but ignored.
 
         Args:
             model: The Google AI model identifier to use (e.g., "gemini-1.5-pro").
