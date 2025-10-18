@@ -202,9 +202,9 @@ class BedrockGenerationProvider(GenerationProvider):
 
         logger.debug(f"Received Bedrock Response: {response}")
 
-        return ConverseResponseToAgentleGenerationAdapter(
-            model=_model, response_schema=response_schema
-        ).adapt(response)
+        return await ConverseResponseToAgentleGenerationAdapter(
+            model=_model, response_schema=response_schema, provider=self
+        ).adapt_async(response)
 
     @override
     async def price_per_million_tokens_input(

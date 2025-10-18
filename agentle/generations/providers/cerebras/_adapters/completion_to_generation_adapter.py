@@ -17,11 +17,13 @@ generic type parameter.
 
 from __future__ import annotations
 import datetime
+import logging
 import uuid
 from typing import TYPE_CHECKING
 
 from agentle.generations.models.generation.choice import Choice
 from agentle.generations.models.generation.generation import Generation
+from agentle.generations.models.generation.pricing import Pricing
 from agentle.generations.models.generation.usage import Usage
 from agentle.generations.providers.cerebras._adapters.cerebras_message_to_generated_assistant_message_adapter import (
     CerebrasMessageToGeneratedAssistantMessageAdapter,
@@ -30,6 +32,9 @@ from rsb.adapters.adapter import Adapter
 
 if TYPE_CHECKING:
     from cerebras.cloud.sdk.types.chat.chat_completion import ChatCompletionResponse
+    from agentle.generations.providers.cerebras.cerebras_generation_provider import CerebrasGenerationProvider
+
+logger = logging.getLogger(__name__)
 
 
 class CerebrasCompletionToGenerationAdapter[T](
@@ -65,6 +70,7 @@ class CerebrasCompletionToGenerationAdapter[T](
         CerebrasMessageToGeneratedAssistantMessageAdapter[T]
     )
     preferred_id: uuid.UUID | None
+    provider: "CerebrasGenerationProvider | None"
 
     def __init__(
         self,
@@ -76,6 +82,7 @@ class CerebrasCompletionToGenerationAdapter[T](
         ]
         | None = None,
         preferred_id: uuid.UUID | None = None,
+        provider: "CerebrasGenerationProvider | None" = None,
     ):
         """
         Initialize the adapter with the necessary configuration.
@@ -88,6 +95,7 @@ class CerebrasCompletionToGenerationAdapter[T](
             message_to_generated_assistant_message_adapter: Optional adapter for converting
                 Cerebras message objects to Agentle message objects.
             preferred_id: Optional UUID to use for the resulting Generation object.
+            provider: Optional provider instance for pricing calculation.
         """
         self.response_schema = response_schema
         self.model = model
@@ -98,6 +106,7 @@ class CerebrasCompletionToGenerationAdapter[T](
             )
         )
         self.preferred_id = preferred_id
+        self.provider = provider
 
     def adapt(self, _f: ChatCompletionResponse) -> Generation[T]:
         """
@@ -137,4 +146,72 @@ class CerebrasCompletionToGenerationAdapter[T](
             created=datetime.datetime.now(),
             model=_f.model,
             usage=usage,
+        )
+    
+    async def adapt_async(self, _f: ChatCompletionResponse) -> Generation[T]:
+        """
+        Convert a Cerebras ChatCompletionResponse to an Agentle Generation object asynchronously.
+        
+        This async version calculates pricing information if provider is available.
+
+        Args:
+            _f: The Cerebras ChatCompletionResponse object to adapt.
+
+        Returns:
+            Generation[T]: An Agentle Generation object with pricing information.
+        """
+        choices: list[Choice[T]] = [
+            Choice(
+                index=index,
+                message=self.message_to_generated_assistant_message_adapter.adapt(
+                    choice.message
+                ),
+            )
+            for index, choice in enumerate(_f.choices)
+        ]
+
+        usage = Usage(
+            prompt_tokens=_f.usage.prompt_tokens or 0,
+            completion_tokens=_f.usage.completion_tokens or 0,
+        )
+        
+        # Calculate pricing if provider is available
+        pricing = Pricing()
+        if self.provider is not None:
+            provider = self.provider
+            model = self.model
+            try:
+                input_tokens = usage.prompt_tokens
+                output_tokens = usage.completion_tokens
+                
+                if input_tokens > 0 or output_tokens > 0:
+                    input_price_per_million = await provider.price_per_million_tokens_input(
+                        model, input_tokens
+                    )
+                    output_price_per_million = await provider.price_per_million_tokens_output(
+                        model, output_tokens
+                    )
+                    
+                    input_cost = input_price_per_million * (input_tokens / 1_000_000)
+                    output_cost = output_price_per_million * (output_tokens / 1_000_000)
+                    total_cost = input_cost + output_cost
+                    
+                    pricing = Pricing(
+                        input_pricing=round(input_cost, 8),
+                        output_pricing=round(output_cost, 8),
+                        total_pricing=round(total_cost, 8),
+                    )
+                    
+            except Exception as e:
+                logger.warning(f"Failed to calculate pricing: {e}")
+                pricing = Pricing()
+
+        return Generation(
+            id=self.preferred_id or uuid.uuid4(),
+            choices=choices,
+            object="chat.generation",
+            created=datetime.datetime.now(),
+            model=_f.model,
+            usage=usage,
+            pricing=pricing,
         )

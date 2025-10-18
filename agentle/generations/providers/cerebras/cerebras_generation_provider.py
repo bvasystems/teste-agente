@@ -301,10 +301,12 @@ class CerebrasGenerationProvider(GenerationProvider):
             )
             raise
 
-        return CerebrasCompletionToGenerationAdapter[T](
+        resolved_model = self._resolve_model(model)
+        return await CerebrasCompletionToGenerationAdapter[T](
             response_schema=response_schema,
-            model=model or self.default_model,
-        ).adapt(cerebras_completion)
+            model=resolved_model,
+            provider=self,
+        ).adapt_async(cerebras_completion)
 
     @override
     def map_model_kind_to_provider_model(

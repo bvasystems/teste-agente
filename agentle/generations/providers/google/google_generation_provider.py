@@ -451,11 +451,18 @@ class GoogleGenerationProvider(GenerationProvider):
             )
             raise
 
-        # Create the response
-        response = GenerateGenerateContentResponseToGenerationAdapter[T](
+        # Create the response with pricing calculation
+        adapter = GenerateGenerateContentResponseToGenerationAdapter[T](
             response_schema=response_schema,
             model=used_model,
-        ).adapt(generate_content_response)
+            provider=self,
+        )
+        
+        # Use async adapter if not streaming
+        if hasattr(generate_content_response, "__aiter__"):
+            response = adapter.adapt(generate_content_response)
+        else:
+            response = await adapter.adapt_async(generate_content_response)
 
         return response
 

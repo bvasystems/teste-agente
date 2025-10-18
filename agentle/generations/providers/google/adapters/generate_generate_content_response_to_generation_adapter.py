@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from logging import Logger
@@ -11,6 +12,7 @@ from rsb.adapters.adapter import Adapter
 
 from agentle.generations.models.generation.choice import Choice
 from agentle.generations.models.generation.generation import Generation
+from agentle.generations.models.generation.pricing import Pricing
 from agentle.generations.models.generation.usage import Usage
 from agentle.generations.models.message_parts.part import Part
 from agentle.generations.models.message_parts.text import TextPart
@@ -32,6 +34,9 @@ if TYPE_CHECKING:
         GenerateContentResponse,
         GenerateContentResponseUsageMetadata,
     )
+    from agentle.generations.providers.google.google_generation_provider import GoogleGenerationProvider
+
+logger = logging.getLogger(__name__)
 
 
 class GenerateGenerateContentResponseToGenerationAdapter[T](
@@ -51,6 +56,7 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
     google_content_to_message_adapter: (
         GoogleContentToGeneratedAssistantMessageAdapter[T] | None
     )
+    provider: "GoogleGenerationProvider | None"
 
     def __init__(
         self,
@@ -62,6 +68,7 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
         ]
         | None = None,
         preferred_id: uuid.UUID | None = None,
+        provider: "GoogleGenerationProvider | None" = None,
     ) -> None:
         super().__init__()
         self.response_schema = response_schema
@@ -71,6 +78,7 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
         )
         self.preferred_id = preferred_id
         self.model = model
+        self.provider = provider
 
     @overload
     def adapt(self, _f: "GenerateContentResponse") -> Generation[T]: ...
@@ -99,6 +107,18 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
             )
         else:
             return self._adapt_single(cast("GenerateContentResponse", _f))
+    
+    async def adapt_async(self, _f: "GenerateContentResponse") -> Generation[T]:
+        """
+        Convert Google response to Agentle Generation object asynchronously with pricing.
+
+        Args:
+            _f: A single GenerateContentResponse
+
+        Returns:
+            Generation object with pricing information
+        """
+        return await self._adapt_single_async(_f)
 
     def _adapt_single(self, response: "GenerateContentResponse") -> Generation[T]:
         """Adapt a single response (non-streaming)."""
@@ -124,6 +144,64 @@ class GenerateGenerateContentResponseToGenerationAdapter[T](
             model=self.model,
             choices=choices,
             usage=usage,
+        )
+    
+    async def _adapt_single_async(self, response: "GenerateContentResponse") -> Generation[T]:
+        """Adapt a single response (non-streaming) asynchronously with pricing."""
+        from google.genai import types
+
+        parsed: T | None = cast(T | None, response.parsed)
+        candidates: list[types.Candidate] | None = response.candidates
+
+        if candidates is None:
+            raise ValueError("The provided candidates by Google are NONE.")
+
+        choices: list[Choice[T]] = self._build_choices(
+            candidates=candidates,
+            generate_content_parsed_response=parsed,
+        )
+
+        usage = self._extract_usage(response.usage_metadata)
+        
+        # Calculate pricing if provider is available
+        pricing = Pricing()
+        if self.provider is not None:
+            provider = self.provider
+            model = self.model
+            try:
+                input_tokens = usage.prompt_tokens
+                output_tokens = usage.completion_tokens
+                
+                if input_tokens > 0 or output_tokens > 0:
+                    input_price_per_million = await provider.price_per_million_tokens_input(
+                        model, input_tokens
+                    )
+                    output_price_per_million = await provider.price_per_million_tokens_output(
+                        model, output_tokens
+                    )
+                    
+                    input_cost = input_price_per_million * (input_tokens / 1_000_000)
+                    output_cost = output_price_per_million * (output_tokens / 1_000_000)
+                    total_cost = input_cost + output_cost
+                    
+                    pricing = Pricing(
+                        input_pricing=round(input_cost, 8),
+                        output_pricing=round(output_cost, 8),
+                        total_pricing=round(total_cost, 8),
+                    )
+                    
+            except Exception as e:
+                logger.warning(f"Failed to calculate pricing: {e}")
+                pricing = Pricing()
+
+        return Generation[T](
+            id=self.preferred_id or uuid.uuid4(),
+            object="chat.generation",
+            created=datetime.datetime.now(),
+            model=self.model,
+            choices=choices,
+            usage=usage,
+            pricing=pricing,
         )
 
     async def _adapt_streaming(

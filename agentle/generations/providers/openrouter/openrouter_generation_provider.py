@@ -1481,10 +1481,13 @@ class OpenRouterGenerationProvider(GenerationProvider):
             if not self.http_client:
                 await client.aclose()
 
-        # Convert response to Generation
-        return OpenRouterResponseToGenerationAdapter[T](
+        # Convert response to Generation with pricing calculation
+        resolved_model = self._resolve_model(model)
+        return await OpenRouterResponseToGenerationAdapter[T](
             response_schema=response_schema,
-        ).adapt(openrouter_response)
+            provider=self,
+            model=resolved_model,
+        ).adapt_async(openrouter_response)
 
     @override
     def map_model_kind_to_provider_model(

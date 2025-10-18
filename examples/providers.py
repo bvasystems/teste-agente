@@ -4,7 +4,6 @@ Providers Example
 This example demonstrates how to use different model providers with the Agentle framework.
 """
 
-import logging
 from dotenv import load_dotenv
 
 from agentle.generations.models.message_parts.file import FilePart
@@ -16,8 +15,6 @@ from agentle.generations.providers.openrouter.openrouter_generation_provider imp
 )
 
 load_dotenv()
-
-logging.basicConfig(level=logging.DEBUG)
 
 
 def add_numbers(a: float, b: float) -> float:

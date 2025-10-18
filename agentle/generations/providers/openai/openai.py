@@ -175,8 +175,12 @@ class OpenaiGenerationProvider(GenerationProvider):
             )
             raise
 
-        output_adapter = ChatCompletionToGenerationAdapter[T]()
-        return output_adapter.adapt(chat_completion)
+        resolved_model = self._resolve_model(model)
+        output_adapter = ChatCompletionToGenerationAdapter[T](
+            provider=self,
+            model=resolved_model,
+        )
+        return await output_adapter.adapt_async(chat_completion)
 
     @property
     @override
