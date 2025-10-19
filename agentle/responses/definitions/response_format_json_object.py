@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 
 class ResponseFormatJsonObject(BaseModel):
-    type: Literal["ResponseFormatJsonObject"] = Field(
+    type: Literal["json_object"] = Field(
         ...,
         description="The type of response format being defined. Always `json_object`.",
     )

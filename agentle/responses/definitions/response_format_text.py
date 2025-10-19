@@ -12,6 +12,6 @@ from pydantic import BaseModel, Field
 
 
 class ResponseFormatText(BaseModel):
-    type: Literal["ResponseFormatText"] = Field(
+    type: Literal["text"] = Field(
         ..., description="The type of response format being defined. Always `text`."
     )

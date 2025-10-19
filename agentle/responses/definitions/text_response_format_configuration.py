@@ -6,9 +6,9 @@
 #   timestamp: 2025-10-18T15:02:20+00:00
 
 
-from typing import Union
+from typing import Annotated, Union
 
-from pydantic import RootModel
+from pydantic import Field
 
 
 # Model dependencies
@@ -17,11 +17,9 @@ from .response_format_text import ResponseFormatText
 from .text_response_format_json_schema import TextResponseFormatJsonSchema
 
 
-class TextResponseFormatConfiguration(
-    RootModel[
-        Union[
-            ResponseFormatText, TextResponseFormatJsonSchema, ResponseFormatJsonObject
-        ]
-    ]
-):
-    pass
+TextResponseFormatConfiguration = Annotated[
+    Union[
+        ResponseFormatText, TextResponseFormatJsonSchema, ResponseFormatJsonObject
+    ],
+    Field(discriminator="type"),
+]

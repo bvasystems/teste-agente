@@ -16,7 +16,7 @@ from .response_format_json_schema_schema import ResponseFormatJsonSchemaSchema
 
 
 class TextResponseFormatJsonSchema(BaseModel):
-    type: Literal["TextResponseFormatJsonSchema"] = Field(
+    type: Literal["json_schema"] = Field(
         ...,
         description="The type of response format being defined. Always `json_schema`.",
     )

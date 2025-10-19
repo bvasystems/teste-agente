@@ -7,9 +7,19 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Union, cast
+from typing import Any, List, Optional, Union, cast
 
-from pydantic import Field
+from pydantic import BaseModel, Field
+
+from agentle.responses.definitions.response_format_json_schema_schema import (
+    ResponseFormatJsonSchemaSchema,
+)
+from agentle.responses.definitions.text import Text
+from agentle.responses.definitions.text_response_format_json_schema import (
+    TextResponseFormatJsonSchema,
+)
+from agentle.responses.definitions.verbosity import Verbosity
+from agentle.responses.definitions.verbosity1 import Verbosity1
 
 # Model dependencies
 from .conversation_param import ConversationParam
@@ -20,8 +30,8 @@ from .response_properties import ResponseProperties
 from .response_stream_options import ResponseStreamOptions
 
 
-class CreateResponse[TextFormatT](CreateModelResponseProperties, ResponseProperties):
-    input: Optional[Union[str, List[InputItem[TextFormatT]]]] = Field(
+class CreateResponse(CreateModelResponseProperties, ResponseProperties):
+    input: Optional[Union[str, List[InputItem[Any]]]] = Field(
         None,
         description="Text, image, or file inputs to the model, used to generate a response.\n\nLearn more:\n- [Text inputs and outputs](https://platform.openai.com/docs/guides/text)\n- [Image inputs](https://platform.openai.com/docs/guides/images)\n- [File inputs](https://platform.openai.com/docs/guides/pdf-files)\n- [Conversation state](https://platform.openai.com/docs/guides/conversation-state)\n- [Function calling](https://platform.openai.com/docs/guides/function-calling)\n",
     )
@@ -32,6 +42,20 @@ class CreateResponse[TextFormatT](CreateModelResponseProperties, ResponsePropert
     stream: Optional[bool] = None
     stream_options: Optional[ResponseStreamOptions] = None
     conversation: Optional[Union[str, ConversationParam]] = None
+
+    def set_structured_output[TextFormatT: BaseModel](
+        self, text_format: type[TextFormatT]
+    ) -> None:
+        self.text = Text(
+            format=TextResponseFormatJsonSchema(
+                type="json_schema",
+                description="Structured output format",
+                name="StructuredOutput",
+                schema=ResponseFormatJsonSchemaSchema(**text_format.model_json_schema()),
+                strict=True,
+            ),
+            verbosity=Verbosity(Verbosity1.low),
+        )
 
     def encode(self) -> str:
         return self.model_dump_json()

@@ -1,16 +1,23 @@
-from typing import Literal, Optional, Union, overload, List
+import abc
+from collections.abc import Sequence
+from typing import List, Literal, Optional, Union, overload
 
+from rsb.models.field import Field
 
+from agentle.generations.tracing.otel_client import OtelClient
+from agentle.responses._streaming.async_stream import AsyncStream
+from agentle.responses.definitions.conversation_param import ConversationParam
 from agentle.responses.definitions.create_response import CreateResponse
 from agentle.responses.definitions.include_enum import IncludeEnum
 from agentle.responses.definitions.input_item import InputItem
+from agentle.responses.definitions.metadata import Metadata
+from agentle.responses.definitions.model_ids_responses import ModelIdsResponses
+from agentle.responses.definitions.prompt import Prompt
+from agentle.responses.definitions.reasoning import Reasoning
 from agentle.responses.definitions.response import Response
 from agentle.responses.definitions.response_stream_event import ResponseStreamEvent
 from agentle.responses.definitions.response_stream_options import ResponseStreamOptions
-from agentle.responses.definitions.conversation_param import ConversationParam
-from agentle.responses.definitions.metadata import Metadata
 from agentle.responses.definitions.service_tier import ServiceTier
-from agentle.responses.definitions.reasoning import Reasoning
 from agentle.responses.definitions.text import Text
 from agentle.responses.definitions.tool import Tool
 from agentle.responses.definitions.tool_choice_allowed import ToolChoiceAllowed
@@ -19,15 +26,12 @@ from agentle.responses.definitions.tool_choice_function import ToolChoiceFunctio
 from agentle.responses.definitions.tool_choice_mcp import ToolChoiceMCP
 from agentle.responses.definitions.tool_choice_options import ToolChoiceOptions
 from agentle.responses.definitions.tool_choice_types import ToolChoiceTypes
-from agentle.responses.definitions.prompt import Prompt
 from agentle.responses.definitions.truncation import Truncation
-from agentle.responses.definitions.model_ids_responses import ModelIdsResponses
-import abc
-from agentle.responses._streaming.async_stream import AsyncStream
-from rsb.models.base_model import BaseModel
 
 
-class ResponderMixin(BaseModel, abc.ABC):
+class ResponderMixin(abc.ABC):
+    otel_clients: Sequence[OtelClient] = Field(default_factory=list)
+
     @overload
     async def respond_async[TextFormatT = None](
         self,
