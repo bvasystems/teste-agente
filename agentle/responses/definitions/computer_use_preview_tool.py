@@ -16,7 +16,7 @@ from .computer_environment import ComputerEnvironment
 
 
 class ComputerUsePreviewTool(BaseModel):
-    type: Literal["ComputerUsePreviewTool"] = Field(
+    type: Literal["computer_use_preview"] = Field(
         ...,
         description="The type of the computer use tool. Always `computer_use_preview`.",
     )

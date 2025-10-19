@@ -17,7 +17,7 @@ from .custom_text_format_param import CustomTextFormatParam
 
 
 class CustomToolParam(BaseModel):
-    type: Literal["CustomToolParam"] = Field(
+    type: Literal["custom"] = Field(
         ..., description="The type of the custom tool. Always `custom`."
     )
     name: str = Field(

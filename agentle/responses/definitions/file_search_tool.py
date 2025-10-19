@@ -17,7 +17,7 @@ from .ranking_options import RankingOptions
 
 
 class FileSearchTool(BaseModel):
-    type: Literal["FileSearchTool"] = Field(
+    type: Literal["file_search"] = Field(
         ..., description="The type of the file search tool. Always `file_search`."
     )
     vector_store_ids: List[str] = Field(

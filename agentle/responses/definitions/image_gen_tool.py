@@ -23,7 +23,7 @@ from .size import Size
 
 
 class ImageGenTool(BaseModel):
-    type: Literal["ImageGenTool"] = Field(
+    type: Literal["image_gen"] = Field(
         ...,
         description="The type of the image generation tool. Always `image_generation`.\n",
     )

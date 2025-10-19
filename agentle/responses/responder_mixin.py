@@ -2,6 +2,7 @@ import abc
 from collections.abc import Sequence
 from typing import List, Literal, Optional, Union, overload
 
+from pydantic import BaseModel
 from rsb.models.field import Field
 
 from agentle.generations.tracing.otel_client import OtelClient
@@ -210,42 +211,54 @@ class ResponderMixin(abc.ABC):
         prompt_cache_key: Optional[str] = None,
         service_tier: Optional[ServiceTier] = None,
     ) -> Response[TextFormatT] | AsyncStream[ResponseStreamEvent]:
+        create_response = CreateResponse(
+            input=input,
+            model=model,
+            include=include,
+            parallel_tool_calls=parallel_tool_calls,
+            store=store,
+            instructions=instructions,
+            stream=stream,
+            stream_options=stream_options,
+            conversation=conversation,
+            # ResponseProperties parameters
+            previous_response_id=previous_response_id,
+            reasoning=reasoning,
+            background=background,
+            max_output_tokens=max_output_tokens,
+            max_tool_calls=max_tool_calls,
+            text=text,
+            tools=tools,
+            tool_choice=tool_choice,
+            prompt=prompt,
+            truncation=truncation,
+            # ModelResponseProperties parameters
+            metadata=metadata,
+            top_logprobs=top_logprobs,
+            temperature=temperature,
+            top_p=top_p,
+            user=user,
+            safety_identifier=safety_identifier,
+            prompt_cache_key=prompt_cache_key,
+            service_tier=service_tier,
+        )
+
+        if text_format:
+            if not issubclass(text_format, BaseModel):
+                raise ValueError(
+                    "Currently, only Pydantic models are supported in text_format"
+                )
+
+            create_response.set_text_format(text_format)
+
         return await self._respond_async(
-            CreateResponse[TextFormatT](
-                input=input,
-                model=model,
-                include=include,
-                parallel_tool_calls=parallel_tool_calls,
-                store=store,
-                instructions=instructions,
-                stream=stream,
-                stream_options=stream_options,
-                conversation=conversation,
-                # ResponseProperties parameters
-                previous_response_id=previous_response_id,
-                reasoning=reasoning,
-                background=background,
-                max_output_tokens=max_output_tokens,
-                max_tool_calls=max_tool_calls,
-                text=text,
-                tools=tools,
-                tool_choice=tool_choice,
-                prompt=prompt,
-                truncation=truncation,
-                # ModelResponseProperties parameters
-                metadata=metadata,
-                top_logprobs=top_logprobs,
-                temperature=temperature,
-                top_p=top_p,
-                user=user,
-                safety_identifier=safety_identifier,
-                prompt_cache_key=prompt_cache_key,
-                service_tier=service_tier,
-            )
+            create_response,
+            text_format=text_format,
         )
 
     @abc.abstractmethod
     async def _respond_async[TextFormatT = None](
         self,
-        create_response: CreateResponse[TextFormatT],
+        create_response: CreateResponse,
+        text_format: type[TextFormatT] | None = None,
     ) -> Response[TextFormatT] | AsyncStream[ResponseStreamEvent]: ...

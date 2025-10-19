@@ -16,7 +16,7 @@ from .code_interpreter_container_auto import CodeInterpreterContainerAuto
 
 
 class CodeInterpreterTool(BaseModel):
-    type: Literal["CodeInterpreterTool"] = Field(
+    type: Literal["code_interpreter"] = Field(
         ...,
         description="The type of the code interpreter tool. Always `code_interpreter`.\n",
     )

@@ -12,6 +12,6 @@ from pydantic import BaseModel, Field
 
 
 class LocalShellToolParam(BaseModel):
-    type: Literal["LocalShellToolParam"] = Field(
+    type: Literal["local_shell"] = Field(
         ..., description="The type of the local shell tool. Always `local_shell`."
     )

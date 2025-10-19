@@ -18,7 +18,7 @@ from .web_search_approximate_location import WebSearchApproximateLocation
 
 
 class WebSearchTool(BaseModel):
-    type: Literal["WebSearchTool"] = Field(
+    type: Literal["web_search"] = Field(
         ...,
         description="The type of the web search tool. One of `web_search` or `web_search_2025_08_26`.",
     )

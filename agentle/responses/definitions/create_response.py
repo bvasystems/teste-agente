@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Union, cast
+from typing import Any, List, Optional, Self, Union, cast
 
 from pydantic import BaseModel, Field
 
@@ -43,19 +43,22 @@ class CreateResponse(CreateModelResponseProperties, ResponseProperties):
     stream_options: Optional[ResponseStreamOptions] = None
     conversation: Optional[Union[str, ConversationParam]] = None
 
-    def set_structured_output[TextFormatT: BaseModel](
+    def set_text_format[TextFormatT: BaseModel](
         self, text_format: type[TextFormatT]
-    ) -> None:
+    ) -> Self:
         self.text = Text(
             format=TextResponseFormatJsonSchema(
                 type="json_schema",
-                description="Structured output format",
-                name="StructuredOutput",
-                schema=ResponseFormatJsonSchemaSchema(**text_format.model_json_schema()),
+                description="JSON Output",
+                name=text_format.__name__,
+                schema=ResponseFormatJsonSchemaSchema(
+                    **text_format.model_json_schema()
+                ),
                 strict=True,
             ),
-            verbosity=Verbosity(Verbosity1.low),
+            verbosity=Verbosity(Verbosity1.medium),
         )
+        return self
 
     def encode(self) -> str:
         return self.model_dump_json()

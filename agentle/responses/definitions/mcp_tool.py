@@ -19,7 +19,7 @@ from .require_approval1 import RequireApproval1
 
 
 class MCPTool(BaseModel):
-    type: Literal["MCPTool"] = Field(
+    type: Literal["mcp"] = Field(
         ..., description="The type of the MCP tool. Always `mcp`."
     )
     server_label: str = Field(

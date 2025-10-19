@@ -5,17 +5,71 @@
 #   filename:  filtered_openapi.yaml
 #   timestamp: 2025-10-18T15:02:20+00:00
 
+from __future__ import annotations
 
+import base64
+import inspect
+from collections.abc import Callable
 from typing import Any, Dict, Literal, Optional
 
+import dill
 from pydantic import BaseModel, Field
+
+from agentle.responses.json_schema_extractor import (
+    JsonSchemaConfig,
+    JsonSchemaExtractor,
+)
 
 
 class FunctionTool(BaseModel):
-    type: Literal["FunctionTool"] = Field(
+    type: Literal["function"] = Field(
         ..., description="The type of the function tool. Always `function`."
     )
+
     name: str = Field(..., description="The name of the function to call.")
+
     description: Optional[str] = None
+
     parameters: Optional[Dict[str, Any]]
+
     strict: Optional[bool]
+
+    code: str | None = Field(
+        default=None, description="The serialized, base64 encoded code of the function."
+    )
+
+    @classmethod
+    def from_callable(cls, callable: Callable[..., Any]) -> FunctionTool:
+        obj = cls(
+            type="function",
+            name=callable.__name__,
+            description=inspect.getdoc(callable),
+            parameters=JsonSchemaExtractor(
+                JsonSchemaConfig(
+                    ensure_additional_properties=True,
+                    include_descriptions=True,
+                    strict_mode=True,
+                    max_enum_values=1000,
+                    max_nesting_depth=10,
+                    make_all_required=True,
+                    dereference=True,
+                )
+            ).extract(callable),
+            strict=True,
+        )
+
+        obj.code = base64.b64encode(
+            dill.dumps(callable, protocol=dill.HIGHEST_PROTOCOL)
+        ).decode("utf-8")
+
+        return obj
+
+
+if __name__ == "__main__":
+
+    def test(a: int, b: str, c: Literal["a", "b", "c"]):
+        """test function"""
+        pass
+
+    tool = FunctionTool.from_callable(test)
+    print(tool)

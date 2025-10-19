@@ -17,7 +17,7 @@ from .search_context_size import SearchContextSize
 
 
 class WebSearchPreviewTool(BaseModel):
-    type: Literal["WebSearchPreviewTool"] = Field(
+    type: Literal["web_search_preview"] = Field(
         ...,
         description="The type of the web search tool. One of `web_search_preview` or `web_search_preview_2025_03_11`.",
     )

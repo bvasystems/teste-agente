@@ -1,3 +1,3 @@
-from .open_router import OpenRouterResponder
+from .open_router_responder import OpenRouterResponder
 
 __all__ = ["OpenRouterResponder"]
