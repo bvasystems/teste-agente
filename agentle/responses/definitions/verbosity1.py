@@ -9,7 +9,7 @@
 from enum import Enum
 
 
-class Verbosity1(Enum):
+class Verbosity1(str, Enum):
     low = "low"
     medium = "medium"
     high = "high"

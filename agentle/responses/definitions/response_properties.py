@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 
 
 # Model dependencies
-from .model_ids_responses import ModelIdsResponses
 from .prompt import Prompt
 from .reasoning import Reasoning
 from .text import Text
@@ -28,7 +27,7 @@ from .truncation import Truncation
 
 class ResponseProperties(BaseModel):
     previous_response_id: Optional[str] = None
-    model: Optional[ModelIdsResponses] = Field(
+    model: Optional[str] = Field(
         None,
         description="Model ID used to generate the response, like `gpt-4o` or `o3`. OpenAI\noffers a wide range of models with different capabilities, performance\ncharacteristics, and price points. Refer to the [model guide](https://platform.openai.com/docs/models)\nto browse and compare available models.\n",
     )
@@ -56,7 +55,6 @@ class ResponseProperties(BaseModel):
     ] = Field(
         None,
         description="How the model should select which tool (or tools) to use when generating\na response. See the `tools` parameter to see how to specify which tools\nthe model can call.\n",
-        discriminator="type",
     )
     prompt: Optional[Prompt] = None
     truncation: Optional[Truncation] = None

@@ -16,7 +16,7 @@ from .mode import Mode
 
 
 class ToolChoiceAllowed(BaseModel):
-    type: Literal["ToolChoiceAllowed"] = Field(
+    type: Literal["allowed_tools"] = Field(
         ..., description="Allowed tool configuration type. Always `allowed_tools`."
     )
     mode: Mode = Field(

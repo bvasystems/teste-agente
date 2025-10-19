@@ -6,7 +6,7 @@
 #   timestamp: 2025-10-18T15:02:20+00:00
 
 
-from typing import List, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,7 @@ class OutputMessage[TextFormatT](BaseModel):
     role: Role2 = Field(
         ..., description="The role of the output message. Always `assistant`.\n"
     )
-    content: List[OutputMessageContent[TextFormatT]] = Field(
+    content: list[OutputMessageContent] = Field(
         ..., description="The content of the output message.\n"
     )
     status: Status5 = Field(

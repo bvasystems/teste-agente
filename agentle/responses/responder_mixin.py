@@ -12,7 +12,6 @@ from agentle.responses.definitions.create_response import CreateResponse
 from agentle.responses.definitions.include_enum import IncludeEnum
 from agentle.responses.definitions.input_item import InputItem
 from agentle.responses.definitions.metadata import Metadata
-from agentle.responses.definitions.model_ids_responses import ModelIdsResponses
 from agentle.responses.definitions.prompt import Prompt
 from agentle.responses.definitions.reasoning import Reasoning
 from agentle.responses.definitions.response import Response
@@ -37,8 +36,8 @@ class ResponderMixin(abc.ABC):
     async def respond_async[TextFormatT = None](
         self,
         *,
-        input: Optional[Union[str, list[InputItem[TextFormatT]]]] = None,
-        model: Optional[ModelIdsResponses] = None,
+        input: Optional[Union[str, list[InputItem]]] = None,
+        model: Optional[str] = None,
         include: Optional[list[IncludeEnum]] = None,
         parallel_tool_calls: Optional[bool] = None,
         store: Optional[bool] = None,
@@ -76,14 +75,14 @@ class ResponderMixin(abc.ABC):
         safety_identifier: Optional[str] = None,
         prompt_cache_key: Optional[str] = None,
         service_tier: Optional[ServiceTier] = None,
-    ) -> AsyncStream[ResponseStreamEvent]: ...
+    ) -> Response[TextFormatT]: ...
 
     @overload
     async def respond_async[TextFormatT = None](
         self,
         *,
-        input: Optional[Union[str, list[InputItem[TextFormatT]]]] = None,
-        model: Optional[ModelIdsResponses] = None,
+        input: Optional[Union[str, list[InputItem]]] = None,
+        model: Optional[str] = None,
         include: Optional[list[IncludeEnum]] = None,
         parallel_tool_calls: Optional[bool] = None,
         store: Optional[bool] = None,
@@ -127,8 +126,8 @@ class ResponderMixin(abc.ABC):
     async def respond_async[TextFormatT = None](
         self,
         *,
-        input: Optional[Union[str, list[InputItem[TextFormatT]]]] = None,
-        model: Optional[ModelIdsResponses] = None,
+        input: Optional[Union[str, list[InputItem]]] = None,
+        model: Optional[str] = None,
         include: Optional[list[IncludeEnum]] = None,
         parallel_tool_calls: Optional[bool] = None,
         store: Optional[bool] = None,
@@ -171,8 +170,8 @@ class ResponderMixin(abc.ABC):
     async def respond_async[TextFormatT = None](
         self,
         *,
-        input: Optional[Union[str, list[InputItem[TextFormatT]]]] = None,
-        model: Optional[ModelIdsResponses] = None,
+        input: Optional[Union[str, list[InputItem]]] = None,
+        model: Optional[str] = None,
         include: Optional[list[IncludeEnum]] = None,
         parallel_tool_calls: Optional[bool] = None,
         store: Optional[bool] = None,

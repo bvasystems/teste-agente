@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Self, Union, cast
+from typing import List, Optional, Self, Union, cast
 
 from pydantic import BaseModel, Field
 
@@ -31,7 +31,7 @@ from .response_stream_options import ResponseStreamOptions
 
 
 class CreateResponse(CreateModelResponseProperties, ResponseProperties):
-    input: Optional[Union[str, List[InputItem[Any]]]] = Field(
+    input: Optional[Union[str, List[InputItem]]] = Field(
         None,
         description="Text, image, or file inputs to the model, used to generate a response.\n\nLearn more:\n- [Text inputs and outputs](https://platform.openai.com/docs/guides/text)\n- [Image inputs](https://platform.openai.com/docs/guides/images)\n- [File inputs](https://platform.openai.com/docs/guides/pdf-files)\n- [Conversation state](https://platform.openai.com/docs/guides/conversation-state)\n- [Function calling](https://platform.openai.com/docs/guides/function-calling)\n",
     )

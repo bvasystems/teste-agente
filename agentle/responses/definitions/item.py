@@ -6,7 +6,7 @@
 #   timestamp: 2025-10-18T15:02:20+00:00
 
 
-from typing import Annotated, TypeVar, Union
+from typing import Annotated, Any, TypeVar, Union
 
 from pydantic import Field
 
@@ -35,10 +35,11 @@ from .web_search_tool_call import WebSearchToolCall
 
 TextFormatT = TypeVar("TextFormatT")
 
+# Using Any for OutputMessage generic parameter since Item is an Annotated type alias
 Item = Annotated[
     Union[
         InputMessage,
-        OutputMessage[TextFormatT],
+        OutputMessage[Any],
         FileSearchToolCall,
         ComputerToolCall,
         ComputerCallOutputItemParam,

@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 
 class ToolChoiceMCP(BaseModel):
-    type: Literal["ToolChoiceMCP"] = Field(
+    type: Literal["mcp"] = Field(
         ..., description="For MCP tools, the type is always `mcp`."
     )
     server_label: str = Field(..., description="The label of the MCP server to use.\n")

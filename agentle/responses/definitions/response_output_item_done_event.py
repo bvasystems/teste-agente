@@ -6,7 +6,7 @@
 #   timestamp: 2025-10-18T15:02:20+00:00
 
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -25,4 +25,4 @@ class ResponseOutputItemDoneEvent(BaseModel):
     sequence_number: int = Field(
         ..., description="The sequence number of this event.\n"
     )
-    item: OutputItem[Any] = Field(..., description="The output item that was marked done.\n")
+    item: OutputItem = Field(..., description="The output item that was marked done.\n")

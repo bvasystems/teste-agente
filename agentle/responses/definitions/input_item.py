@@ -19,7 +19,9 @@ from .item_reference_param import ItemReferenceParam
 
 TextFormatT = TypeVar("TextFormatT")
 
+# Using Item without generic parameter since it's an Annotated type alias
+# The generic type handling is done at the Item level
 InputItem = Annotated[
-    Union[EasyInputMessage, Item[TextFormatT], ItemReferenceParam],
+    Union[EasyInputMessage, Item, ItemReferenceParam],
     Field(discriminator="type"),
 ]

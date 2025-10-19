@@ -12,7 +12,13 @@ from pydantic import BaseModel, Field
 
 
 class ToolChoiceTypes(BaseModel):
-    type: Literal["ToolChoiceTypes"] = Field(
+    type: Literal[
+        "file_search",
+        "web_search_preview",
+        "computer_use_preview",
+        "code_interpreter",
+        "image_generation",
+    ] = Field(
         ...,
         description="The type of hosted tool the model should to use. Learn more about\n[built-in tools](https://platform.openai.com/docs/guides/tools).\n\nAllowed values are:\n- `file_search`\n- `web_search_preview`\n- `computer_use_preview`\n- `code_interpreter`\n- `image_generation`\n",
     )

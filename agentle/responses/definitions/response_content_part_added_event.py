@@ -6,7 +6,7 @@
 #   timestamp: 2025-10-18T15:02:20+00:00
 
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -31,5 +31,5 @@ class ResponseContentPartAddedEvent(BaseModel):
     content_index: int = Field(
         ..., description="The index of the content part that was added.\n"
     )
-    part: OutputContent[Any] = Field(..., description="The content part that was added.\n")
+    part: OutputContent = Field(..., description="The content part that was added.\n")
     sequence_number: int = Field(..., description="The sequence number of this event.")

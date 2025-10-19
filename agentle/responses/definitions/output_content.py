@@ -6,7 +6,7 @@
 #   timestamp: 2025-10-18T15:02:20+00:00
 
 
-from typing import Annotated, TypeVar, Union
+from typing import Annotated, Any, TypeVar, Union
 
 from pydantic import Field
 
@@ -19,7 +19,8 @@ from .refusal_content import RefusalContent
 
 TextFormatT = TypeVar("TextFormatT")
 
+# Using Any for OutputTextContent generic parameter since OutputContent is an Annotated type alias
 OutputContent = Annotated[
-    Union[OutputTextContent[TextFormatT], RefusalContent, ReasoningTextContent],
+    Union[OutputTextContent[Any], RefusalContent, ReasoningTextContent],
     Field(discriminator="type"),
 ]

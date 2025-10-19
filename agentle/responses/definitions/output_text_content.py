@@ -10,10 +10,7 @@ from __future__ import annotations
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
-from openai import OpenAI
 
-client = OpenAI()
-client.responses.parse
 
 # Model dependencies
 from .annotation import Annotation
