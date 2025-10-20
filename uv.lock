@@ -166,7 +166,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.11.3" },
     { name = "pypdf2", specifier = ">=3.0.1" },
     { name = "pyyaml", specifier = ">=6.0.2" },
-    { name = "rock-solid-base", specifier = ">=0.1.2" },
+    { name = "rock-solid-base", specifier = ">=0.1.14" },
     { name = "ujson", specifier = ">=5.10.0" },
 ]
 

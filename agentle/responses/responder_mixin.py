@@ -262,6 +262,21 @@ class ResponderMixin(abc.ABC):
 
             create_response.set_text_format(text_format)
 
+            # If the caller requested structured output and did not provide tools,
+            # prefer to disable tool calling explicitly so the model focuses on JSON.
+            if tool_choice is None and not _tools:
+                # Import locally to avoid a circular import at module import time
+                from agentle.responses.definitions.tool_choice_options import (
+                    ToolChoiceOptions as _ToolChoiceOptions,
+                )
+
+                create_response.tool_choice = _ToolChoiceOptions.none
+
+            # Disable reasoning by default for structured outputs unless explicitly set,
+            # to avoid consuming tokens on hidden reasoning and risking truncation
+            if reasoning is None:
+                create_response.reasoning = None
+
         return await self._respond_async(
             create_response,
             text_format=text_format,

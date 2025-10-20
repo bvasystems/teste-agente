@@ -10,7 +10,9 @@ from typing import (
     Callable,
     Dict,
     List,
+    NotRequired,
     Optional,
+    TypedDict,
     Union,
     cast,
     get_args,
@@ -23,6 +25,7 @@ from typing import (
 from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum
 import re
+from pydantic import BaseModel
 
 
 @dataclass
@@ -38,6 +41,10 @@ class JsonSchemaConfig:
         True  # Make all fields required (can use Optional for nullable)
     )
     dereference: bool = False  # Inline all $ref definitions (no references)
+
+
+class FunctionExtractionConfig(TypedDict):
+    extract_return_type: NotRequired[bool]
 
 
 class JsonSchemaExtractor:
@@ -60,13 +67,16 @@ class JsonSchemaExtractor:
         ] = {}  # Parameter descriptions from docstring
 
     def extract(
-        self, func: Callable[..., Any], extract_return_type: bool = False
+        self,
+        target: Callable[..., Any] | type[BaseModel],
+        *,
+        function_extraction_config: FunctionExtractionConfig | None = None,
     ) -> Dict[str, Any]:
         """
-        Extract JSON Schema from a callable.
+        Extract JSON Schema from a callable or Pydantic BaseModel.
 
         Args:
-            func: A callable (function, method, or class)
+            target: A callable (function, method, or class) or a Pydantic BaseModel class
             extract_return_type: If True, extract schema from return type instead of parameters
 
         Returns:
@@ -79,6 +89,13 @@ class JsonSchemaExtractor:
         self._building_types = {}
         self._param_descriptions = {}
 
+        # Check if target is a Pydantic BaseModel
+        if inspect.isclass(target) and issubclass(target, BaseModel):
+            return self._extract_from_pydantic(target)
+
+        # Otherwise, it's a callable - use existing logic
+        func = target
+
         # Get function signature
         sig = inspect.signature(func)
 
@@ -89,7 +106,9 @@ class JsonSchemaExtractor:
         # Extract parameter descriptions from docstring
         self._param_descriptions = self._extract_param_descriptions(func)
 
-        if extract_return_type:
+        function_extraction_config = function_extraction_config or {}
+
+        if function_extraction_config.get("extract_return_type"):
             # Extract schema from return type
             return_annotation = sig.return_annotation
 
@@ -165,6 +184,147 @@ class JsonSchemaExtractor:
             complete_schema["description"] = description
 
         return complete_schema
+
+    def _extract_from_pydantic(self, model_class: type[BaseModel]) -> Dict[str, Any]:
+        """
+        Extract JSON Schema from a Pydantic BaseModel.
+
+        Args:
+            model_class: A Pydantic BaseModel class
+
+        Returns:
+            Dictionary containing the JSON Schema
+        """
+        # Get the base schema from Pydantic
+        if self.config.dereference:
+            # Use mode='serialization' to get a clean schema
+            base_schema = model_class.model_json_schema(
+                mode="serialization", ref_template="{model}"
+            )
+        else:
+            base_schema = model_class.model_json_schema(mode="serialization")
+
+        # Extract the main schema and definitions
+        schema = base_schema.copy()
+        definitions = schema.pop("$defs", {})
+
+        # Apply our configuration settings
+        schema = self._apply_config_to_pydantic_schema(schema, definitions)
+
+        # Handle dereferencing if needed
+        if self.config.dereference:
+            # Store definitions temporarily for dereferencing
+            self._definitions = definitions
+            schema = self._dereference_schema(schema)
+            # Clear definitions after dereferencing since they're inlined
+            if "$defs" in schema:
+                del schema["$defs"]
+        else:
+            # Add definitions back if not dereferencing
+            if definitions:
+                schema["$defs"] = definitions
+
+        # Build complete schema with metadata
+        model_name = model_class.__name__
+        description = model_class.__doc__
+
+        complete_schema = {
+            "name": model_name,
+            "strict": self.config.strict_mode,
+            "schema": schema,
+        }
+
+        if description and self.config.include_descriptions:
+            complete_schema["description"] = description.strip()
+
+        return complete_schema
+
+    def _apply_config_to_pydantic_schema(
+        self, schema: Dict[str, Any], definitions: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Apply JsonSchemaConfig settings to a Pydantic-generated schema.
+
+        Args:
+            schema: The main schema object
+            definitions: The definitions ($defs) object
+
+        Returns:
+            Modified schema with config applied
+        """
+        # Apply to main schema
+        schema = self._apply_config_to_schema_object(schema)
+
+        # Apply to all definitions
+        for def_name, def_schema in definitions.items():
+            definitions[def_name] = self._apply_config_to_schema_object(def_schema)
+
+        return schema
+
+    def _apply_config_to_schema_object(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Recursively apply config to a schema object.
+
+        Args:
+            schema: A schema object (can be nested)
+
+        Returns:
+            Modified schema
+        """
+        # Make a copy to avoid modifying the original
+        schema = schema.copy()
+
+        # Handle additionalProperties
+        if self.config.ensure_additional_properties and schema.get("type") == "object":
+            if "additionalProperties" not in schema:
+                schema["additionalProperties"] = False
+
+        # Handle descriptions
+        if not self.config.include_descriptions:
+            if "description" in schema:
+                del schema["description"]
+
+        # Handle required fields based on make_all_required
+        if self.config.make_all_required and schema.get("type") == "object":
+            # Get all properties
+            properties = schema.get("properties", {})
+            # Make all properties required
+            if properties:
+                schema["required"] = list(properties.keys())
+
+        # Recursively apply to nested schemas
+        if "properties" in schema:
+            schema["properties"] = {
+                key: self._apply_config_to_schema_object(value)
+                for key, value in schema["properties"].items()
+            }
+
+        if "items" in schema:
+            schema["items"] = self._apply_config_to_schema_object(schema["items"])
+
+        if "additionalProperties" in schema and isinstance(
+            schema["additionalProperties"], dict
+        ):
+            schema["additionalProperties"] = self._apply_config_to_schema_object(
+                cast(Dict[str, Any], schema["additionalProperties"])
+            )
+
+        if "anyOf" in schema:
+            schema["anyOf"] = [
+                self._apply_config_to_schema_object(s) for s in schema["anyOf"]
+            ]
+
+        if "allOf" in schema:
+            schema["allOf"] = [
+                self._apply_config_to_schema_object(s) for s in schema["allOf"]
+            ]
+
+        if "oneOf" in schema:
+            schema["oneOf"] = [
+                self._apply_config_to_schema_object(s) for s in schema["oneOf"]
+            ]
+
+        return schema
 
     def _extract_description(self, func: Callable[..., Any]) -> Optional[str]:
         """Extract description from docstring"""
@@ -295,10 +455,11 @@ class JsonSchemaExtractor:
                 return resolved
 
         # Try to find the type in the calling frame's globals
-        import sys
 
-        frame = sys._getframe()  # type: ignore[reportPrivateUsage]
+        frame = inspect.currentframe()
         for _ in range(15):  # Look up to 15 frames
+            if frame is None:
+                break
             frame = frame.f_back
             if frame is None:
                 break
@@ -553,7 +714,7 @@ class JsonSchemaExtractor:
         return schema
 
     def _handle_tuple(
-        self, args: tuple[type, ...] | EllipsisType, field_name: str
+        self, args: tuple[Any, ...] | EllipsisType, field_name: str
     ) -> Dict[str, Any]:
         """Handle Tuple types - represented as arrays with specific item schemas"""
 
@@ -566,11 +727,12 @@ class JsonSchemaExtractor:
         # For fixed-length tuples, we'll use array with items as array of schemas
         # Note: JSON Schema prefixItems is more precise but may not be supported
         # Using a simpler array representation
-        item_schemas = [
-            self._get_type_schema(arg, f"{field_name}_{i}")
-            for i, arg in enumerate(cast(tuple[type, ...], args))
-            if arg is not Ellipsis  # type: ignore[reportUnnecessaryComparison]
-        ]
+        item_schemas: list[Dict[str, Any]] = []
+        if isinstance(args, tuple):
+            for i, arg in enumerate(args):
+                if arg is Ellipsis:
+                    continue
+                item_schemas.append(self._get_type_schema(arg, f"{field_name}_{i}"))
 
         schema: dict[str, Any] = {
             "type": "array",
@@ -585,6 +747,43 @@ class JsonSchemaExtractor:
             )
 
         return schema
+
+    def extract_type(self, type_cls: type) -> Dict[str, Any]:
+        """Public helper to extract schema directly from a Python type.
+
+        This avoids accessing protected internals from callers and mirrors the
+        behavior used when extracting from return annotations.
+        """
+        # Reset state
+        self._definitions = {}
+        self._seen_types = set()
+        self._current_depth = 0
+        self._type_schemas = {}
+        self._building_types = {}
+        self._param_descriptions = {}
+
+        schema = self._get_type_schema(type_cls, getattr(type_cls, "__name__", ""))
+
+        # If it's a reference, unwrap it
+        if "$ref" in schema:
+            ref_name = schema["$ref"].split("/")[-1]
+            if ref_name in self._definitions:
+                schema = self._definitions[ref_name].copy()
+
+        # Add definitions if any (unless dereferencing)
+        if self._definitions and not self.config.dereference:
+            schema["$defs"] = self._definitions
+
+        result: Dict[str, Any] = {
+            "name": getattr(type_cls, "__name__", "type").lower(),
+            "strict": True if self.config.strict_mode else False,
+            "schema": schema,
+        }
+
+        if getattr(type_cls, "__doc__", None):
+            result["description"] = cast(str, type_cls.__doc__).strip()
+
+        return result
 
     def _handle_enum(self, enum_class: type[Enum], field_name: str) -> Dict[str, Any]:
         """Handle Enum types"""
@@ -986,7 +1185,9 @@ if __name__ == "__main__":
 
     print("\n\n6b. Math reasoning - Return Type (for response format):")
     print("-" * 80)
-    schema = extractor.extract(solve_math_problem, extract_return_type=True)
+    schema = extractor.extract(
+        solve_math_problem, function_extraction_config={"extract_return_type": True}
+    )
     print(json.dumps(schema, indent=2))
 
     # Test 7: Recursive schema (UI components)
@@ -1037,28 +1238,7 @@ if __name__ == "__main__":
     def extract_from_type(type_cls: type) -> Dict[str, Any]:
         """Helper to extract schema directly from a type"""
         ext = JsonSchemaExtractor()
-        ext._definitions = {}  # type: ignore[reportPrivateUsage]
-        ext._seen_types = set()  # type: ignore[reportPrivateUsage]
-        ext._current_depth = 0  # type: ignore[reportPrivateUsage]
-
-        schema = ext._get_type_schema(type_cls, type_cls.__name__)  # type: ignore[reportPrivateUsage]
-
-        # If it's a reference, unwrap it
-        if "$ref" in schema:
-            ref_name = schema["$ref"].split("/")[-1]
-            if ref_name in ext._definitions:  # type: ignore[reportPrivateUsage]
-                schema = ext._definitions[ref_name].copy()  # type: ignore[reportPrivateUsage]
-
-        # Add definitions
-        if ext._definitions:  # type: ignore[reportPrivateUsage]
-            schema["$defs"] = ext._definitions  # type: ignore[reportPrivateUsage]
-
-        result = {"name": type_cls.__name__.lower(), "strict": True, "schema": schema}
-
-        if type_cls.__doc__:
-            result["description"] = type_cls.__doc__.strip()
-
-        return result
+        return ext.extract_type(type_cls)
 
     schema = extract_from_type(CalendarEvent)
     print(json.dumps(schema, indent=2))
@@ -1110,7 +1290,9 @@ if __name__ == "__main__":
 
     config_deref = JsonSchemaConfig(dereference=True)
     extractor_deref = JsonSchemaExtractor(config_deref)
-    schema = extractor_deref.extract(solve_detailed, extract_return_type=True)
+    schema = extractor_deref.extract(
+        solve_detailed, function_extraction_config={"extract_return_type": True}
+    )
     print(json.dumps(schema, indent=2))
 
     print("\n\n" + "=" * 80)
@@ -1198,3 +1380,116 @@ if __name__ == "__main__":
         print(json.dumps(schema, indent=2))
     except Exception as e:
         print(f"✗ Failed: {e}")
+
+    # NEW TESTS FOR PYDANTIC BASEMODEL
+    print("\n\n" + "=" * 80)
+    print("PYDANTIC BASEMODEL TESTS")
+    print("=" * 80)
+
+    # Test 14: Simple Pydantic model
+    print("\n\n14. Simple Pydantic BaseModel:")
+    print("-" * 80)
+
+    class UserModel(BaseModel):
+        """A user model"""
+
+        name: str
+        age: int
+        email: str
+
+    extractor = JsonSchemaExtractor()
+    schema = extractor.extract(UserModel)
+    print(json.dumps(schema, indent=2))
+
+    # Test 15: Pydantic model with optional fields
+    print("\n\n15. Pydantic model with optional fields:")
+    print("-" * 80)
+
+    class ProductModel(BaseModel):
+        """A product model"""
+
+        name: str
+        price: float
+        description: Optional[str] = None
+        tags: List[str] = []
+
+    schema = extractor.extract(ProductModel)
+    print(json.dumps(schema, indent=2))
+
+    # Test 16: Nested Pydantic models
+    print("\n\n16. Nested Pydantic models:")
+    print("-" * 80)
+
+    class AddressModel(BaseModel):
+        """Address information"""
+
+        street: str
+        city: str
+        country: str
+
+    class PersonModel(BaseModel):
+        """Person information"""
+
+        name: str
+        age: int
+        address: AddressModel
+        emails: List[str]
+
+    schema = extractor.extract(PersonModel)
+    print(json.dumps(schema, indent=2))
+
+    # Test 17: Dereferenced Pydantic model
+    print("\n\n17. Dereferenced Pydantic model:")
+    print("-" * 80)
+
+    config_deref = JsonSchemaConfig(dereference=True)
+    extractor_deref = JsonSchemaExtractor(config_deref)
+    schema = extractor_deref.extract(PersonModel)
+    print(json.dumps(schema, indent=2))
+
+    # Test 18: Pydantic model with Literal and Enum
+    print("\n\n18. Pydantic model with Literal and Enum:")
+    print("-" * 80)
+
+    class Priority(Enum):
+        LOW = "low"
+        MEDIUM = "medium"
+        HIGH = "high"
+
+    class TaskModel(BaseModel):
+        """A task model"""
+
+        title: str
+        priority: Priority
+        status: Literal["pending", "in_progress", "done"]
+
+    schema = extractor.extract(TaskModel)
+    print(json.dumps(schema, indent=2))
+
+    # Test 19: Pydantic with custom config (no descriptions)
+    print("\n\n19. Pydantic with custom config (no descriptions):")
+    print("-" * 80)
+
+    config_no_desc = JsonSchemaConfig(include_descriptions=False)
+    extractor_no_desc = JsonSchemaExtractor(config_no_desc)
+    schema = extractor_no_desc.extract(UserModel)
+    print(json.dumps(schema, indent=2))
+
+    # Test 20: Pydantic with make_all_required=False
+    print("\n\n20. Pydantic with make_all_required=False:")
+    print("-" * 80)
+
+    class FlexibleModel(BaseModel):
+        """A flexible model"""
+
+        required_field: str
+        optional_field: Optional[str] = None
+
+    config_flexible = JsonSchemaConfig(make_all_required=False)
+    extractor_flexible = JsonSchemaExtractor(config_flexible)
+    schema = extractor_flexible.extract(FlexibleModel)
+    print(json.dumps(schema, indent=2))
+
+    print("\n\n" + "=" * 80)
+    print("ALL PYDANTIC TESTS COMPLETED")
+    print("=" * 80)

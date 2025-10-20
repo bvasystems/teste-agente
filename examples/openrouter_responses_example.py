@@ -11,10 +11,13 @@ This demonstrates:
 """
 
 import asyncio
+import os
 
 from dotenv import load_dotenv
 from rsb.models.base_model import BaseModel
 
+from agentle.responses.definitions.reasoning import Reasoning
+from agentle.responses.definitions.reasoning_effort import ReasoningEffort
 from agentle.responses.open_router.open_router_responder import OpenRouterResponder
 
 load_dotenv()
@@ -26,18 +29,18 @@ class MathResponse(BaseModel):
 
 async def main():
     """Basic text generation example."""
-    responder = OpenRouterResponder()
+    responder = OpenRouterResponder(api_key=os.getenv("OPENAI_API_KEY"))
 
     print("Starting...")
     response = await responder.respond_async(
         input="What is 2+2?",
-        model="openai/gpt-5-nano",
-        max_output_tokens=500,
+        model="gpt-5-nano",
+        max_output_tokens=4096,
         text_format=MathResponse,
+        reasoning=Reasoning(
+            effort=ReasoningEffort.high,
+        ),
     )
-
-    # async for event in response:
-    #     print(event)
 
     print("Response: ")
     print(response)

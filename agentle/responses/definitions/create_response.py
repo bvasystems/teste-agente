@@ -20,6 +20,10 @@ from agentle.responses.definitions.text_response_format_json_schema import (
 )
 from agentle.responses.definitions.verbosity import Verbosity
 from agentle.responses.definitions.verbosity1 import Verbosity1
+from agentle.responses.json_schema_extractor import (
+    JsonSchemaConfig,
+    JsonSchemaExtractor,
+)
 
 # Model dependencies
 from .conversation_param import ConversationParam
@@ -46,16 +50,27 @@ class CreateResponse(CreateModelResponseProperties, ResponseProperties):
     def set_text_format[TextFormatT: BaseModel](
         self, text_format: type[TextFormatT]
     ) -> Self:
-        schema_dict = text_format.model_json_schema()
-        schema_dict.pop("$defs", None)
+        extractor = JsonSchemaExtractor(
+            config=JsonSchemaConfig(
+                ensure_additional_properties=True,
+                include_descriptions=True,
+                strict_mode=True,
+                max_enum_values=1000,
+                max_nesting_depth=10,
+                make_all_required=True,
+                dereference=True,
+            )
+        )
+
+        schema_dict = extractor.extract(text_format)
+        # Use only the inner JSON Schema object for the `schema` field
+        inner_schema = schema_dict.get("schema", {})
         self.text = Text(
             format=TextResponseFormatJsonSchema(
                 type="json_schema",
                 description="JSON Output",
                 name=text_format.__name__,
-                schema=ResponseFormatJsonSchemaSchema(
-                    **schema_dict
-                ),
+                schema=ResponseFormatJsonSchemaSchema(**inner_schema),
                 strict=True,
             ),
             verbosity=Verbosity(Verbosity1.medium),

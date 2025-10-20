@@ -85,4 +85,6 @@ class Response[TextFormatT = None](ModelResponseProperties, ResponseProperties):
                             raise ValueError("No parsed output available")
                         return cast(TextFormatT, content.parsed)
 
-        return cast(TextFormatT, None)
+        # If a text_format was provided but we didn't find any parsed content,
+        # raise a clear error rather than silently returning None
+        raise ValueError("No parsed output available")

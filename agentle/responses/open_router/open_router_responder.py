@@ -118,7 +118,7 @@ class OpenRouterResponder(BaseModel, ResponderMixin):
         is_streaming = create_response.stream or False
 
         # Make API request
-        base_url = "https://openrouter.ai/api/v1"
+        base_url = "https://api.openai.com/v1"
         url = f"{base_url}/responses"
 
         async with aiohttp.ClientSession() as session:
@@ -157,7 +157,20 @@ class OpenRouterResponder(BaseModel, ResponderMixin):
         text_format: Type[TextFormatT] | None = None,
     ) -> Response[TextFormatT]:
         """Handle non-streaming response from OpenRouter Responses API."""
-        response_data = await response.json()
+        # Read raw text for debugging, then parse JSON
+        response_text = await response.text()
+        try:
+            response_data = json.loads(response_text)
+        except Exception:
+            logger.error("Failed to decode response JSON: %s", response_text)
+            raise
+
+        # Debug: log the raw JSON response to help diagnose missing structured outputs
+        try:
+            print("HTTP response JSON:")
+            print(response_data)
+        except Exception:
+            pass
 
         # Parse the response using Pydantic
         parsed_response = (
@@ -166,8 +179,7 @@ class OpenRouterResponder(BaseModel, ResponderMixin):
             .set_text_format(text_format)
         )
 
-        print("Output parsed: ")
-        print(parsed_response.output_parsed)
+        # Avoid forcing access to parsed output here; caller may inspect if available
 
         # If text_format is provided, parse structured output
         if text_format and issubclass(text_format, BaseModel):
@@ -185,6 +197,22 @@ class OpenRouterResponder(BaseModel, ResponderMixin):
                                 except Exception:
                                     # If parsing fails, leave parsed as None
                                     pass
+
+            # Fallback: some models populate output_text at the top level
+            if not parsed_response.output_parsed and parsed_response.output_text:
+                try:
+                    parsed_data = json.loads(parsed_response.output_text)
+                    # Inject into the first message/output_text content if available
+                    for output_item in parsed_response.output:
+                        if output_item.type == "message":
+                            for content in output_item.content:
+                                if content.type == "output_text":
+                                    content.parsed = text_format.model_validate(
+                                        parsed_data
+                                    )
+                                    break
+                except Exception:
+                    pass
 
         return parsed_response
 
