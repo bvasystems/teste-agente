@@ -183,6 +183,7 @@ class OpenRouterResponder(BaseModel, ResponderMixin):
 
         # If text_format is provided, parse structured output
         if text_format and issubclass(text_format, BaseModel):
+            found_parsed = False
             if parsed_response.output:
                 for output_item in parsed_response.output:
                     if output_item.type == "message":
@@ -194,12 +195,13 @@ class OpenRouterResponder(BaseModel, ResponderMixin):
                                     content.parsed = text_format.model_validate(
                                         parsed_data
                                     )
+                                    found_parsed = True
                                 except Exception:
                                     # If parsing fails, leave parsed as None
                                     pass
 
             # Fallback: some models populate output_text at the top level
-            if not parsed_response.output_parsed and parsed_response.output_text:
+            if not found_parsed and parsed_response.output_text:
                 try:
                     parsed_data = json.loads(parsed_response.output_text)
                     # Inject into the first message/output_text content if available
@@ -211,8 +213,36 @@ class OpenRouterResponder(BaseModel, ResponderMixin):
                                         parsed_data
                                     )
                                     break
+                    found_parsed = True
                 except Exception:
                     pass
+
+            # If we still don't have parsed content and the response is incomplete
+            # due to max_output_tokens, raise a helpful error message so users know
+            # it's a token budget/reasoning issue rather than a provider failure.
+            status_value = getattr(
+                parsed_response.status, "value", parsed_response.status
+            )
+            incomplete_reason = (
+                getattr(
+                    parsed_response.incomplete_details.reason,
+                    "value",
+                    parsed_response.incomplete_details.reason,
+                )
+                if parsed_response.incomplete_details
+                else None
+            )
+
+            if (
+                not found_parsed
+                and status_value == "incomplete"
+                and incomplete_reason == "max_output_tokens"
+            ):
+                raise ValueError(
+                    "Structured output not returned: the response was truncated due to max_output_tokens. "
+                    + "When text_format is set and reasoning is enabled (especially high), the model may spend the entire budget on reasoning. "
+                    + "Increase max_output_tokens or lower reasoning effort to ensure the JSON can be emitted."
+                )
 
         return parsed_response
 

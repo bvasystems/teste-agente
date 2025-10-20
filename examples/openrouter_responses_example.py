@@ -35,12 +35,16 @@ async def main():
     response = await responder.respond_async(
         input="What is 2+2?",
         model="gpt-5-nano",
-        max_output_tokens=4096,
+        max_output_tokens=500,
         text_format=MathResponse,
         reasoning=Reasoning(
             effort=ReasoningEffort.high,
         ),
+        stream=True,
     )
+
+    async for event in response:
+        print(event)
 
     print("Response: ")
     print(response)
