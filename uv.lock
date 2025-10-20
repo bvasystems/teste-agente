@@ -19,6 +19,7 @@ dependencies = [
     { name = "dill" },
     { name = "duckdb" },
     { name = "google-genai" },
+    { name = "html-to-markdown" },
     { name = "markitdown" },
     { name = "mcp", extra = ["cli"] },
     { name = "pydantic" },
@@ -159,6 +160,7 @@ requires-dist = [
     { name = "dill", specifier = ">=0.4.0" },
     { name = "duckdb", specifier = ">=1.3.2" },
     { name = "google-genai", specifier = ">=1.14.0" },
+    { name = "html-to-markdown", specifier = ">=2.3.4" },
     { name = "markitdown", specifier = ">=0.1.3" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.6.0" },
     { name = "pydantic", specifier = ">=2.11.3" },
@@ -1564,6 +1566,17 @@ wheels = [
 ]
 
 [[package]]
+name = "html-to-markdown"
+version = "2.3.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/43/e0/0a67404eefc49cd97565e8fe8739c4a24d754a4047cc1bdd262e5eadd467/html_to_markdown-2.3.4.tar.gz", hash = "sha256:6f2fd7e0a2849963255810644c23c4032aede06e4c31c4e1802a004e908f8b7c", size = 1906082 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c5/fe/706353b0b3216d88a9908072a34e2064ce22baae44cea65f9fcc67f65489/html_to_markdown-2.3.4-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:b05e846992f4c9baa7388db947beb4558a7a5242138969e2cc7585c9fd7173e7", size = 4809869 },
+    { url = "https://files.pythonhosted.org/packages/89/1e/db150654599197e750d806afdc1b9d71d5c4a98a245b44435c17691f97ca/html_to_markdown-2.3.4-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:b0950d9f1549dfeff3489c14f2060676f9a2cea86ef2255b583ff7d497ce31b6", size = 5331237 },
+    { url = "https://files.pythonhosted.org/packages/a2/fc/281bec596011114380e57d67d1fbc37bf1b53e86b52fcfa74cca6feb6a65/html_to_markdown-2.3.4-cp310-abi3-win_amd64.whl", hash = "sha256:5a176471b518a8ab3cb093d50c324fa9956b3688911fbd07d01e3f8a627f7c07", size = 5080125 },
+]
+
+[[package]]
 name = "httpcore"
 version = "1.0.8"
 source = { registry = "https://pypi.org/simple" }
@@ -2679,21 +2692,21 @@ wheels = [
 
 [[package]]
 name = "playwright"
-version = "1.52.0"
+version = "1.55.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "greenlet" },
     { name = "pyee" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1e/62/a20240605485ca99365a8b72ed95e0b4c5739a13fb986353f72d8d3f1d27/playwright-1.52.0-py3-none-macosx_10_13_x86_64.whl", hash = "sha256:19b2cb9d4794062008a635a99bd135b03ebb782d460f96534a91cb583f549512", size = 39611246 },
-    { url = "https://files.pythonhosted.org/packages/dc/23/57ff081663b3061a2a3f0e111713046f705da2595f2f384488a76e4db732/playwright-1.52.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:0797c0479cbdc99607412a3c486a3a2ec9ddc77ac461259fd2878c975bcbb94a", size = 37962977 },
-    { url = "https://files.pythonhosted.org/packages/a2/ff/eee8532cff4b3d768768152e8c4f30d3caa80f2969bf3143f4371d377b74/playwright-1.52.0-py3-none-macosx_11_0_universal2.whl", hash = "sha256:7223960b7dd7ddeec1ba378c302d1d09733b8dac438f492e9854c85d3ca7144f", size = 39611247 },
-    { url = "https://files.pythonhosted.org/packages/73/c6/8e27af9798f81465b299741ef57064c6ec1a31128ed297406469907dc5a4/playwright-1.52.0-py3-none-manylinux1_x86_64.whl", hash = "sha256:d010124d24a321e0489a8c0d38a3971a7ca7656becea7656c9376bfea7f916d4", size = 45141333 },
-    { url = "https://files.pythonhosted.org/packages/4e/e9/0661d343ed55860bcfb8934ce10e9597fc953358773ece507b22b0f35c57/playwright-1.52.0-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4173e453c43180acc60fd77ffe1ebee8d0efbfd9986c03267007b9c3845415af", size = 44540623 },
-    { url = "https://files.pythonhosted.org/packages/7a/81/a850dbc6bc2e1bd6cc87341e59c253269602352de83d34b00ea38cf410ee/playwright-1.52.0-py3-none-win32.whl", hash = "sha256:cd0bdf92df99db6237a99f828e80a6a50db6180ef8d5352fc9495df2c92f9971", size = 34839156 },
-    { url = "https://files.pythonhosted.org/packages/51/f3/cca2aa84eb28ea7d5b85d16caa92d62d18b6e83636e3d67957daca1ee4c7/playwright-1.52.0-py3-none-win_amd64.whl", hash = "sha256:dcbf75101eba3066b7521c6519de58721ea44379eb17a0dafa94f9f1b17f59e4", size = 34839164 },
-    { url = "https://files.pythonhosted.org/packages/b5/4f/71a8a873e8c3c3e2d3ec03a578e546f6875be8a76214d90219f752f827cd/playwright-1.52.0-py3-none-win_arm64.whl", hash = "sha256:9d0085b8de513de5fb50669f8e6677f0252ef95a9a1d2d23ccee9638e71e65cb", size = 30688972 },
+    { url = "https://files.pythonhosted.org/packages/80/3a/c81ff76df266c62e24f19718df9c168f49af93cabdbc4608ae29656a9986/playwright-1.55.0-py3-none-macosx_10_13_x86_64.whl", hash = "sha256:d7da108a95001e412effca4f7610de79da1637ccdf670b1ae3fdc08b9694c034", size = 40428109 },
+    { url = "https://files.pythonhosted.org/packages/cf/f5/bdb61553b20e907196a38d864602a9b4a461660c3a111c67a35179b636fa/playwright-1.55.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:8290cf27a5d542e2682ac274da423941f879d07b001f6575a5a3a257b1d4ba1c", size = 38687254 },
+    { url = "https://files.pythonhosted.org/packages/4a/64/48b2837ef396487807e5ab53c76465747e34c7143fac4a084ef349c293a8/playwright-1.55.0-py3-none-macosx_11_0_universal2.whl", hash = "sha256:25b0d6b3fd991c315cca33c802cf617d52980108ab8431e3e1d37b5de755c10e", size = 40428108 },
+    { url = "https://files.pythonhosted.org/packages/08/33/858312628aa16a6de97839adc2ca28031ebc5391f96b6fb8fdf1fcb15d6c/playwright-1.55.0-py3-none-manylinux1_x86_64.whl", hash = "sha256:c6d4d8f6f8c66c483b0835569c7f0caa03230820af8e500c181c93509c92d831", size = 45905643 },
+    { url = "https://files.pythonhosted.org/packages/83/83/b8d06a5b5721931aa6d5916b83168e28bd891f38ff56fe92af7bdee9860f/playwright-1.55.0-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:29a0777c4ce1273acf90c87e4ae2fe0130182100d99bcd2ae5bf486093044838", size = 45296647 },
+    { url = "https://files.pythonhosted.org/packages/06/2e/9db64518aebcb3d6ef6cd6d4d01da741aff912c3f0314dadb61226c6a96a/playwright-1.55.0-py3-none-win32.whl", hash = "sha256:29e6d1558ad9d5b5c19cbec0a72f6a2e35e6353cd9f262e22148685b86759f90", size = 35476046 },
+    { url = "https://files.pythonhosted.org/packages/46/4f/9ba607fa94bb9cee3d4beb1c7b32c16efbfc9d69d5037fa85d10cafc618b/playwright-1.55.0-py3-none-win_amd64.whl", hash = "sha256:7eb5956473ca1951abb51537e6a0da55257bb2e25fc37c2b75af094a5c93736c", size = 35476048 },
+    { url = "https://files.pythonhosted.org/packages/21/98/5ca173c8ec906abde26c28e1ecb34887343fd71cc4136261b90036841323/playwright-1.55.0-py3-none-win_arm64.whl", hash = "sha256:012dc89ccdcbd774cdde8aeee14c08e0dd52ddb9135bf10e9db040527386bd76", size = 31225543 },
 ]
 
 [[package]]
@@ -3574,14 +3587,14 @@ wheels = [
 
 [[package]]
 name = "rock-solid-base"
-version = "0.1.13"
+version = "0.1.14"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0a/f7/3d824c6aa242279d4abb33406df65e3668cc2f8486e0f0430a796665029a/rock_solid_base-0.1.13.tar.gz", hash = "sha256:00890a28a86bae191586b3482aebb892420c2afd3bf95b4004c0473a419bf30d", size = 71779 }
+sdist = { url = "https://files.pythonhosted.org/packages/d3/c8/0d73196c62a3d1812997c0a85d443058bf4efb61ff61c1c222108e29e697/rock_solid_base-0.1.14.tar.gz", hash = "sha256:1d4f1a8c3754ebba67fcf402f9809a82b3c7d0f587c547d727f6e82710dffb27", size = 71691 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1c/e4/7a3f8a93d6b50238a18a03dbea24147bf90046fc11171e359276783dce47/rock_solid_base-0.1.13-py3-none-any.whl", hash = "sha256:8c45a1128373ac59434491edc4368b624cebe6811eea44aa8961982db5db008f", size = 59585 },
+    { url = "https://files.pythonhosted.org/packages/db/60/4dd44a72aab024b227331bf5896f8fe51037ea980cb5ddc380059a14e14a/rock_solid_base-0.1.14-py3-none-any.whl", hash = "sha256:d9f67c6682ea04c21aeea9ecc8822eb60d5361920e59bd1ea3bbc6ec52023c5a", size = 59692 },
 ]
 
 [[package]]

@@ -13,14 +13,15 @@ This demonstrates:
 import asyncio
 
 from dotenv import load_dotenv
+from rsb.models.base_model import BaseModel
 
 from agentle.responses.open_router.open_router_responder import OpenRouterResponder
 
 load_dotenv()
 
 
-async def sum_two_numbers(a: float, b: float):
-    return a + b
+class MathResponse(BaseModel):
+    math_result: int
 
 
 async def main():
@@ -29,10 +30,10 @@ async def main():
 
     print("Starting...")
     response = await responder.respond_async(
-        input="What is 2+2? call the tool",
+        input="What is 2+2?",
         model="openai/gpt-5-nano",
         max_output_tokens=500,
-        tools=[sum_two_numbers],
+        text_format=MathResponse,
     )
 
     # async for event in response:
@@ -41,8 +42,8 @@ async def main():
     print("Response: ")
     print(response)
 
-    print("Function calls: ")
-    print(response.function_calls)
+    print("Output parsed: ")
+    print(response.output_parsed)
 
 
 if __name__ == "__main__":

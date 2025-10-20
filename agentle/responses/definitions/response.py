@@ -6,9 +6,9 @@
 #   timestamp: 2025-10-18T15:02:20+00:00
 
 
-from typing import List, Optional, Union
+from typing import List, Optional, Self, Union, cast
 
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 
 from agentle.responses.definitions.function_tool_call import FunctionToolCall
 
@@ -53,6 +53,15 @@ class Response[TextFormatT = None](ModelResponseProperties, ResponseProperties):
         ..., description="Whether to allow the model to run tool calls in parallel.\n"
     )
     conversation: Optional[Conversation2] = None
+    _text_format: type[TextFormatT] | None = PrivateAttr(default=None)
+
+    def set_text_format(self, text_format: type[TextFormatT] | None) -> Self:
+        # Accept None for cases where callers pass through optional text_format
+        if text_format is None:
+            return self
+
+        self._text_format = text_format
+        return self
 
     @property
     def function_calls(self) -> list[FunctionToolCall]:
@@ -64,11 +73,16 @@ class Response[TextFormatT = None](ModelResponseProperties, ResponseProperties):
         return _function_calls
 
     @property
-    def output_parsed(self) -> Optional[TextFormatT]:
+    def output_parsed(self) -> TextFormatT:
+        if not self._text_format:
+            return cast(TextFormatT, None)
+
         for output in self.output:
             if output.type == "message":
                 for content in output.content:
-                    if content.type == "output_text" and content.parsed:
-                        return content.parsed
+                    if content.type == "output_text":
+                        if not content.parsed:
+                            raise ValueError("No parsed output available")
+                        return cast(TextFormatT, content.parsed)
 
-        return None
+        return cast(TextFormatT, None)

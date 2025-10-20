@@ -160,7 +160,14 @@ class OpenRouterResponder(BaseModel, ResponderMixin):
         response_data = await response.json()
 
         # Parse the response using Pydantic
-        parsed_response = Response[TextFormatT].model_validate(response_data)
+        parsed_response = (
+            Response[TextFormatT]
+            .model_validate(response_data)
+            .set_text_format(text_format)
+        )
+
+        print("Output parsed: ")
+        print(parsed_response.output_parsed)
 
         # If text_format is provided, parse structured output
         if text_format and issubclass(text_format, BaseModel):
