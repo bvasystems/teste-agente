@@ -111,3 +111,91 @@ class FunctionCallStore(BaseModel):
             return function_calls[index]
         except IndexError:
             return None
+
+    def get_all_tool_names(self) -> list[str]:
+        """
+        Get all registered tool names in the store.
+
+        Returns:
+            List of all tool names.
+        """
+        return list(self.store.keys())
+
+    def get_call_count(self, name: str) -> int:
+        """
+        Get the number of times a tool was called.
+
+        Args:
+            name: The name of the function tool.
+
+        Returns:
+            Number of calls for the tool, 0 if not found or no calls.
+        """
+        if name not in self.store:
+            return 0
+
+        function_calls = self.store[name].function_calls
+        return len(function_calls) if function_calls else 0
+
+    def remove_function_tool(self, name: str) -> bool:
+        """
+        Remove a function tool and all its calls from the store.
+
+        Args:
+            name: The name of the function tool to remove.
+
+        Returns:
+            True if the tool was removed, False if it wasn't found.
+        """
+        if name not in self.store:
+            return False
+
+        del self.store[name]
+        return True
+
+    def remove_call(self, name: str, index: int) -> bool:
+        """
+        Remove a specific function call by name and index.
+
+        Args:
+            name: The name of the function tool.
+            index: The index of the call to remove.
+
+        Returns:
+            True if the call was removed, False if not found or invalid index.
+        """
+        if name not in self.store:
+            return False
+
+        function_calls = self.store[name].function_calls
+        if function_calls is None or not function_calls:
+            return False
+
+        try:
+            function_calls.pop(index)
+            return True
+        except IndexError:
+            return False
+
+    def clear_all_calls(self) -> None:
+        """
+        Clear all function calls from all tools, but keep the tools themselves.
+        """
+        for tool_pair in self.store.values():
+            tool_pair.function_calls = None
+
+    def is_function_tool_present(self, function_tool: FunctionTool) -> bool:
+        """
+        Check if a function tool is present in the store.
+
+        Args:
+            function_tool: The function tool to check for.
+
+        Returns:
+            True if the tool is present, False otherwise.
+        """
+        if function_tool.name not in self.store:
+            return False
+
+        stored_tool = self.store[function_tool.name].function_tool
+        return stored_tool is not None
