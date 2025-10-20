@@ -289,6 +289,17 @@ class OpenRouterResponder(BaseModel, ResponderMixin):
                         self._response_stream_adapter.validate_python(event_data)
                     )
 
+                    # Ensure response objects inside events know the requested text_format
+                    if (
+                        text_format
+                        and hasattr(event, "response")
+                        and getattr(event, "response") is not None
+                    ):
+                        try:
+                            event.response = event.response.set_text_format(text_format)
+                        except Exception:
+                            pass
+
                     # Accumulate text for structured output parsing
                     if event_type == "response.output_text.delta":
                         accumulated_text += event_data.get("delta", "")
