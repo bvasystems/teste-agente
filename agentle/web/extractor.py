@@ -1,7 +1,6 @@
-import asyncio
+from rsb.coroutines.run_sync import run_sync
 from collections.abc import Sequence
 from textwrap import dedent
-from typing import Any
 
 from html_to_markdown import convert
 from playwright.async_api import Geolocation, ViewportSize
@@ -18,15 +17,25 @@ from agentle.web.extraction_result import ExtractionResult
 
 _INSTRUCTIONS = Prompt.from_text(
     dedent("""\
-    <character>You are a specialist in data extraction and web content analysis. Your role is to act as an intelligent and precise data processor.</character>
+    <character>
+    You are a specialist in data extraction and web content analysis. Your role is to act as an intelligent and precise data processor.
+    </character>
     
-    <request>Your task is to analyze the content of a web page provided in Markdown format inside `<markdown>` tags and extract the information requested in the `user_instructions`. You must process the content and return the extracted data in a strictly structured format, according to the requested output schema.</request>
+    <request>
+    Your task is to analyze the content of a web page provided in Markdown format inside `<markdown>` tags and extract the information requested in the `user_instructions`. You must process the content and return the extracted data in a strictly structured format, according to the requested output schema.
+    </request>
 
-    <additions>Focus exclusively on the textual content and its structure to identify the data. Ignore irrelevant elements such as script tags, styles, or metadata that do not contain the requested information. If a piece of information requested in `user_instructions` cannot be found in the Markdown content, the corresponding field in the output must be null or empty, as allowed by the schema. Be literal and precise in extraction, avoiding inferences or assumptions not directly supported by the text.</additions>
+    <additions>
+    Focus exclusively on the textual content and its structure to identify the data. Ignore irrelevant elements such as script tags, styles, or metadata that do not contain the requested information. If a piece of information requested in `user_instructions` cannot be found in the Markdown content, the corresponding field in the output must be null or empty, as allowed by the schema. Be literal and precise in extraction, avoiding inferences or assumptions not directly supported by the text.
+    </additions>
     
-    <type>The output must be a single valid JSON object that exactly matches the provided data schema. Do not include any text, explanation, comment, or any character outside the JSON object. Your response must start with `{` and end with `}`.</type>
+    <type>
+    The output must be a single valid JSON object that exactly matches the provided data schema. Do not include any text, explanation, comment, or any character outside the JSON object. Your response must start with `{` and end with `}`.
+    </type>
     
-    <extras>Act as an automated extraction tool. Accuracy and schema compliance are your only priorities. Ensure that all required fields in the output schema are filled.</extras>
+    <extras>
+    Act as an automated extraction tool. Accuracy and schema compliance are your only priorities. Ensure that all required fields in the output schema are filled.
+    </extras>
     """)
 )
 
@@ -43,12 +52,24 @@ _PROMPT = Prompt.from_text(
 
 # HTML -> MD -> LLM (Structured Output)
 class Extractor(BaseModel):
-    responder: Responder = Field(
-        ..., description="The responder to use for the extractor."
-    )
+    llm: Responder = Field(..., description="The responder to use for the extractor.")
     reasoning: Reasoning | None = Field(default=None)
     model: str | None = Field(default=None)
     max_output_tokens: int | None = Field(default=None)
+
+    def extract[T: BaseModel](
+        self,
+        urls: Sequence[str],
+        output: type[T],
+        prompt: str | None = None,
+        extraction_preferences: ExtractionPreferences | None = None,
+        ignore_invalid_urls: bool = True,
+    ) -> ExtractionResult[T]:
+        return run_sync(
+            self.extract_async(
+                urls, output, prompt, extraction_preferences, ignore_invalid_urls
+            )
+        )
 
     @needs("playwright")
     async def extract_async[T: BaseModel](
@@ -64,11 +85,6 @@ class Extractor(BaseModel):
         _preferences = extraction_preferences or ExtractionPreferences()
         _actions: Sequence[Action] = _preferences.actions or []
 
-        # Configure browser launch options
-        launch_options: dict[str, Any] = {
-            "headless": True,
-        }
-
         # Configure proxy if specified
         if _preferences.proxy in ["basic", "stealth"]:
             # You would need to configure actual proxy servers here
@@ -76,7 +92,7 @@ class Extractor(BaseModel):
             pass
 
         async with async_api.async_playwright() as p:
-            browser = await p.chromium.launch(**launch_options)
+            browser = await p.chromium.launch(headless=True)
 
             # Build context options properly based on preferences
             if _preferences.mobile:
@@ -205,7 +221,7 @@ class Extractor(BaseModel):
                 user_instructions=prompt or "Not provided.", markdown=markdown
             )
 
-            response = await self.responder.respond_async(
+            response = await self.llm.respond_async(
                 input=_prompt,
                 model=self.model,
                 instructions=_INSTRUCTIONS,
@@ -224,14 +240,18 @@ class Extractor(BaseModel):
             )
 
 
-async def main():
+if __name__ == "__main__":
+    from dotenv import load_dotenv
+
+    load_dotenv()
+
     site_uniube = "https://uniube.br/"
 
     class PossiveisRedirecionamentos(BaseModel):
         possiveis_redirecionamentos: list[str]
 
     extractor = Extractor(
-        responder=Responder.from_openai(),
+        llm=Responder.from_openai(),
         model="gpt-5-nano",
     )
 
@@ -244,7 +264,7 @@ async def main():
         timeout_ms=15000,
     )
 
-    result = await extractor.extract_async(
+    result = extractor.extract(
         urls=[site_uniube],
         output=PossiveisRedirecionamentos,
         prompt="Extract the possible redirects from the page.",
@@ -253,11 +273,3 @@ async def main():
 
     for link in result.output_parsed.possiveis_redirecionamentos:
         print(f"Link: {link}")
-
-
-if __name__ == "__main__":
-    from dotenv import load_dotenv
-
-    load_dotenv()
-
-    asyncio.run(main())

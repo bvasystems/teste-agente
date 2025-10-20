@@ -10,7 +10,7 @@ import orjson
 from pydantic import BaseModel, TypeAdapter
 from rsb.models.field import Field
 
-from agentle.generations.tracing.otel_client import OtelClient
+from agentle.generations.tracing.otel_client_type import OtelClientType
 from agentle.prompts.models.prompt import Prompt as PromptModel
 from agentle.responses.async_stream import AsyncStream
 from agentle.responses.definitions.conversation_param import ConversationParam
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 class Responder(BaseModel):
-    otel_clients: Sequence[OtelClient] = Field(default_factory=list)
+    otel_clients: Sequence[OtelClientType] = Field(default_factory=list)
     api_key: str | None = Field(default=None)
     base_url: str = Field(default="https://openrouter.ai/api/v1")
 

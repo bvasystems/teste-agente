@@ -11,8 +11,6 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any, AsyncGenerator, Optional, Protocol, runtime_checkable
 
-from pydantic import BaseModel
-
 
 @runtime_checkable
 class TraceContext(Protocol):
@@ -36,7 +34,7 @@ class GenerationContext(Protocol):
         ...
 
 
-class OtelClient(BaseModel, ABC):
+class OtelClient(ABC):
     """
     Interface abstrata para clientes de telemetria OpenTelemetry.
 

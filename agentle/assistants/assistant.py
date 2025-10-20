@@ -1,11 +1,33 @@
-from typing import Optional, Any, Literal
+from collections.abc import Callable, Sequence
+import time
 import uuid
+from typing import Any, Literal, Optional
+
 from rsb.models.base_model import BaseModel
 from rsb.models.field import Field
-import time
+
+from agentle.assistants.assistant_input_type import AssistantInputType
+from agentle.prompts.models.prompt import Prompt
+from agentle.responses.definitions.conversation_param import ConversationParam
+from agentle.responses.definitions.include_enum import IncludeEnum
+from agentle.responses.definitions.reasoning import Reasoning
+from agentle.responses.definitions.response import Response
+from agentle.responses.definitions.response_stream_options import ResponseStreamOptions
+from agentle.responses.definitions.service_tier import ServiceTier
+from agentle.responses.definitions.text import Text
+from agentle.responses.definitions.tool import Tool
+from agentle.responses.definitions.tool_choice_allowed import ToolChoiceAllowed
+from agentle.responses.definitions.tool_choice_custom import ToolChoiceCustom
+from agentle.responses.definitions.tool_choice_function import ToolChoiceFunction
+from agentle.responses.definitions.tool_choice_mcp import ToolChoiceMCP
+from agentle.responses.definitions.tool_choice_options import ToolChoiceOptions
+
+from agentle.responses.definitions.tool_choice_types import ToolChoiceTypes
+from agentle.responses.definitions.truncation import Truncation
+from agentle.responses.responder import Responder
 
 
-class Assistant(BaseModel):
+class Assistant[ResponseSchema = None](BaseModel):
     created_at: int = Field(
         default=int(time.time()),
         description="""The time the assistant was created.""",
@@ -23,15 +45,15 @@ class Assistant(BaseModel):
     overview for descriptions of them.""",
     )
 
+    responder: Responder = Field(
+        ...,
+        description="""The responder to use for the assistant.""",
+    )
+
     description: Optional[str] = Field(
         default=None,
         description="""The description of the assistant. The maximum
         length is 512 characters.""",
-    )
-
-    instructions: Optional[str] = Field(
-        default=None,
-        description="""The system instructions that the assistant uses. The maximum length is 256,000 characters.""",
     )
 
     metadata: Optional[dict[str, str]] = Field(
@@ -48,31 +70,6 @@ class Assistant(BaseModel):
         description="""The name of the assistant. The maximum length is 256 characters.""",
     )
 
-    reasoning_effort: Optional[Literal["minimal", "low", "medium", "high"]] = Field(
-        default="medium",
-        description="""Constrains effort on reasoning for reasoning models. 
-        Currently supported values are minimal, low, medium, and high. 
-        Reducing reasoning effort can result in faster responses and fewer tokens 
-        used on reasoning in a response. 
-        Note: The gpt-5-pro model defaults to (and only supports) high reasoning effort.""",
-    )
-
-    response_format: Optional[str | dict[str, Any]] = Field(
-        default="auto",
-        description="""Specifies the format that the model must output. 
-        Compatible with GPT-4o, GPT-4 Turbo, and all GPT-3.5 Turbo models since gpt-3.5-turbo-1106.
-        
-        Setting to { "type": "json_schema", "json_schema": {...} } enables Structured Outputs 
-        which ensures the model will match your supplied JSON schema.
-        
-        Setting to { "type": "json_object" } enables JSON mode, which ensures the message 
-        the model generates is valid JSON.
-        
-        Important: when using JSON mode, you must also instruct the model to produce JSON 
-        yourself via a system or user message. Without this, the model may generate an 
-        unending stream of whitespace until the generation reaches the token limit.""",
-    )
-
     temperature: Optional[float] = Field(
         default=1.0,
         ge=0.0,
@@ -80,21 +77,6 @@ class Assistant(BaseModel):
         description="""What sampling temperature to use, between 0 and 2. 
         Higher values like 0.8 will make the output more random, while lower values 
         like 0.2 will make it more focused and deterministic.""",
-    )
-
-    tool_resources: Optional[dict[str, Any]] = Field(
-        default=None,
-        description="""A set of resources that are used by the assistant's tools. 
-        The resources are specific to the type of tool. For example, the code_interpreter 
-        tool requires a list of file IDs, while the file_search tool requires a list of 
-        vector store IDs.""",
-    )
-
-    tools: Optional[list[dict[str, Any]]] = Field(
-        default_factory=list,
-        description="""A list of tool enabled on the assistant. There can be a maximum 
-        of 128 tools per assistant. Tools can be of types code_interpreter, file_search, 
-        or function.""",
     )
 
     top_p: Optional[float] = Field(
@@ -107,3 +89,42 @@ class Assistant(BaseModel):
         
         We generally recommend altering this or temperature but not both.""",
     )
+
+    include: Optional[list[IncludeEnum]] = None
+    parallel_tool_calls: Optional[bool] = None
+    store: Optional[bool] = None
+    instructions: Optional[str | Prompt] = None
+
+    stream_options: Optional[ResponseStreamOptions] = None
+    conversation: Optional[str | ConversationParam] = None
+    text_format: type[ResponseSchema] | None = None
+    # ResponseProperties parameters
+    previous_response_id: Optional[str] = None
+    reasoning: Optional[Reasoning] = None
+    background: Optional[bool] = None
+    max_output_tokens: Optional[int] = None
+    max_tool_calls: Optional[int] = None
+    text: Optional[Text] = None
+    tools: Optional[Sequence[Tool | Callable[..., Any]]] = None
+    tool_choice: Optional[
+        ToolChoiceOptions
+        | ToolChoiceAllowed
+        | ToolChoiceTypes
+        | ToolChoiceFunction
+        | ToolChoiceMCP
+        | ToolChoiceCustom
+    ] = None
+    prompt: Optional[Prompt] = None
+    truncation: Optional[Truncation] = None
+    # ModelResponseProperties parameters
+    top_logprobs: Optional[int] = None
+    user: Optional[str] = None
+    safety_identifier: Optional[str] = None
+    prompt_cache_key: Optional[str] = None
+    service_tier: Optional[ServiceTier] = None
+
+    async def execute_async(
+        self,
+        input: AssistantInputType,
+        stream: Optional[Literal[False] | Literal[True]] = None,
+    ) -> Response[ResponseSchema]: ...
