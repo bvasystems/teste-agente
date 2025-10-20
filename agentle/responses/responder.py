@@ -22,6 +22,9 @@ from agentle.responses.definitions.metadata import Metadata
 from agentle.responses.definitions.prompt import Prompt
 from agentle.responses.definitions.reasoning import Reasoning
 from agentle.responses.definitions.response import Response
+from agentle.responses.definitions.response_completed_event import (
+    ResponseCompletedEvent,
+)
 from agentle.responses.definitions.response_stream_event import ResponseStreamEvent
 from agentle.responses.definitions.response_stream_options import ResponseStreamOptions
 from agentle.responses.definitions.response_stream_type import ResponseStreamType
@@ -466,8 +469,6 @@ class Responder(BaseModel):
         event: response.created
         data: {"type":"response.created",...}
         """
-
-        from examples.openrouter_responses_example import ResponseCompletedEvent
 
         accumulated_text = ""
 

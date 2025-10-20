@@ -9,19 +9,52 @@ from __future__ import annotations
 
 import base64
 import inspect
-from collections.abc import Callable
-from typing import Any, Dict, Literal, Optional
+import logging
+from collections.abc import Awaitable, Callable
+from typing import Any, Dict, Generic, Literal, Optional, ParamSpec, TypeVar
 
 import dill
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from agentle.responses.json_schema_extractor import (
     JsonSchemaConfig,
     JsonSchemaExtractor,
 )
 
+_logger = logging.getLogger(__name__)
 
-class FunctionTool(BaseModel):
+# Type variables for the from_callable method
+CallableP = ParamSpec("CallableP")
+CallableT = TypeVar("CallableT")
+
+P = ParamSpec(
+    "P",
+    default=...,  # Can't use Python's 3.13 new Generic syntax. Cannot pickle them.
+)
+T_Output = TypeVar("T_Output", default=Any)
+
+
+class FunctionTool(BaseModel, Generic[P, T_Output]):
+    """
+    A callable function tool with robust type safety and parameter conversion.
+
+    This enhanced version of FunctionTool includes comprehensive type safety
+    and parameter conversion capabilities similar to the Tool class.
+
+    Type Parameters:
+        P: ParamSpec for the callable's parameters
+        T_Output: Return type of the callable function
+
+    Attributes:
+        type: Literal field that identifies this as a function tool, always set to "function".
+        name: Human-readable name of the function.
+        description: Human-readable description of what the function does.
+        parameters: Dictionary of parameter specifications for the function.
+        strict: Whether to use strict parameter validation.
+        code: Base64-encoded serialized callable function.
+        _callable_ref: Private attribute storing the callable function.
+    """
+
     type: Literal["function"] = Field(
         ..., description="The type of the function tool. Always `function`."
     )
@@ -38,38 +71,418 @@ class FunctionTool(BaseModel):
         default=None, description="The serialized, base64 encoded code of the function."
     )
 
-    @classmethod
-    def from_callable(cls, callable: Callable[..., Any]) -> FunctionTool:
-        obj = cls(
-            type="function",
-            name=callable.__name__,
-            description=inspect.getdoc(callable),
-            parameters=JsonSchemaExtractor(
-                JsonSchemaConfig(
-                    ensure_additional_properties=True,
-                    include_descriptions=True,
-                    strict_mode=True,
-                    max_enum_values=1000,
-                    max_nesting_depth=10,
-                    make_all_required=True,
-                    dereference=True,
-                )
-            ).extract(callable)["schema"],
-            strict=True,
+    # Private attributes for runtime callables
+    _callable_ref: Callable[P, T_Output] | Callable[P, Awaitable[T_Output]] | None = (
+        PrivateAttr(default=None)
+    )
+
+    def set_callable(
+        self, callable: Callable[P, T_Output] | Callable[P, Awaitable[T_Output]]
+    ) -> None:
+        """Set the callable reference for this function tool."""
+        self._callable_ref = callable
+
+    @property
+    def callable(
+        self,
+    ) -> Callable[P, T_Output] | Callable[P, Awaitable[T_Output]] | None:
+        """Get the callable reference."""
+        return self._callable_ref
+
+    def _convert_parameter_types(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """
+        Convert parameter values to their expected types based on function signature.
+
+        This is particularly important for complex types like BaseModel, TypedDict,
+        dataclasses, etc., where the AI passes a dict but the function expects
+        an instance of the type.
+
+        Args:
+            kwargs: Keyword arguments to convert.
+
+        Returns:
+            Converted keyword arguments.
+        """
+        if self._callable_ref is None:
+            return kwargs
+
+        try:
+            sig = inspect.signature(self._callable_ref)
+            converted_kwargs = {}
+
+            for param_name, param_value in kwargs.items():
+                if param_name not in sig.parameters:
+                    # Keep unknown parameters as-is
+                    converted_kwargs[param_name] = param_value
+                    continue
+
+                param = sig.parameters[param_name]
+
+                # Skip if no annotation
+                if param.annotation == inspect.Parameter.empty:
+                    converted_kwargs[param_name] = param_value
+                    continue
+
+                param_type = param.annotation
+
+                # Try to resolve forward references
+                if isinstance(param_type, str):
+                    # This is a forward reference, try to resolve it
+                    try:
+                        # Get the function's module and try to resolve the type
+                        if hasattr(self._callable_ref, "__globals__"):
+                            globals_dict = self._callable_ref.__globals__
+                            if param_type in globals_dict:
+                                param_type = globals_dict[param_type]
+                    except Exception as e:
+                        _logger.debug(
+                            f"Failed to resolve forward reference '{param_type}': {e}"
+                        )
+
+                # Check if we need to convert from dict to a complex type
+                if isinstance(param_value, dict) and inspect.isclass(param_type):
+                    # Check if it's a BaseModel (Pydantic)
+                    if hasattr(param_type, "model_validate"):
+                        # Pydantic v2
+                        try:
+                            converted_kwargs[param_name] = param_type.model_validate(
+                                param_value
+                            )
+                            _logger.debug(
+                                f"Converted parameter '{param_name}' from dict to {param_type.__name__} (Pydantic v2)"
+                            )
+                            continue
+                        except Exception as e:
+                            _logger.warning(
+                                f"Failed to convert '{param_name}' using Pydantic v2: {e}"
+                            )
+
+                    # Check if it's a Pydantic v1 model
+                    if hasattr(param_type, "parse_obj"):
+                        try:
+                            converted_kwargs[param_name] = param_type.parse_obj(
+                                param_value
+                            )
+                            _logger.debug(
+                                f"Converted parameter '{param_name}' from dict to {param_type.__name__} (Pydantic v1)"
+                            )
+                            continue
+                        except Exception as e:
+                            _logger.warning(
+                                f"Failed to convert '{param_name}' using Pydantic v1: {e}"
+                            )
+
+                    # Check if it's a dataclass
+                    if hasattr(param_type, "__dataclass_fields__"):
+                        try:
+                            converted_kwargs[param_name] = param_type(**param_value)
+                            _logger.debug(
+                                f"Converted parameter '{param_name}' from dict to {param_type.__name__} (dataclass)"
+                            )
+                            continue
+                        except Exception as e:
+                            _logger.warning(
+                                f"Failed to convert '{param_name}' to dataclass: {e}"
+                            )
+
+                    # Check if it's a TypedDict (these stay as dicts, no conversion needed)
+                    if hasattr(param_type, "__annotations__") and hasattr(
+                        param_type, "__required_keys__"
+                    ):
+                        # TypedDict is just a type hint, the value is already a dict
+                        converted_kwargs[param_name] = param_value
+                        _logger.debug(
+                            f"Parameter '{param_name}' is TypedDict, keeping as dict"
+                        )
+                        continue
+
+                # No conversion needed or possible, keep original value
+                converted_kwargs[param_name] = param_value
+
+            return converted_kwargs
+
+        except Exception as e:
+            _logger.warning(
+                f"Failed to convert parameter types for function tool '{self.name}': {e}. Using original parameters."
+            )
+            return kwargs
+
+    async def call_async(self, *args: P.args, **kwargs: P.kwargs) -> T_Output:
+        """
+        Executes the underlying function asynchronously with the provided arguments.
+        Automatically converts parameter types for complex types.
+
+        Args:
+            *args: Positional arguments matching the ParamSpec P of the underlying function.
+            **kwargs: Keyword arguments matching the ParamSpec P of the underlying function.
+
+        Returns:
+            T_Output: The result of calling the underlying function.
+
+        Raises:
+            ValueError: If the FunctionTool does not have a callable reference.
+        """
+        _logger.debug(
+            f"Calling function tool '{self.name}' with arguments: args={args}, kwargs={kwargs}"
         )
 
-        obj.code = base64.b64encode(
-            dill.dumps(callable, protocol=dill.HIGHEST_PROTOCOL)
-        ).decode("utf-8")
+        if self._callable_ref is None:
+            _logger.error(
+                f"Function tool '{self.name}' is not callable - missing _callable_ref"
+            )
+            raise ValueError(
+                f'Function tool "{self.name}" is not callable because the "_callable_ref" instance variable is not set'
+            )
 
-        return obj
+        # Convert parameter types (e.g., dict to BaseModel)
+        converted_kwargs = self._convert_parameter_types(dict(kwargs))
+
+        try:
+            # Execute the main function
+            _logger.debug(f"Executing main function for function tool '{self.name}'")
+            if inspect.iscoroutinefunction(self._callable_ref):
+                async_result: T_Output = await self._callable_ref(
+                    *args, **converted_kwargs
+                )
+                _logger.info(f"Function tool '{self.name}' executed successfully")
+                return async_result
+            else:
+                sync_result: T_Output = self._callable_ref(*args, **converted_kwargs)  # type: ignore[misc]
+                _logger.info(f"Function tool '{self.name}' executed successfully")
+                return sync_result
+
+        except Exception as e:
+            _logger.error(
+                f"Error executing function tool '{self.name}': {str(e)}", exc_info=True
+            )
+            raise
+
+    def call(self, *args: P.args, **kwargs: P.kwargs) -> T_Output:
+        """
+        Executes the underlying function synchronously with the provided arguments.
+        Automatically converts parameter types for complex types.
+
+        Args:
+            *args: Positional arguments matching the ParamSpec P of the underlying function.
+            **kwargs: Keyword arguments matching the ParamSpec P of the underlying function.
+
+        Returns:
+            T_Output: The result of calling the underlying function.
+
+        Raises:
+            ValueError: If the FunctionTool does not have a callable reference.
+        """
+        # For synchronous execution, we need to handle async functions
+        if self._callable_ref is None:
+            raise ValueError("Callable not set")
+
+        if inspect.iscoroutinefunction(self._callable_ref):
+            # If it's an async function, we need to run it in an event loop
+            import asyncio
+
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If we're already in an event loop, we can't use run_sync
+                    # This is a limitation - we need to be in an async context
+                    raise RuntimeError(
+                        "Cannot call async function synchronously from within an event loop. Use call_async() instead."
+                    )
+                else:
+                    return loop.run_until_complete(self.call_async(*args, **kwargs))
+            except RuntimeError:
+                # No event loop exists, create one
+                return asyncio.run(self.call_async(*args, **kwargs))
+        else:
+            # Synchronous function - convert parameters and call directly
+            converted_kwargs = self._convert_parameter_types(dict(kwargs))
+            return self._callable_ref(*args, **converted_kwargs)  # type: ignore[misc]
+
+    @classmethod
+    def from_callable(
+        cls,
+        _callable: Callable[CallableP, CallableT]
+        | Callable[CallableP, Awaitable[CallableT]],
+        /,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> FunctionTool[CallableP, CallableT]:
+        """
+        Creates a FunctionTool instance from a callable function with full type safety.
+
+        This class method analyzes a function's signature and creates a FunctionTool instance
+        that preserves both the parameter signature and return type.
+
+        Type Parameters:
+            CallableP: ParamSpec for the callable's parameters
+            CallableT: Return type of the callable
+
+        Args:
+            _callable: A callable function to wrap as a FunctionTool.
+            name: Optional custom name for the function tool.
+            description: Optional custom description for the function tool.
+
+        Returns:
+            FunctionTool[CallableP, CallableT]: A new FunctionTool instance with preserved type signatures.
+
+        Example:
+            ```python
+            def multiply(a: int, b: int) -> int:
+                \"\"\"Multiply two numbers\"\"\"
+                return a * b
+
+            # Create function tool with automatic type safety
+            multiply_tool = FunctionTool.from_callable(multiply)
+
+            # The tool preserves type information
+            result = multiply_tool.call(a=5, b=3)  # Type-safe!
+            ```
+        """
+        _name: str = name or getattr(_callable, "__name__", "anonymous_function")
+        _logger.debug(f"Creating FunctionTool from callable function: {_name}")
+
+        try:
+            _description = (
+                description or _callable.__doc__ or "No description available"
+            )
+
+            # Extract parameter information from the function
+            parameters: dict[str, object] = {}
+            signature = inspect.signature(_callable)
+            _logger.debug(
+                f"Analyzing {len(signature.parameters)} parameters for function '{_name}'"
+            )
+
+            for param_name, param in signature.parameters.items():
+                # Skip self/cls parameters for methods
+                if (
+                    param_name in ("self", "cls")
+                    and param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+                ):
+                    _logger.debug(f"Skipping {param_name} parameter (self/cls)")
+                    continue
+
+                param_info: dict[str, object] = {"type": "object"}
+
+                # Add type information if available
+                if param.annotation != inspect.Parameter.empty:
+                    param_type = param.annotation
+                    param_type_str = (
+                        str(param_type).replace("<class '", "").replace("'>", "")
+                    )
+                    param_info["type"] = param_type_str
+                    _logger.debug(
+                        f"Parameter '{param_name}' has type annotation: {param_type_str}"
+                    )
+
+                # Add default value if available
+                if param.default != inspect.Parameter.empty:
+                    param_info["default"] = param.default
+                    _logger.debug(
+                        f"Parameter '{param_name}' has default value: {param.default}"
+                    )
+
+                # Determine if parameter is required
+                if param.default == inspect.Parameter.empty and param.kind in (
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                ):
+                    param_info["required"] = True
+                    _logger.debug(f"Parameter '{param_name}' is required")
+
+                parameters[param_name] = param_info
+
+            # Create instance with type parameter matching the callable's return type
+            instance: FunctionTool[CallableP, CallableT] = cls(  # type: ignore[assignment]
+                type="function",
+                name=_name,
+                description=_description,
+                parameters=JsonSchemaExtractor(
+                    JsonSchemaConfig(
+                        ensure_additional_properties=True,
+                        include_descriptions=True,
+                        strict_mode=True,
+                        max_enum_values=1000,
+                        max_nesting_depth=10,
+                        make_all_required=True,
+                        dereference=True,
+                    )
+                ).extract(_callable)["schema"],
+                strict=True,
+            )
+
+            # Set private attributes after instance creation
+            instance._callable_ref = _callable
+
+            # Serialize the callable
+            instance.code = base64.b64encode(
+                dill.dumps(_callable, protocol=dill.HIGHEST_PROTOCOL)
+            ).decode("utf-8")
+
+            _logger.info(
+                f"Successfully created FunctionTool from callable: {_name} with {len(parameters)} parameters"
+            )
+            return instance
+
+        except Exception as e:
+            _logger.error(
+                f"Error creating FunctionTool from callable '{_name}': {str(e)}",
+                exc_info=True,
+            )
+            raise
 
 
 if __name__ == "__main__":
+    # Example 1: Basic type-safe function tool
+    def multiply(a: int, b: int) -> int:
+        """Multiply two numbers together."""
+        return a * b
 
-    def test(a: int, b: str, c: Literal["a", "b", "c"]):
-        """test function"""
-        pass
+    # Create function tool with automatic type safety
+    multiply_tool = FunctionTool.from_callable(multiply)
+    print(f"Function tool: {multiply_tool.name}")
+    print(f"Description: {multiply_tool.description}")
+    print(f"Parameters: {multiply_tool.parameters}")
 
-    tool = FunctionTool.from_callable(test)
-    print(tool)
+    # Test the type-safe call
+    result = multiply_tool.call(a=5, b=3)
+    print(f"Result: {result}")
+
+    # Example 2: Complex types with parameter conversion
+    from pydantic import BaseModel
+
+    class UserData(BaseModel):
+        name: str
+        age: int
+        email: str
+
+    def process_user(user: UserData, multiplier: int = 2) -> str:
+        """Process user data and return formatted string."""
+        return f"User {user.name} (age: {user.age * multiplier}) - {user.email}"
+
+    process_tool = FunctionTool.from_callable(process_user)
+
+    # Test with dict input that should be converted to UserData
+    user_dict = {"name": "Alice", "age": 30, "email": "alice@example.com"}
+    result = process_tool.call(user=user_dict, multiplier=3)  # type: ignore[arg-type]
+    print(f"Processed user: {result}")
+
+    # Example 3: Async function
+    async def async_calculate(x: float, y: float) -> float:
+        """Async calculation function."""
+        import asyncio
+
+        await asyncio.sleep(0.1)  # Simulate async work
+        return x * y + 10
+
+    async_tool = FunctionTool.from_callable(async_calculate)
+
+    # Test async call
+    import asyncio
+
+    async def test_async():
+        result = await async_tool.call_async(x=2.5, y=4.0)
+        print(f"Async result: {result}")
+
+    asyncio.run(test_async())

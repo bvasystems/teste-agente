@@ -11,13 +11,17 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional, cast
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Literal, Optional, cast, override
+
+from pydantic import PrivateAttr
+from rsb.models import BaseModel
 
 from .otel_client import GenerationContext, OtelClient, TraceContext
 
 if TYPE_CHECKING:
-    from langfuse._client.client import Langfuse
     from langfuse._client.span import LangfuseGeneration, LangfuseSpan
+
+from langfuse._client.client import Langfuse
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +62,7 @@ class _LangfuseGenerationContext:
         return self._generation
 
 
-class LangfuseOtelClient(OtelClient):
+class LangfuseOtelClient(BaseModel, OtelClient):
     """
     Cliente de telemetria específico para Langfuse usando SDK V3.
 
@@ -74,18 +78,24 @@ class LangfuseOtelClient(OtelClient):
     - Tratamento robusto de erros
     """
 
-    def __init__(self, langfuse: Langfuse):
-        """
-        Inicializa o cliente Langfuse.
+    type: Literal["langfuse"] = "langfuse"
 
-        Args:
-            public_key: Chave pública do Langfuse
-            secret_key: Chave secreta do Langfuse
-            host: URL do host Langfuse
-            environment: Ambiente de execução
-            release: Versão/release da aplicação
-        """
-        self._client = langfuse
+    _langfuse: Langfuse | None = PrivateAttr(default=None)
+
+    @property
+    def langfuse(self) -> Langfuse:
+        if self._langfuse is None:
+            raise ValueError("Langfuse client not initialized")
+        return self._langfuse
+
+    @override
+    def model_post_init(self, context: Any, /) -> None:
+        super().model_post_init(context)
+        if self._langfuse is None:
+            self._langfuse = Langfuse()
+
+    def set_langfuse(self, langfuse: Langfuse) -> None:
+        self._langfuse = langfuse
 
     async def trace_context(
         self,
@@ -108,7 +118,7 @@ class LangfuseOtelClient(OtelClient):
             trace_metadata = dict(metadata) if metadata else {}
 
             # Usar start_as_current_span do SDK V3
-            with self._client.start_as_current_span(
+            with self.langfuse.start_as_current_span(
                 name=name,
                 input=dict(input_data),
                 metadata=trace_metadata,
@@ -154,7 +164,7 @@ class LangfuseOtelClient(OtelClient):
             )
 
             # Usar start_as_current_generation do SDK V3
-            with self._client.start_as_current_generation(
+            with self.langfuse.start_as_current_generation(
                 name=name,
                 model=model,
                 input=dict(input_data),
@@ -355,7 +365,7 @@ class LangfuseOtelClient(OtelClient):
 
         try:
             # Usar o método score_current_trace do SDK V3
-            self._client.score_current_trace(
+            self.langfuse.score_current_trace(
                 name=name,
                 value=value,
                 comment=comment,
@@ -452,7 +462,7 @@ class LangfuseOtelClient(OtelClient):
     async def flush(self) -> None:
         """Força o envio imediato de todos os eventos pendentes."""
         try:
-            self._client.flush()
+            self.langfuse.flush()
             logger.debug("Eventos enviados com sucesso para Langfuse")
         except Exception as e:
             logger.error(f"Erro ao enviar eventos para Langfuse: {e}")
