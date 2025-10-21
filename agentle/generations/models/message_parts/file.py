@@ -184,10 +184,10 @@ class FilePart(BaseModel):
         # Also include common types that might not be in types_map
         all_mimes.update(mimetypes.common_types.values())
 
-        if self.mime_type not in all_mimes:
-            raise ValueError(
-                f"The provided MIME type '{self.mime_type}' is not in the list of official MIME types."
-            )
+        # if self.mime_type not in all_mimes:
+        #     raise ValueError(
+        #         f"The provided MIME type '{self.mime_type}' is not in the list of official MIME types."
+        #     )
 
     def _validate_data_integrity(self) -> None:
         """Validates that the data is well-formed for its claimed MIME type."""

@@ -27,19 +27,19 @@ provider: GenerationProvider = OpenRouterGenerationProvider().with_fallback_mode
 )
 
 example_file = FilePart.from_local_file(
-    "/Users/arthurbrenno/Documents/Dev/Paragon/agentle/examples/dog.jpeg",
-    "image/jpeg",
+    "/Users/arthurbrenno/Documents/Dev/Paragon/agentle/examples/harvard.wav",
+    "audio/mp3",
 )
 
 # Run the Google agent
 generation = provider.generate(
-    model="openai/gpt-oss-120b",
+    model="google/gemini-2.5-flash",
     messages=[
         UserMessage(
             parts=[
                 example_file,
                 TextPart(
-                    text="O que essa imagem representa?",
+                    text="O que tem nesse audio?",
                 ),
             ]
         )
