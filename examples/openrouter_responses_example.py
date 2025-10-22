@@ -4,7 +4,6 @@ import time
 from dotenv import load_dotenv
 from rsb.models.base_model import BaseModel
 
-
 from agentle.generations.tracing.langfuse_otel_client import LangfuseOtelClient
 from agentle.responses.responder import Responder
 
@@ -28,7 +27,7 @@ async def without_langfuse(run_num: int):
     start_time = time.time()
     response = await responder.respond_async(
         input="What is 2+2?",
-        model="gpt-5-nano",
+        model="google/gemma-3-27b-it",
         max_output_tokens=5000,
         text_format=MathResponse,
     )
@@ -50,7 +49,7 @@ async def with_langfuse(run_num: int):
     start_time = time.time()
     response = await responder.respond_async(
         input="What is 2+2?",
-        model="gpt-5-nano",
+        model="google/gemma-3-27b-it",
         max_output_tokens=5000,
         text_format=MathResponse,
     )
@@ -65,7 +64,7 @@ async def with_langfuse(run_num: int):
 async def main():
     """Compare performance with and without Langfuse over 4 runs."""
 
-    num_runs = 4
+    num_runs = 10
     times_without: list[float] = []
     times_with: list[float] = []
 
