@@ -94,7 +94,7 @@
   - Store as instance attribute
   - _Requirements: 2.2, 2.3_
 
-- [x] 6.2 Update `from_openrouter` and `from_openai` class methods
+- [x] 6.2 Update `openrouter` and `openai` class methods
   - Pass pricing_service parameter through
   - _Requirements: 2.2, 2.3_
 

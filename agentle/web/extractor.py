@@ -251,7 +251,7 @@ if __name__ == "__main__":
         possiveis_redirecionamentos: list[str]
 
     extractor = Extractor(
-        llm=Responder.from_openai(),
+        llm=Responder.openai(),
         model="gpt-5-nano",
     )
 

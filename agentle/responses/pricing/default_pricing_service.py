@@ -242,6 +242,8 @@ class DefaultPricingService(BaseModel):
     Prices are approximate and based on publicly available pricing information.
     """
 
+    type: str = "default"
+
     def __init__(
         self,
         custom_pricing: dict[str, dict[str, dict[str, float]]] | None = None,
@@ -253,6 +255,7 @@ class DefaultPricingService(BaseModel):
             custom_pricing: Optional dictionary to override or extend default pricing.
                            Format: {"model": {"modality": {"input": float, "cached_input": float, "output": float}}}
         """
+        super().__init__()
         self.pricing = MODEL_PRICING.copy()
         if custom_pricing:
             # Deep merge custom pricing

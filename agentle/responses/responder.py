@@ -48,6 +48,9 @@ from agentle.responses.definitions.tool_choice_options import (
 )
 from agentle.responses.definitions.tool_choice_types import ToolChoiceTypes
 from agentle.responses.definitions.truncation import Truncation
+from agentle.responses.pricing.openrouter_pricing_service import (
+    OpenRouterPricingService,
+)
 from agentle.responses.pricing.pricing_service import PricingService
 
 logger = logging.getLogger(__name__)
@@ -82,7 +85,7 @@ class Responder(BaseModel):
             base_url.
 
         base_url: Base URL for the API endpoint. Defaults to OpenRouter's API endpoint.
-            Use from_openrouter() or from_openai() class methods for convenience.
+            Use openrouter() or openai() class methods for convenience.
 
         pricing_service: Service for looking up model pricing to calculate costs.
             Defaults to DefaultPricingService which includes pricing for common models.
@@ -108,7 +111,7 @@ class Responder(BaseModel):
 
     Example:
         Basic usage without tracing:
-        >>> responder = Responder.from_openrouter(api_key="your-key")
+        >>> responder = Responder.openrouter(api_key="your-key")
         >>> response = await responder.respond_async(
         ...     input="What is the capital of France?",
         ...     model="openai/gpt-4"
@@ -117,7 +120,7 @@ class Responder(BaseModel):
         With observability integration:
         >>> from agentle.generations.tracing.langfuse_otel_client import LangfuseOtelClient
         >>> otel_client = LangfuseOtelClient()
-        >>> responder = Responder.from_openrouter(otel_clients=[otel_client])
+        >>> responder = Responder.openrouter(otel_clients=[otel_client])
         >>> response = await responder.respond_async(
         ...     input="What is the capital of France?",
         ...     model="openai/gpt-4"
@@ -125,7 +128,7 @@ class Responder(BaseModel):
         # Automatically traces the request with usage and cost metrics
 
         Adding observability dynamically:
-        >>> responder = Responder.from_openrouter()
+        >>> responder = Responder.openrouter()
         >>> # Later, add observability
         >>> otel_client = LangfuseOtelClient()
         >>> responder.append_otel_client(otel_client)
@@ -164,10 +167,9 @@ class Responder(BaseModel):
     )
 
     @classmethod
-    def from_openrouter(
+    def openrouter(
         cls,
         api_key: str | None = None,
-        pricing_service: PricingService | None = None,
         otel_clients: Sequence[OtelClientType] | None = None,
     ) -> Responder:
         """
@@ -181,23 +183,12 @@ class Responder(BaseModel):
         Returns:
             Configured Responder instance for OpenRouter.
         """
-        if pricing_service is not None and otel_clients is not None:
+        pricing_service = OpenRouterPricingService()
+        if otel_clients is not None:
             return cls(
                 api_key=api_key or os.getenv("OPENROUTER_API_KEY"),
                 base_url="https://openrouter.ai/api/v1",
                 pricing_service=pricing_service,
-                otel_clients=list(otel_clients),
-            )
-        elif pricing_service is not None:
-            return cls(
-                api_key=api_key or os.getenv("OPENROUTER_API_KEY"),
-                base_url="https://openrouter.ai/api/v1",
-                pricing_service=pricing_service,
-            )
-        elif otel_clients is not None:
-            return cls(
-                api_key=api_key or os.getenv("OPENROUTER_API_KEY"),
-                base_url="https://openrouter.ai/api/v1",
                 otel_clients=list(otel_clients),
             )
         else:
@@ -207,7 +198,7 @@ class Responder(BaseModel):
             )
 
     @classmethod
-    def from_openai(
+    def openai(
         cls,
         api_key: str | None = None,
         pricing_service: PricingService | None = None,
@@ -260,7 +251,7 @@ class Responder(BaseModel):
             client: An OtelClient instance to add to the responder's client list.
 
         Example:
-            >>> responder = Responder.from_openrouter()
+            >>> responder = Responder.openrouter()
             >>> langfuse_client = LangfuseOtelClient()
             >>> responder.append_otel_client(langfuse_client)
             >>> # Now all API calls will be traced to Langfuse

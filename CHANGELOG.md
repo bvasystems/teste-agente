@@ -12,7 +12,7 @@
   - Comprehensive response streaming with `AsyncStream` implementation
   - Integration with `orjson` for improved JSON handling performance
   - Support for reasoning, background processing, and conversation management
-  - Factory methods for easy instantiation (`from_openrouter()`, `from_openai()`)
+  - Factory methods for easy instantiation (`openrouter()`, `openai()`)
 
 ### 🌐 **Web Extraction & Automation**
 - **feat(web)**: Complete web extraction and automation system

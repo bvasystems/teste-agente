@@ -19,7 +19,7 @@ def add(a: int, b: int) -> int:
 
 async def main():
     """Basic text generation example."""
-    responder = Responder.from_openai()
+    responder = Responder.openai()
 
     print("Starting...")
     response = await responder.respond_async(
