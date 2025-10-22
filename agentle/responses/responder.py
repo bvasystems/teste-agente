@@ -974,27 +974,18 @@ class Responder(BaseModel):
         tools_count = len(tools)
 
         # Extract structured output information
-        has_structured_output = (
-            create_response.text is not None
-            and hasattr(create_response.text, "format")
-            and create_response.text.format is not None
-            and hasattr(create_response.text.format, "type")
-            and create_response.text.format.type == "json_schema"
-        )
+        has_structured_output = False
+        if create_response.text is not None and create_response.text.format is not None:
+            format_type = getattr(create_response.text.format, "type", None)
+            has_structured_output = format_type == "json_schema"
 
         # Extract reasoning information
         reasoning_enabled = create_response.reasoning is not None
         reasoning_effort: str | None = None
-        if create_response.reasoning is not None and hasattr(
-            create_response.reasoning, "effort"
-        ):
+        if create_response.reasoning is not None:
             effort_value = create_response.reasoning.effort
             if effort_value is not None:
-                reasoning_effort = (
-                    effort_value.value
-                    if hasattr(effort_value, "value")
-                    else str(effort_value)
-                )
+                reasoning_effort = effort_value.value
 
         return TraceInputData(
             input=input_data,
@@ -1191,8 +1182,8 @@ class Responder(BaseModel):
                 # Create trace context
                 trace_gen = client.trace_context(
                     name="responder_api_call",
-                    input_data=input_data.to_dict(),
-                    metadata=metadata.to_dict(),
+                    input_data=input_data.model_dump(),
+                    metadata=metadata.to_api_dict(),
                 )
                 trace_ctx = await trace_gen.__anext__()
 
@@ -1205,8 +1196,8 @@ class Responder(BaseModel):
                     name="response_generation",
                     model=model,
                     provider=metadata.provider,
-                    input_data=input_data.to_dict(),
-                    metadata=metadata.to_dict(),
+                    input_data=input_data.model_dump(),
+                    metadata=metadata.to_api_dict(),
                 )
                 generation_ctx = await generation_gen.__anext__()
 
@@ -1350,10 +1341,10 @@ class Responder(BaseModel):
         }
 
         if usage_details:
-            metadata["usage"] = usage_details.to_dict()
+            metadata["usage"] = usage_details.model_dump()
 
         if cost_details:
-            metadata["cost"] = cost_details.to_dict()
+            metadata["cost"] = cost_details.model_dump()
 
         # Update contexts for each client
         for ctx in active_contexts:
@@ -1369,10 +1360,10 @@ class Responder(BaseModel):
                         await ctx.client.update_generation(
                             ctx.generation_ctx,
                             output_data=output_data,
-                            usage_details=usage_details.to_dict()
+                            usage_details=usage_details.model_dump()
                             if usage_details
                             else None,
-                            cost_details=cost_details.to_dict()
+                            cost_details=cost_details.model_dump()
                             if cost_details
                             else None,
                             metadata=metadata,
@@ -1457,7 +1448,7 @@ class Responder(BaseModel):
         logger.debug(f"Latency until error: {latency:.3f}s")
 
         # Prepare error metadata
-        error_metadata = metadata.to_dict()
+        error_metadata = metadata.to_api_dict()
         error_metadata.update(
             {
                 "error_type": type(error).__name__,

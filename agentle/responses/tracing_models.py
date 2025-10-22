@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
 from typing import Any
+
+from pydantic import BaseModel, Field, computed_field
 
 from agentle.generations.tracing.otel_client import GenerationContext, TraceContext
 from agentle.generations.tracing.otel_client_type import OtelClientType
 
 
-@dataclass
-class TraceInputData:
+class TraceInputData(BaseModel):
     """Structured input data for trace context."""
 
     input: str | list[dict[str, Any]] | None
@@ -26,34 +26,17 @@ class TraceInputData:
     max_output_tokens: int | None
     stream: bool
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for API calls."""
-        return {
-            "input": self.input,
-            "model": self.model,
-            "has_tools": self.has_tools,
-            "tools_count": self.tools_count,
-            "has_structured_output": self.has_structured_output,
-            "reasoning_enabled": self.reasoning_enabled,
-            "reasoning_effort": self.reasoning_effort,
-            "temperature": self.temperature,
-            "top_p": self.top_p,
-            "max_output_tokens": self.max_output_tokens,
-            "stream": self.stream,
-        }
 
-
-@dataclass
-class TraceMetadata:
+class TraceMetadata(BaseModel):
     """Metadata for trace context."""
 
     model: str
     provider: str
     base_url: str
-    custom_metadata: dict[str, Any]
+    custom_metadata: dict[str, Any] = Field(default_factory=dict)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for API calls."""
+    def to_api_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for API calls, merging custom_metadata."""
         result = {
             "model": self.model,
             "provider": self.provider,
@@ -63,8 +46,7 @@ class TraceMetadata:
         return result
 
 
-@dataclass
-class UsageDetails:
+class UsageDetails(BaseModel):
     """Token usage details from API response."""
 
     input: int
@@ -73,21 +55,8 @@ class UsageDetails:
     unit: str
     reasoning_tokens: int | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for API calls."""
-        result = {
-            "input": self.input,
-            "output": self.output,
-            "total": self.total,
-            "unit": self.unit,
-        }
-        if self.reasoning_tokens is not None and self.reasoning_tokens > 0:
-            result["reasoning_tokens"] = self.reasoning_tokens
-        return result
 
-
-@dataclass
-class CostDetails:
+class CostDetails(BaseModel):
     """Cost calculation details."""
 
     input: float
@@ -97,21 +66,11 @@ class CostDetails:
     input_tokens: int
     output_tokens: int
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for API calls."""
-        return {
-            "input": self.input,
-            "output": self.output,
-            "total": self.total,
-            "currency": self.currency,
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
-        }
 
-
-@dataclass
-class TracingContext:
+class TracingContext(BaseModel):
     """Container for a single client's tracing contexts."""
+
+    model_config = {"arbitrary_types_allowed": True}
 
     client: OtelClientType
     trace_gen: AsyncGenerator[TraceContext | None, None]
@@ -119,6 +78,7 @@ class TracingContext:
     generation_gen: AsyncGenerator[GenerationContext | None, None]
     generation_ctx: GenerationContext | None
 
+    @computed_field
     @property
     def client_name(self) -> str:
         """Get the client class name for logging."""
