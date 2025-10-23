@@ -11,5 +11,6 @@ class Key(BaseModel):
     """
 
     remoteJid: str
+    remoteJidAlt: str
     fromMe: bool
     id: str
