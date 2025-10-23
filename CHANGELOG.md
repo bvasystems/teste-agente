@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.9.4
+feat(whatsapp): Improve WhatsApp webhook payload and key handling
+
+- Add remoteJidAlt field to Key model for enhanced JID parsing
+- Update phone number ID extraction logic in webhook payload processing
+- Modify message handling to use remoteJidAlt for linked WhatsApp accounts
+- Enhance robustness of JID parsing for different WhatsApp account types
+
+
 ## v0.9.3
 
 ### 🚀 **New Responses API (Experimental)**
