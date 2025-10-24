@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.9.8
+fix(whatsapp): Improve phone number ID extraction for WhatsApp webhook payloads
+
+- Update phone number ID extraction logic for linked IDs
+- Set remoteJid to remoteJidAlt when "@lid" is present in key
+- Ensure consistent phone number ID handling for different WhatsApp message types
+
 ## v0.9.7
 fix(whatsapp): not returning early when "lid" is present.
 
