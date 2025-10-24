@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.9.6
+fix(stdio-mcp-server): Improve JSON message parsing and connection state handling
+
+- Enhance message parsing to skip non-JSON lines in stdout
+- Add debug logging for skipped lines and invalid JSON
+- Modify connection state checks to allow requests/notifications during initialization
+- Prevent potential errors from processing non-JSON output from MCP servers
+- Improve error handling and logging for message decoding
+
 ## v0.9.5
 fix(whatsapp): Improve WhatsApp webhook payload phone number ID extraction
 
