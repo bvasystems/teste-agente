@@ -451,12 +451,19 @@ class StdioMCPServer(MCPServerProtocol):
                     self._logger.warning("Server closed stdout")
                     break
 
+                message_str = ""
                 try:
                     message_str = line.decode("utf-8").strip()
                     if not message_str:
                         continue
 
                     self._logger.debug(f"<- RECV: {message_str}")
+
+                    # Skip lines that don't look like JSON (common with MCP servers that log to stdout)
+                    if not message_str.startswith("{"):
+                        self._logger.debug(f"Skipping non-JSON line: {message_str}")
+                        continue
+
                     message = json.loads(message_str)
 
                     if "id" in message:
@@ -468,8 +475,10 @@ class StdioMCPServer(MCPServerProtocol):
                     else:
                         self._logger.warning(f"Unknown message type: {message}")
 
-                except json.JSONDecodeError as e:
-                    self._logger.error(f"Failed to parse JSON: {e}")
+                except json.JSONDecodeError:
+                    self._logger.debug(
+                        f"Skipping invalid JSON line: {message_str[:100]}"
+                    )
                 except UnicodeDecodeError as e:
                     self._logger.error(f"Failed to decode UTF-8: {e}")
 
@@ -762,7 +771,12 @@ class StdioMCPServer(MCPServerProtocol):
 
     async def _send_request(self, request: _JsonRpcRequest) -> _JsonRpcResponse:
         """Send a request to the server and wait for response."""
-        if not self._is_connected() or not self._stdin:
+        # Allow requests during INITIALIZING state (for the initialize request itself)
+        if (
+            self._connection_state
+            not in [ConnectionState.CONNECTED, ConnectionState.INITIALIZING]
+            or not self._stdin
+        ):
             raise ConnectionError("Server not connected")
 
         request_id = request["id"]
@@ -798,7 +812,12 @@ class StdioMCPServer(MCPServerProtocol):
 
     async def _send_notification(self, notification: _JsonRpcNotification) -> None:
         """Send a notification to the server."""
-        if not self._is_connected() or not self._stdin:
+        # Allow notifications during INITIALIZING state (for the initialized notification)
+        if (
+            self._connection_state
+            not in [ConnectionState.CONNECTED, ConnectionState.INITIALIZING]
+            or not self._stdin
+        ):
             raise ConnectionError("Server not connected")
 
         try:
