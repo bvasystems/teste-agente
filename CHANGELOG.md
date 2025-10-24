@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.9.7
+fix(whatsapp): not returning early when "lid" is present.
+
 ## v0.9.6
 fix(stdio-mcp-server): Improve JSON message parsing and connection state handling
 
