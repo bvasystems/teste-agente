@@ -739,6 +739,9 @@ class PDFFileParser(DocumentParser):
                             file_part,
                             developer_prompt=developer_prompt,
                             response_schema=VisualMediaDescription,
+                            generation_config=GenerationConfig(
+                                max_output_tokens=self.max_output_tokens
+                            )
                         ),
                         timeout=self.image_description_timeout,
                     )
@@ -856,6 +859,7 @@ class PDFFileParser(DocumentParser):
                 response_schema=PDFPageExtraction,
                 generation_config=GenerationConfig(
                     timeout_s=300.0,
+                    max_output_tokens=self.max_output_tokens
                 ),
                 model=self.model,
             )
