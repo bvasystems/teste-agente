@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.17
+feat(whatsapp): Add recording indicator for TTS audio synthesis
+
+- Implement `send_recording_indicator` method in WhatsApp base provider
+- Add recording indicator support for Evolution API provider
+- Update WhatsApp bot to show recording indicator during TTS audio synthesis
+- Enhance TTS audio response flow with async synthesis and recording indicator
+- Improve logging and error handling for recording indicator functionality
+Adds a visual cue for users during text-to-speech audio generation, providing a more interactive and responsive messaging experience.
+
 ## v0.9.16
 feat(whatsapp): Add text-to-speech (TTS) integration for WhatsApp bot
 
