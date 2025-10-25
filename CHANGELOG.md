@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.9.18
+refactor(whatsapp): Update expected_status handling in API requests
+
+- Modify expected_status parameter in request methods to accept both int and Sequence[int]
+- Update all relevant API request calls to use a list for expected_status values
+- Enhance resilience in handling HTTP responses by allowing multiple acceptable status codes
+
 ## v0.9.17
 feat(whatsapp): Add recording indicator for TTS audio synthesis
 
