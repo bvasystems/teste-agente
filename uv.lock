@@ -9,7 +9,7 @@ resolution-markers = [
 
 [[package]]
 name = "agentle"
-version = "0.9.3"
+version = "0.9.15"
 source = { editable = "." }
 dependencies = [
     { name = "aiocache" },
@@ -54,6 +54,7 @@ dev = [
     { name = "datamodel-code-generator" },
     { name = "duckdb" },
     { name = "duckduckgo-search" },
+    { name = "elevenlabs" },
     { name = "furo" },
     { name = "gemini-srt-translator" },
     { name = "google-cloud-firestore" },
@@ -195,6 +196,7 @@ dev = [
     { name = "datamodel-code-generator", specifier = ">=0.35.0" },
     { name = "duckdb", specifier = ">=1.3.2" },
     { name = "duckduckgo-search", specifier = ">=8.0.4" },
+    { name = "elevenlabs", specifier = ">=2.20.1" },
     { name = "furo", specifier = ">=2024.8.6" },
     { name = "gemini-srt-translator", specifier = ">=1.8.5" },
     { name = "google-cloud-firestore", specifier = ">=2.21.0" },
@@ -1128,6 +1130,23 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/dc/ad/11f1b4e984f2230d3857914d6b496a6ec24c768f9f57e120b135c7ee8e4e/duckduckgo_search-8.0.4.tar.gz", hash = "sha256:02aee731d05056a6bbf217c51faddd0b9565c5ce1e94d0278cbd2fbcc0e41b95", size = 21843 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/14/f0/1332de2dc7e7cbcabcf3993b3383dbce6b43d91cb3759fb53916be02845d/duckduckgo_search-8.0.4-py3-none-any.whl", hash = "sha256:22490e83c0ca885998d6623d8274f24934faffc43dac3c3482fe24ea4f6799bb", size = 18219 },
+]
+
+[[package]]
+name = "elevenlabs"
+version = "2.20.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "requests" },
+    { name = "typing-extensions" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/75/76/0b27ddb7aa9b323e807c991746710c9c105305a324fe6e2807c88db3e6ee/elevenlabs-2.20.1.tar.gz", hash = "sha256:321a5b5425899738af41530b6fe1e9982a6b22c9d82e1e7fe3df8f6dfcc56d50", size = 404610 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/71/07/9871b59b58df1ca775276343ef97344740e7cec74e725ecc5d7870ff758e/elevenlabs-2.20.1-py3-none-any.whl", hash = "sha256:9ac7eb2ecc57e2a6e7dfb491f3b57ec9e36deb8eff54c35ab1c5fb92f1e80ec8", size = 1087629 },
 ]
 
 [[package]]
