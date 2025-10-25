@@ -1088,6 +1088,68 @@ class EvolutionAPIProvider(WhatsAppProvider):
                 },
             )
 
+    async def send_recording_indicator(self, to: str, duration: int = 3) -> None:
+        """Send recording indicator via Evolution API."""
+        logger.debug(f"Sending recording indicator to {to} for {duration}s")
+
+        try:
+            # CRITICAL FIX: Check if there's a stored remoteJid for this contact
+            # This is essential for @lid numbers (Brazilian WhatsApp contacts)
+            session = await self.get_session(to)
+            remote_jid = session.context_data.get("remote_jid") if session else None
+
+            if remote_jid:
+                logger.debug(
+                    f"🔑 Using stored remoteJid for recording indicator to {to}: {remote_jid}"
+                )
+                normalized_to = remote_jid
+            else:
+                normalized_to = self._normalize_phone(to)
+
+            payload = {
+                "number": normalized_to,
+                "presence": "recording",
+                "delay": duration * 1000,
+                "options": {
+                    "delay": duration * 1000,
+                    "presence": "recording",
+                    "number": normalized_to,
+                },  # Evolution API expects milliseconds
+            }
+
+            url = self._build_url(
+                f"chat/sendPresence/{self.config.instance_name}",
+                use_message_prefix=False,
+            )
+            await self._make_request_with_resilience(
+                "POST", url, payload, expected_status=201
+            )
+
+            logger.debug(
+                f"Recording indicator sent successfully to {to} for {duration}s",
+                extra={
+                    "to_number": to,
+                    "normalized_to": normalized_to,
+                    "duration_seconds": duration,
+                },
+            )
+
+        except EvolutionAPIError as e:
+            # Recording indicator failures are non-critical
+            logger.warning(
+                f"Failed to send recording indicator to {to}: {e}",
+                extra={"to_number": to, "duration_seconds": duration, "error": str(e)},
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to send recording indicator to {to}: {type(e).__name__}: {e}",
+                extra={
+                    "to_number": to,
+                    "duration_seconds": duration,
+                    "error_type": type(e).__name__,
+                },
+            )
+
     async def mark_message_as_read(self, message_id: str) -> None:
         """Mark a message as read via Evolution API."""
         logger.debug(f"Marking message as read: {message_id}")

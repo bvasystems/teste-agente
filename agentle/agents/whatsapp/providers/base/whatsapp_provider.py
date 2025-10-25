@@ -113,6 +113,17 @@ class WhatsAppProvider(abc.ABC):
         pass
 
     @abstractmethod
+    async def send_recording_indicator(self, to: str, duration: int = 3) -> None:
+        """
+        Send recording indicator to show the bot is recording audio.
+
+        Args:
+            to: Recipient phone number
+            duration: Duration in seconds to show recording
+        """
+        pass
+
+    @abstractmethod
     async def mark_message_as_read(self, message_id: str) -> None:
         """Mark a message as read."""
         pass

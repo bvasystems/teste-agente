@@ -2097,8 +2097,17 @@ class WhatsAppBot(BaseModel):
                     f"[TTS] Attempting to send audio response to {to} (chance: {self.config.speech_play_chance * 100}%)"
                 )
                 try:
+                    # Show recording indicator while synthesizing
+                    if self.config.typing_indicator:
+                        logger.debug(
+                            f"[TTS] Sending recording indicator to {to} during synthesis"
+                        )
+                        await self.provider.send_recording_indicator(
+                            to, self.config.typing_duration
+                        )
+
                     # Synthesize speech
-                    speech_result = await self.tts_provider.synthesize(
+                    speech_result = await self.tts_provider.synthesize_async(
                         response_text, config=self.config.speech_config
                     )
 
