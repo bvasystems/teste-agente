@@ -1237,14 +1237,8 @@ class WhatsAppBot(BaseModel):
             session.context_data["sending_started_at"] = datetime.now().isoformat()
             await self.provider.update_session(session)
 
-            # Show typing indicator
-            if self.config.typing_indicator:
-                logger.debug(
-                    f"[BATCH_PROCESSING] Sending typing indicator to {phone_number}"
-                )
-                await self.provider.send_typing_indicator(
-                    phone_number, self.config.typing_duration
-                )
+            # Note: Typing indicator is now sent in _send_response after TTS decision
+            # to avoid sending it before determining if audio should be sent
 
             # Get all pending messages
             pending_messages = session.clear_pending_messages()
@@ -2082,11 +2076,14 @@ class WhatsAppBot(BaseModel):
         )
 
         # Check if we should send audio via TTS
-        if (
+        should_attempt_tts = (
             self.tts_provider
             and self.config.speech_config
             and self.config.speech_play_chance > 0
-        ):
+            and self._validate_tts_configuration()
+        )
+
+        if should_attempt_tts:
             import random
 
             # Determine if we should play speech based on chance
@@ -2102,11 +2099,19 @@ class WhatsAppBot(BaseModel):
                         logger.debug(
                             f"[TTS] Sending recording indicator to {to} during synthesis"
                         )
+                        # Use a more appropriate duration for recording indicator
+                        # Based on text length: minimum 2s, maximum 10s, or estimated synthesis time
+                        estimated_duration = max(
+                            2, min(10, len(response_text) // 50 + 2)
+                        )
                         await self.provider.send_recording_indicator(
-                            to, self.config.typing_duration
+                            to, estimated_duration
                         )
 
                     # Synthesize speech
+                    # We know these are not None due to validation above
+                    assert self.tts_provider is not None
+                    assert self.config.speech_config is not None
                     speech_result = await self.tts_provider.synthesize_async(
                         response_text, config=self.config.speech_config
                     )
@@ -2133,14 +2138,28 @@ class WhatsAppBot(BaseModel):
                     return
 
                 except Exception as e:
-                    logger.warning(
-                        f"[TTS] Failed to send audio response to {to}, falling back to text: {e}",
-                        extra={
-                            "to_number": to,
-                            "error_type": type(e).__name__,
-                            "error": str(e),
-                        },
-                    )
+                    # Check if this is a specific Evolution API media upload error
+                    error_message = str(e).lower()
+                    if "media upload failed" in error_message or "400" in error_message:
+                        logger.warning(
+                            f"[TTS] Evolution API media upload failed for {to}, falling back to text: {e}",
+                            extra={
+                                "to_number": to,
+                                "error_type": type(e).__name__,
+                                "error": str(e),
+                                "fallback_reason": "evolution_api_media_upload_failed",
+                            },
+                        )
+                    else:
+                        logger.warning(
+                            f"[TTS] Failed to send audio response to {to}, falling back to text: {e}",
+                            extra={
+                                "to_number": to,
+                                "error_type": type(e).__name__,
+                                "error": str(e),
+                                "fallback_reason": "tts_synthesis_or_send_failed",
+                            },
+                        )
                     # Fall through to send text message instead
 
         # Split messages by line breaks and length
@@ -2148,10 +2167,23 @@ class WhatsAppBot(BaseModel):
         logger.info(f"[SEND_RESPONSE] Split response into {len(messages)} parts")
 
         # Show typing indicator ONCE before sending all messages
-        if self.config.typing_indicator:
+        # Only send typing indicator if we're not attempting TTS or if TTS failed
+        if self.config.typing_indicator and not should_attempt_tts:
             try:
                 logger.debug(
                     f"[SEND_RESPONSE] Sending typing indicator to {to} before sending {len(messages)} message(s)"
+                )
+                await self.provider.send_typing_indicator(
+                    to, self.config.typing_duration
+                )
+            except Exception as e:
+                # Don't let typing indicator failures break message sending
+                logger.warning(f"[SEND_RESPONSE] Failed to send typing indicator: {e}")
+        elif self.config.typing_indicator and should_attempt_tts:
+            # TTS was attempted but failed, send typing indicator for text fallback
+            try:
+                logger.debug(
+                    f"[SEND_RESPONSE] TTS failed, sending typing indicator to {to} for text fallback"
                 )
                 await self.provider.send_typing_indicator(
                     to, self.config.typing_duration
@@ -2256,6 +2288,36 @@ class WhatsAppBot(BaseModel):
             logger.info(
                 f"[SEND_RESPONSE] Successfully sent all {len(messages)} message parts to {to}"
             )
+
+    def _validate_tts_configuration(self) -> bool:
+        """Validate TTS configuration before attempting synthesis."""
+        try:
+            if not self.config.speech_config:
+                logger.debug("[TTS_VALIDATION] No speech_config provided")
+                return False
+
+            # Check if voice_id is provided
+            if not self.config.speech_config.voice_id:
+                logger.warning(
+                    "[TTS_VALIDATION] speech_config.voice_id is required but not provided"
+                )
+                return False
+
+            # Check if TTS provider is properly configured
+            if not self.tts_provider:
+                logger.warning("[TTS_VALIDATION] TTS provider is not configured")
+                return False
+
+            logger.debug(
+                f"[TTS_VALIDATION] TTS configuration is valid: voice_id={self.config.speech_config.voice_id}"
+            )
+            return True
+
+        except Exception as e:
+            logger.warning(
+                f"[TTS_VALIDATION] Failed to validate TTS configuration: {e}"
+            )
+            return False
 
     def _split_message_by_line_breaks(self, text: str) -> Sequence[str]:
         """Split message by line breaks first, then by length if needed with enhanced validation."""
