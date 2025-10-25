@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.9.19
+fix(whatsapp): Optimize typing indicator and response handling
+
+- Fix response handling logic in EvolutionAPI provider
+- Modify typing indicator to send only once before sending multiple messages
+- Improve error handling for typing indicator failures
+- Prevent typing indicator errors from interrupting message sending process
+- Optimize logging for typing indicator and message sending
+
 ## v0.9.18
 refactor(whatsapp): Update expected_status handling in API requests
 
