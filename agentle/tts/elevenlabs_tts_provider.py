@@ -1,19 +1,36 @@
+from __future__ import annotations
+
 import base64
+import os
 from collections.abc import AsyncIterator
-from typing import override
+from typing import TYPE_CHECKING, override
 
 from agentle.tts.audio_format import AudioFormat
 from agentle.tts.output_format_type import OutputFormatType
 from agentle.tts.speech_config import SpeechConfig
 from agentle.tts.speech_result import SpeechResult
 from agentle.tts.tts_provider import TtsProvider
-from agentle.utils.needs import needs
+from agentle.tts.voice_settings import VoiceSettings
+from agentle.utils.needs import check_modules
+
+if TYPE_CHECKING:
+    from elevenlabs import AsyncElevenLabs
 
 
 class ElevenLabsTtsProvider(TtsProvider):
+    _client: AsyncElevenLabs
+
+    def __init__(self, api_key: str | None = None) -> None:
+        super().__init__()
+        check_modules("elevenlabs")
+        from elevenlabs import AsyncElevenLabs
+
+        self._client = AsyncElevenLabs(
+            api_key=api_key or os.getenv("ELEVENLABS_API_KEY")
+        )
+
     @override
-    @needs("elevenlabs")
-    async def synthesize(self, text: str, config: SpeechConfig) -> SpeechResult:
+    async def synthesize_async(self, text: str, config: SpeechConfig) -> SpeechResult:
         from elevenlabs import AsyncElevenLabs
         from elevenlabs.types.voice_settings import (
             VoiceSettings as ElevenLabsVoiceSettings,
@@ -65,3 +82,27 @@ class ElevenLabsTtsProvider(TtsProvider):
             return "audio/opus"
         else:
             return "application/octet-stream"  # fallback
+
+
+if __name__ == "__main__":
+    from dotenv import load_dotenv
+
+    load_dotenv(override=True)
+    tts_provider = ElevenLabsTtsProvider()
+    audio = tts_provider.synthesize(
+        "Oi, eu sou a Júlia. Assistente pessoal da Dany Braga do estúdio de fotografia. Em que posso ajudar você hoje?",
+        config=SpeechConfig(
+            voice_id="lWq4KDY8znfkV0DrK8Vb",
+            model_id="eleven_v3",
+            language_code="pt",
+            voice_settings=VoiceSettings(
+                stability=0.0,
+                use_speaker_boost=None,
+                similarity_boost=None,
+                style=None,
+                speed=None,
+            ),
+        ),
+    )
+    with open("audio.mp3", "wb") as file:
+        file.write(base64.b64decode(audio.audio))
