@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.16
+feat(whatsapp): Add text-to-speech (TTS) integration for WhatsApp bot
+
+- Implement speech configuration in WhatsAppBotConfig
+- Add speech_play_chance and speech_config fields to control TTS behavior
+- Create send_audio_message method in WhatsAppProvider base class
+- Implement send_audio_message for EvolutionAPI provider
+- Add documentation and example for WhatsApp TTS integration
+- Enhance WhatsApp bot to support optional audio message generation
+This change enables flexible text-to-speech capabilities for WhatsApp bots, allowing dynamic audio response generation with configurable probability and provider settings.
+
 ## v0.9.15
 
 rollback changes
