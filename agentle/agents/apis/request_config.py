@@ -7,7 +7,6 @@ Includes timeouts, retries, circuit breakers, rate limiting, caching, and more.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
 
 from rsb.models.base_model import BaseModel
 from rsb.models.field import Field
@@ -34,7 +33,29 @@ __all__ = [
 
 
 class RequestConfig(BaseModel):
-    """Enhanced configuration for HTTP requests."""
+    """
+    Enhanced configuration for HTTP requests.
+    
+    This configuration can be set at both API-level and per-endpoint level.
+    Endpoint-level configs override API-level configs.
+    
+    Example:
+        ```python
+        # API-level config (applies to all endpoints)
+        api_config = RequestConfig(
+            timeout=30.0,
+            max_retries=3,
+            enable_caching=True
+        )
+        
+        # Per-endpoint override
+        endpoint_config = RequestConfig(
+            timeout=60.0,  # Override for this specific endpoint
+            max_retries=5,
+            cache_ttl=600.0
+        )
+        ```
+    """
 
     # Timeouts (in seconds)
     timeout: float = Field(description="Total request timeout in seconds", default=30.0)

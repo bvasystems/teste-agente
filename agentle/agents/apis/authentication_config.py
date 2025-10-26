@@ -43,7 +43,14 @@ class AuthenticationConfig(BaseModel):
     oauth2_grant_type: OAuth2GrantType = Field(
         default=OAuth2GrantType.CLIENT_CREDENTIALS
     )
-    oauth2_scope: str | None = Field(default=None)
+    oauth2_scope: str | None = Field(
+        default=None,
+        description="Single scope string (deprecated, use oauth2_scopes for multiple)",
+    )
+    oauth2_scopes: list[str] | None = Field(
+        default=None,
+        description="List of OAuth2 scopes to request (e.g., ['read', 'write', 'admin'])",
+    )
     oauth2_refresh_token: str | None = Field(default=None)
 
     # HMAC
@@ -96,6 +103,7 @@ class AuthenticationConfig(BaseModel):
                 self.oauth2_grant_type,
                 self.oauth2_scope,
                 self.oauth2_refresh_token,
+                self.oauth2_scopes,
             )
 
         elif self.type == AuthType.HMAC:

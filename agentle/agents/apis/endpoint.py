@@ -18,9 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import mimetypes
 import random
-from collections.abc import AsyncIterator, Callable, MutableMapping, Sequence
+from collections.abc import AsyncIterator, MutableMapping, Sequence
 from typing import Any, Literal
 
 import aiohttp
@@ -42,7 +41,6 @@ from agentle.agents.apis.rate_limiter import RateLimiter
 from agentle.agents.apis.request_config import RequestConfig
 from agentle.agents.apis.response_cache import ResponseCache
 from agentle.agents.apis.retry_strategy import RetryStrategy
-from agentle.agents.apis.request_hook import RequestHook
 from agentle.generations.tools.tool import Tool
 
 logger = logging.getLogger(__name__)
@@ -326,13 +324,22 @@ class Endpoint(BaseModel):
                 files[param_name] = value
                 continue
 
-            # Place parameter in appropriate location
+            # Place parameter in appropriate location with proper type handling
             if param.location == ParameterLocation.QUERY:
-                query_params[param_name] = value
+                # Handle boolean conversion for query params
+                if isinstance(value, bool):
+                    # Convert Python bool to lowercase string for URL compatibility
+                    query_params[param_name] = str(value).lower()
+                else:
+                    query_params[param_name] = value
             elif param.location == ParameterLocation.BODY:
                 body_params[param_name] = value
             elif param.location == ParameterLocation.HEADER:
-                header_params[param_name] = str(value)
+                # Convert to string for headers
+                if isinstance(value, bool):
+                    header_params[param_name] = str(value).lower()
+                else:
+                    header_params[param_name] = str(value)
             elif param.location == ParameterLocation.PATH:
                 path_params[param_name] = value
 
@@ -547,8 +554,10 @@ class Endpoint(BaseModel):
 
         for param in self.parameters:
             if hasattr(param, "to_tool_parameter_schema"):
+                # Use the parameter's own schema conversion method
                 tool_parameters[param.name] = param.to_tool_parameter_schema()
             else:
+                # Fallback for parameters without schema method
                 param_info: dict[str, object] = {
                     "type": getattr(param, "param_type", "string") or "string",
                     "description": param.description,
@@ -560,6 +569,20 @@ class Endpoint(BaseModel):
 
                 if hasattr(param, "enum") and param.enum:
                     param_info["enum"] = list(param.enum)
+                
+                # Add constraints for number/primitive types
+                if hasattr(param, "parameter_schema") and param.parameter_schema:
+                    from agentle.agents.apis.primitive_schema import PrimitiveSchema
+                    
+                    schema = param.parameter_schema
+                    # Only PrimitiveSchema has minimum, maximum, format
+                    if isinstance(schema, PrimitiveSchema):
+                        if schema.minimum is not None:
+                            param_info["minimum"] = schema.minimum
+                        if schema.maximum is not None:
+                            param_info["maximum"] = schema.maximum
+                        if schema.format:
+                            param_info["format"] = schema.format
 
                 tool_parameters[param.name] = param_info
 

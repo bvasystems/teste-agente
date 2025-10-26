@@ -23,11 +23,15 @@ class OAuth2Authentication(AuthenticationBase):
         grant_type: OAuth2GrantType = OAuth2GrantType.CLIENT_CREDENTIALS,
         scope: str | None = None,
         refresh_token: str | None = None,
+        scopes: list[str] | None = None,
     ):
         self.token_url = token_url
         self.client_id = client_id
         self.client_secret = client_secret
         self.grant_type = grant_type
+        # Support both single scope and multiple scopes
+        # If scopes list is provided, use it; otherwise fall back to single scope
+        self.scopes = scopes
         self.scope = scope
         self.refresh_token_value = refresh_token
 
@@ -76,7 +80,10 @@ class OAuth2Authentication(AuthenticationBase):
             "grant_type": self.grant_type.value,
         }
 
-        if self.scope:
+        # Handle scopes - prefer scopes list over single scope
+        if self.scopes:
+            data["scope"] = " ".join(self.scopes)
+        elif self.scope:
             data["scope"] = self.scope
 
         if (

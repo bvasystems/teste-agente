@@ -271,12 +271,15 @@ class API(BaseModel):
         elif scheme_type == "oauth2":
             flows = scheme.get("flows", {})
             if "clientCredentials" in flows:
-                token_url = flows["clientCredentials"].get("tokenUrl")
+                flow = flows["clientCredentials"]
+                token_url = flow.get("tokenUrl")
+                scopes = flow.get("scopes", {})
                 if token_url:
                     return AuthenticationConfig(
                         type=AuthType.OAUTH2,
                         oauth2_token_url=token_url,
                         oauth2_grant_type=OAuth2GrantType.CLIENT_CREDENTIALS,
+                        oauth2_scopes=list(scopes.keys()) if scopes else None,
                     )
 
         return None
@@ -535,14 +538,19 @@ class API(BaseModel):
                     components,
                 )
 
-                # Determine response format
+                # Determine response format and extract response schema
                 response_format = "json"  # Default
+                response_schema = None
                 responses = operation.get("responses", {})
                 if "200" in responses:
                     response_200 = responses["200"]
                     content = response_200.get("content", {})
                     if "application/json" in content:
                         response_format = "json"
+                        # Extract response schema if available
+                        json_content = content["application/json"]
+                        if "schema" in json_content:
+                            response_schema = json_content["schema"]
                     elif "text/plain" in content:
                         response_format = "text"
                     elif "application/xml" in content:
@@ -555,6 +563,8 @@ class API(BaseModel):
                     method=HTTPMethod(method.upper()),
                     parameters=endpoint_parameters,
                     response_format=response_format,  # type: ignore
+                    response_schema=response_schema,
+                    validate_response_schema=bool(response_schema),
                 )
 
                 endpoints.append(endpoint)
