@@ -33,43 +33,19 @@ from agentle.agents.apis.authentication import (
     NoAuthentication,
 )
 from agentle.agents.apis.endpoint_parameter import EndpointParameter
+from agentle.agents.apis.file_upload import FileUpload
 from agentle.agents.apis.http_method import HTTPMethod
 from agentle.agents.apis.parameter_location import ParameterLocation
-from agentle.agents.apis.request_config import (
-    CircuitBreaker,
-    CircuitBreakerError,
-    RateLimiter,
-    RequestConfig,
-    ResponseCache,
-    RetryStrategy,
-)
+from agentle.agents.apis.circuit_breaker import CircuitBreaker
+from agentle.agents.apis.circuit_breaker_error import CircuitBreakerError
+from agentle.agents.apis.rate_limiter import RateLimiter
+from agentle.agents.apis.request_config import RequestConfig
+from agentle.agents.apis.response_cache import ResponseCache
+from agentle.agents.apis.retry_strategy import RetryStrategy
+from agentle.agents.apis.request_hook import RequestHook
 from agentle.generations.tools.tool import Tool
 
 logger = logging.getLogger(__name__)
-
-
-class FileUpload(BaseModel):
-    """Represents a file to be uploaded."""
-
-    filename: str
-    content: bytes
-    mime_type: str | None = None
-
-    def to_form_part(self) -> tuple[str, bytes, str]:
-        """Convert to multipart form part."""
-        mime = (
-            self.mime_type
-            or mimetypes.guess_type(self.filename)[0]
-            or "application/octet-stream"
-        )
-        return (self.filename, self.content, mime)
-
-
-class RequestHook(BaseModel):
-    """Hook for request/response interception."""
-
-    name: str
-    callback: Callable[[dict[str, Any]], Any] | None = None
 
 
 class Endpoint(BaseModel):

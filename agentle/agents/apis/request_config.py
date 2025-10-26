@@ -6,40 +6,31 @@ Includes timeouts, retries, circuit breakers, rate limiting, caching, and more.
 
 from __future__ import annotations
 
-import asyncio
-import time
-from collections.abc import Callable, Sequence
-from enum import StrEnum
+from collections.abc import Sequence
 from typing import Any
 
 from rsb.models.base_model import BaseModel
 from rsb.models.field import Field
 
+from agentle.agents.apis.cache_strategy import CacheStrategy
+from agentle.agents.apis.circuit_breaker import CircuitBreaker
+from agentle.agents.apis.circuit_breaker_error import CircuitBreakerError
+from agentle.agents.apis.rate_limiter import RateLimiter
+from agentle.agents.apis.rate_limit_error import RateLimitError
+from agentle.agents.apis.response_cache import ResponseCache
+from agentle.agents.apis.retry_strategy import RetryStrategy
 
-class RetryStrategy(StrEnum):
-    """Retry strategies."""
-
-    EXPONENTIAL = "exponential"
-    LINEAR = "linear"
-    CONSTANT = "constant"
-    FIBONACCI = "fibonacci"
-
-
-class CircuitBreakerState(StrEnum):
-    """Circuit breaker states."""
-
-    CLOSED = "closed"  # Normal operation
-    OPEN = "open"  # Failing, reject requests
-    HALF_OPEN = "half_open"  # Testing if service recovered
-
-
-class CacheStrategy(StrEnum):
-    """Cache strategies."""
-
-    NONE = "none"
-    MEMORY = "memory"
-    REDIS = "redis"
-    CUSTOM = "custom"
+# Re-export for backward compatibility
+__all__ = [
+    "RequestConfig",
+    "RetryStrategy",
+    "CacheStrategy",
+    "CircuitBreaker",
+    "RateLimiter",
+    "ResponseCache",
+    "CircuitBreakerError",
+    "RateLimitError",
+]
 
 
 class RequestConfig(BaseModel):
@@ -145,149 +136,3 @@ class RequestConfig(BaseModel):
     decompress_response: bool = Field(
         description="Enable response decompression", default=True
     )
-
-
-class CircuitBreaker:
-    """Circuit breaker implementation for resilient API calls."""
-
-    def __init__(self, config: RequestConfig):
-        self.config = config
-        self.state = CircuitBreakerState.CLOSED
-        self.failure_count = 0
-        self.success_count = 0
-        self.last_failure_time: float | None = None
-        self._lock = asyncio.Lock()
-
-    async def call(self, func: Callable[[], Any]) -> Any:
-        """Execute function with circuit breaker protection."""
-        async with self._lock:
-            # Check if circuit is open
-            if self.state == CircuitBreakerState.OPEN:
-                # Check if we should transition to half-open
-                if self.last_failure_time:
-                    elapsed = time.time() - self.last_failure_time
-                    if elapsed >= self.config.circuit_breaker_recovery_timeout:
-                        self.state = CircuitBreakerState.HALF_OPEN
-                        self.success_count = 0
-                    else:
-                        raise CircuitBreakerError(
-                            f"Circuit breaker is OPEN. Retry after {self.config.circuit_breaker_recovery_timeout - elapsed:.1f}s"
-                        )
-
-        # Execute the function
-        try:
-            result = await func()
-            await self._on_success()
-            return result
-        except Exception:
-            await self._on_failure()
-            raise
-
-    async def _on_success(self) -> None:
-        """Handle successful call."""
-        async with self._lock:
-            if self.state == CircuitBreakerState.HALF_OPEN:
-                self.success_count += 1
-                if self.success_count >= self.config.circuit_breaker_success_threshold:
-                    self.state = CircuitBreakerState.CLOSED
-                    self.failure_count = 0
-            elif self.state == CircuitBreakerState.CLOSED:
-                self.failure_count = 0
-
-    async def _on_failure(self) -> None:
-        """Handle failed call."""
-        async with self._lock:
-            self.failure_count += 1
-            self.last_failure_time = time.time()
-
-            if self.state == CircuitBreakerState.HALF_OPEN:
-                # Failure in half-open state reopens circuit
-                self.state = CircuitBreakerState.OPEN
-            elif self.state == CircuitBreakerState.CLOSED:
-                # Check if we've hit the failure threshold
-                if self.failure_count >= self.config.circuit_breaker_failure_threshold:
-                    self.state = CircuitBreakerState.OPEN
-
-
-class RateLimiter:
-    """Rate limiter for API calls."""
-
-    def __init__(self, config: RequestConfig):
-        self.config = config
-        self.calls: list[float] = []
-        self._lock = asyncio.Lock()
-
-    async def acquire(self) -> None:
-        """Acquire rate limit slot, waiting if necessary."""
-        async with self._lock:
-            now = time.time()
-
-            # Remove old calls outside the window
-            cutoff = now - self.config.rate_limit_period
-            self.calls = [t for t in self.calls if t > cutoff]
-
-            # Check if we're at the limit
-            if len(self.calls) >= self.config.rate_limit_calls:
-                # Calculate wait time
-                oldest_call = self.calls[0]
-                wait_time = self.config.rate_limit_period - (now - oldest_call)
-                if wait_time > 0:
-                    await asyncio.sleep(wait_time)
-                    # Recursively try again
-                    return await self.acquire()
-
-            # Record this call
-            self.calls.append(now)
-
-
-class ResponseCache:
-    """Simple in-memory response cache."""
-
-    def __init__(self, config: RequestConfig):
-        self.config = config
-        self._cache: dict[str, tuple[Any, float]] = {}
-        self._lock = asyncio.Lock()
-
-    def _make_key(self, url: str, params: dict[str, Any]) -> str:
-        """Create cache key from URL and params."""
-        import hashlib
-        import json
-
-        key_str = f"{url}:{json.dumps(params, sort_keys=True)}"
-        return hashlib.sha256(key_str.encode()).hexdigest()
-
-    async def get(self, url: str, params: dict[str, Any]) -> Any | None:
-        """Get cached response if available and not expired."""
-        async with self._lock:
-            key = self._make_key(url, params)
-            if key in self._cache:
-                response, timestamp = self._cache[key]
-                if time.time() - timestamp < self.config.cache_ttl:
-                    return response
-                else:
-                    # Expired, remove it
-                    del self._cache[key]
-            return None
-
-    async def set(self, url: str, params: dict[str, Any], response: Any) -> None:
-        """Cache a response."""
-        async with self._lock:
-            key = self._make_key(url, params)
-            self._cache[key] = (response, time.time())
-
-    async def clear(self) -> None:
-        """Clear all cached responses."""
-        async with self._lock:
-            self._cache.clear()
-
-
-class CircuitBreakerError(Exception):
-    """Raised when circuit breaker is open."""
-
-    pass
-
-
-class RateLimitError(Exception):
-    """Raised when rate limit is exceeded."""
-
-    pass

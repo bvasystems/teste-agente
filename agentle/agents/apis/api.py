@@ -14,7 +14,13 @@ Provides advanced features for managing collections of related endpoints with:
 from __future__ import annotations
 
 import logging
-from collections.abc import Coroutine, Mapping, MutableMapping, MutableSequence, Sequence
+from collections.abc import (
+    Coroutine,
+    Mapping,
+    MutableMapping,
+    MutableSequence,
+    Sequence,
+)
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -24,6 +30,7 @@ import yaml
 from rsb.models.base_model import BaseModel
 from rsb.models.field import Field
 
+from agentle.agents.apis.api_metrics import APIMetrics
 from agentle.agents.apis.array_schema import ArraySchema
 from agentle.agents.apis.authentication import (
     ApiKeyLocation,
@@ -41,17 +48,6 @@ from agentle.agents.apis.request_config import RequestConfig
 from agentle.generations.tools.tool import Tool
 
 logger = logging.getLogger(__name__)
-
-
-class APIMetrics(BaseModel):
-    """Metrics for API usage."""
-
-    total_requests: int = 0
-    successful_requests: int = 0
-    failed_requests: int = 0
-    total_latency_ms: float = 0.0
-    average_latency_ms: float = 0.0
-    requests_by_endpoint: dict[str, int] = {}
 
 
 class API(BaseModel):
