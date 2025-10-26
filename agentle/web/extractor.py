@@ -6,7 +6,8 @@ from html_to_markdown import convert
 from playwright.async_api import Geolocation, ViewportSize
 from rsb.models import Field
 from rsb.models.base_model import BaseModel
-
+from agentle.generations.models.generation.generation import Generation
+from agentle.generations.providers.base.generation_provider import GenerationProvider
 from agentle.prompts.models.prompt import Prompt
 from agentle.responses.definitions.reasoning import Reasoning
 from agentle.responses.responder import Responder
@@ -52,7 +53,9 @@ _PROMPT = Prompt.from_text(
 
 # HTML -> MD -> LLM (Structured Output)
 class Extractor(BaseModel):
-    llm: Responder = Field(..., description="The responder to use for the extractor.")
+    llm: Responder | GenerationProvider = Field(
+        ..., description="The responder to use for the extractor."
+    )
     reasoning: Reasoning | None = Field(default=None)
     model: str | None = Field(default=None)
     max_output_tokens: int | None = Field(default=None)
@@ -221,12 +224,26 @@ class Extractor(BaseModel):
                 user_instructions=prompt or "Not provided.", markdown=markdown
             )
 
-            response = await self.llm.respond_async(
-                input=_prompt,
-                model=self.model,
-                instructions=_INSTRUCTIONS,
-                reasoning=self.reasoning,
-                text_format=output,
+            if isinstance(self.llm, GenerationProvider):
+                response = await self.llm.generate_by_prompt_async(
+                    prompt=_prompt,
+                    model=self.model,
+                    developer_prompt=_INSTRUCTIONS,
+                    response_schema=output,
+                )
+            else:
+                response = await self.llm.respond_async(
+                    input=_prompt,
+                    model=self.model,
+                    instructions=_INSTRUCTIONS,
+                    reasoning=self.reasoning,
+                    text_format=output,
+                )
+
+            output_parsed = (
+                response.parsed
+                if isinstance(response, Generation)
+                else response.output_parsed
             )
 
             await browser.close()
@@ -236,7 +253,7 @@ class Extractor(BaseModel):
                 html=html,
                 markdown=markdown,
                 extraction_preferences=_preferences,
-                output_parsed=response.output_parsed,
+                output_parsed=output_parsed,
             )
 
 
