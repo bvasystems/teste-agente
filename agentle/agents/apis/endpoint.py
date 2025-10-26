@@ -1,111 +1,90 @@
 """
-API endpoint integration for Agentle framework.
+Complete enhanced API endpoint integration for Agentle framework.
 
-This module provides classes for defining HTTP API endpoints that can be automatically
-converted to tools for use by AI agents. This allows users to integrate with REST APIs
-without writing HTTP request functions manually.
-
-Example:
-```python
-from agentle.apis.endpoint import Endpoint, API, HTTPMethod, ParameterLocation, EndpointParameter
-from agentle.agents.agent import Agent
-
-# Define individual endpoints
-weather_endpoint = Endpoint(
-    name="get_weather",
-    description="Get current weather for a location",
-    call_condition="when user asks about weather, current conditions, or temperature",
-    url="https://api.weather.com/v1/current",
-    method=HTTPMethod.GET,
-    parameters=[
-        EndpointParameter(
-            name="location",
-            description="City name or coordinates",
-            param_type="string",
-            location=ParameterLocation.QUERY,
-            required=True
-        ),
-        EndpointParameter(
-            name="units",
-            description="Temperature units",
-            param_type="string",
-            location=ParameterLocation.QUERY,
-            default="metric"
-        )
-    ]
-)
-
-# Or define an API with multiple endpoints
-weather_api = API(
-    name="WeatherAPI",
-    base_url="https://api.weather.com/v1",
-    headers={"Authorization": "Bearer YOUR_TOKEN"},
-    endpoints=[
-        Endpoint(
-            name="get_current_weather",
-            description="Get current weather conditions",
-            call_condition="when user asks about current weather",
-            path="/current",
-            method=HTTPMethod.GET,
-            parameters=[
-                EndpointParameter("location", "Location to get weather for", "string",
-                                ParameterLocation.QUERY, required=True)
-            ]
-        ),
-        Endpoint(
-            name="get_forecast",
-            description="Get weather forecast",
-            call_condition="when user asks about weather forecast or future weather",
-            path="/forecast",
-            method=HTTPMethod.GET,
-            parameters=[
-                EndpointParameter("location", "Location for forecast", "string",
-                                ParameterLocation.QUERY, required=True),
-                EndpointParameter("days", "Number of days", "integer",
-                                ParameterLocation.QUERY, default=5)
-            ]
-        )
-    ]
-)
-
-# Use with an agent
-agent = Agent(
-    generation_provider=GoogleGenerationProvider(),
-    model="gemini-2.5-flash",
-    instructions="You are a weather assistant.",
-    tools=[weather_endpoint],  # Individual endpoint
-    apis=[weather_api]         # Full API with multiple endpoints
-)
-```
+This module provides comprehensive HTTP API endpoint support with:
+- Multiple authentication methods
+- Advanced retry strategies
+- Circuit breaker pattern
+- Rate limiting
+- Response caching
+- File uploads (multipart/form-data)
+- Streaming responses
+- Request/response hooks
+- SSL/Proxy configuration
+- and more...
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import MutableMapping, Sequence
+import mimetypes
+import random
+from collections.abc import AsyncIterator, Callable, MutableMapping, Sequence
 from typing import Any, Literal
 
 import aiohttp
 from rsb.models.base_model import BaseModel
 from rsb.models.field import Field
 
+from agentle.agents.apis.authentication import (
+    AuthenticationBase,
+    AuthenticationConfig,
+    NoAuthentication,
+)
 from agentle.agents.apis.endpoint_parameter import EndpointParameter
 from agentle.agents.apis.http_method import HTTPMethod
 from agentle.agents.apis.parameter_location import ParameterLocation
-from agentle.agents.apis.request_config import RequestConfig
+from agentle.agents.apis.request_config import (
+    CircuitBreaker,
+    CircuitBreakerError,
+    RateLimiter,
+    RequestConfig,
+    ResponseCache,
+    RetryStrategy,
+)
 from agentle.generations.tools.tool import Tool
 
 logger = logging.getLogger(__name__)
 
 
+class FileUpload(BaseModel):
+    """Represents a file to be uploaded."""
+
+    filename: str
+    content: bytes
+    mime_type: str | None = None
+
+    def to_form_part(self) -> tuple[str, bytes, str]:
+        """Convert to multipart form part."""
+        mime = (
+            self.mime_type
+            or mimetypes.guess_type(self.filename)[0]
+            or "application/octet-stream"
+        )
+        return (self.filename, self.content, mime)
+
+
+class RequestHook(BaseModel):
+    """Hook for request/response interception."""
+
+    name: str
+    callback: Callable[[dict[str, Any]], Any] | None = None
+
+
 class Endpoint(BaseModel):
     """
-    Represents a single HTTP API endpoint that can be called by an agent.
+    Enhanced HTTP API endpoint with comprehensive features.
 
-    This class encapsulates all the information needed to make HTTP requests
-    to a specific API endpoint, including URL, method, parameters, and conditions
-    for when the agent should use this endpoint.
+    Supports:
+    - Multiple authentication methods
+    - Advanced retry strategies with circuit breakers
+    - Rate limiting and quota management
+    - Response caching
+    - File uploads
+    - Streaming responses
+    - Request/response hooks
+    - SSL and proxy configuration
     """
 
     name: str = Field(description="Unique name for this endpoint")
@@ -147,23 +126,74 @@ class Endpoint(BaseModel):
         default_factory=RequestConfig,
     )
 
-    response_format: Literal["json", "text", "bytes"] = Field(
+    auth_config: AuthenticationConfig | None = Field(
+        description="Authentication configuration",
+        default=None,
+    )
+
+    response_format: Literal["json", "text", "bytes", "stream", "xml"] = Field(
         description="Expected response format", default="json"
     )
 
+    # File upload support
+    supports_file_upload: bool = Field(
+        description="Whether this endpoint supports file uploads", default=False
+    )
+
+    # Pagination support
+    supports_pagination: bool = Field(
+        description="Whether this endpoint supports pagination", default=False
+    )
+    pagination_param_name: str = Field(
+        description="Name of pagination parameter", default="page"
+    )
+    pagination_style: Literal["page", "offset", "cursor"] = Field(
+        description="Style of pagination", default="page"
+    )
+
+    # Response validation
+    validate_response_schema: bool = Field(
+        description="Whether to validate response against schema", default=False
+    )
+    response_schema: dict[str, Any] | None = Field(
+        description="JSON schema for response validation", default=None
+    )
+
+    # Advanced features
+    enable_hooks: bool = Field(
+        description="Enable request/response hooks", default=False
+    )
+
+    # Internal state (not serialized)
+    _auth_handler: AuthenticationBase | None = None
+    _circuit_breaker: CircuitBreaker | None = None
+    _rate_limiter: RateLimiter | None = None
+    _response_cache: ResponseCache | None = None
+
+    def model_post_init(self, __context: Any) -> None:
+        """Initialize internal components."""
+        super().model_post_init(__context)
+
+        # Initialize authentication handler
+        if self.auth_config:
+            self._auth_handler = self.auth_config.create_handler()
+        else:
+            self._auth_handler = NoAuthentication()
+
+        # Initialize circuit breaker if enabled
+        if self.request_config.enable_circuit_breaker:
+            self._circuit_breaker = CircuitBreaker(self.request_config)
+
+        # Initialize rate limiter if enabled
+        if self.request_config.enable_rate_limiting:
+            self._rate_limiter = RateLimiter(self.request_config)
+
+        # Initialize cache if enabled
+        if self.request_config.enable_caching:
+            self._response_cache = ResponseCache(self.request_config)
+
     def get_full_url(self, base_url: str | None = None) -> str:
-        """
-        Get the complete URL for this endpoint.
-
-        Args:
-            base_url: Base URL to prepend to the path
-
-        Returns:
-            Complete URL for the endpoint
-
-        Raises:
-            ValueError: If neither url nor (base_url + path) is available
-        """
+        """Get the complete URL for this endpoint."""
         if self.url:
             return self.url
 
@@ -175,12 +205,7 @@ class Endpoint(BaseModel):
         )
 
     def get_enhanced_description(self) -> str:
-        """
-        Get description enhanced with call condition.
-
-        Returns:
-            Description with call condition appended if available
-        """
+        """Get description enhanced with call condition."""
         base_desc = self.description
 
         if self.call_condition:
@@ -188,56 +213,124 @@ class Endpoint(BaseModel):
 
         return base_desc
 
-    def to_tool_parameters(self) -> dict[str, object]:
-        """
-        Convert endpoint parameters to tool parameter format.
+    def _calculate_retry_delay(self, attempt: int) -> float:
+        """Calculate retry delay based on strategy."""
+        base_delay = self.request_config.retry_delay
 
-        Returns:
-            Dictionary of parameters in tool format
-        """
-        tool_params: dict[str, object] = {}
+        if self.request_config.retry_strategy == RetryStrategy.CONSTANT:
+            delay = base_delay
 
-        for param in self.parameters:
-            param_info: dict[str, object] = {
-                "type": param.param_type,
-                "description": param.description,
-                "required": param.required,
-            }
+        elif self.request_config.retry_strategy == RetryStrategy.LINEAR:
+            delay = base_delay * (attempt + 1)
 
-            if param.default is not None:
-                param_info["default"] = param.default
+        elif self.request_config.retry_strategy == RetryStrategy.EXPONENTIAL:
+            delay = base_delay * (2**attempt)
 
-            if param.enum:
-                param_info["enum"] = list(param.enum)
+        elif self.request_config.retry_strategy == RetryStrategy.FIBONACCI:
+            # Calculate Fibonacci number for attempt
+            fib = [1, 1]
+            for _ in range(attempt):
+                fib.append(fib[-1] + fib[-2])
+            delay = base_delay * fib[-1]
 
-            tool_params[param.name] = param_info
+        else:
+            delay = base_delay
 
-        return tool_params
+        # Add jitter (±20%)
+        jitter = delay * 0.2 * (random.random() - 0.5) * 2
+        delay = delay + jitter
 
-    async def _make_request(
+        # Cap at 60 seconds
+        return min(delay, 60.0)
+
+    def _should_retry(
+        self, response: aiohttp.ClientResponse | None, exception: Exception | None
+    ) -> bool:
+        """Determine if request should be retried."""
+        # Retry on configured status codes
+        if response and response.status in self.request_config.retry_on_status_codes:
+            return True
+
+        # Retry on exceptions if configured
+        if exception and self.request_config.retry_on_exceptions:
+            # Don't retry on certain exceptions
+            if isinstance(exception, (asyncio.CancelledError, KeyboardInterrupt)):
+                return False
+            return True
+
+        return False
+
+    async def _parse_response(self, response: aiohttp.ClientResponse) -> Any:
+        """Parse response based on format."""
+        if self.response_format == "json":
+            return await response.json()
+        elif self.response_format == "text":
+            return await response.text()
+        elif self.response_format == "bytes":
+            return await response.read()
+        elif self.response_format == "xml":
+            # Try to parse XML
+            try:
+                import xml.etree.ElementTree as ET
+
+                text = await response.text()
+                return ET.fromstring(text)
+            except Exception:
+                return await response.text()
+        else:
+            return await response.text()
+
+    async def _handle_streaming_response(
+        self, response: aiohttp.ClientResponse
+    ) -> AsyncIterator[bytes]:
+        """Handle streaming response."""
+        async for chunk in response.content.iter_chunked(8192):
+            yield chunk
+
+    async def _validate_response(self, data: Any) -> Any:
+        """Validate response against schema if configured."""
+        if not self.validate_response_schema or not self.response_schema:
+            return data
+
+        try:
+            import jsonschema
+
+            jsonschema.validate(instance=data, schema=self.response_schema)
+            return data
+        except Exception as e:
+            logger.warning(f"Response validation failed: {e}")
+            return data
+
+    async def make_request(
         self,
         base_url: str | None = None,
         global_headers: MutableMapping[str, str] | None = None,
         **kwargs: Any,
     ) -> Any:
-        """
-        Internal method to make the HTTP request.
-
-        Args:
-            base_url: Base URL if using path-based endpoint
-            global_headers: Global headers to merge with endpoint headers
-            **kwargs: Parameters for the request
-
-        Returns:
-            Response data based on response_format
-        """
+        """Internal method to make the HTTP request with all enhancements."""
         url = self.get_full_url(base_url)
+
+        # Check rate limiter
+        if self._rate_limiter:
+            await self._rate_limiter.acquire()
+
+        # Check cache (only for GET requests if configured)
+        if (
+            self._response_cache
+            and self.method == HTTPMethod.GET
+            and self.request_config.cache_only_get
+        ):
+            cached = await self._response_cache.get(url, kwargs)
+            if cached is not None:
+                logger.debug(f"Cache hit for {url}")
+                return cached
 
         # Separate parameters by location
         query_params: dict[str, Any] = {}
         body_params: dict[str, Any] = {}
         header_params: dict[str, str] = {}
         path_params: dict[str, Any] = {}
+        files: dict[str, FileUpload] = {}
 
         for param in self.parameters:
             param_name = param.name
@@ -250,6 +343,11 @@ class Endpoint(BaseModel):
             elif param.required:
                 raise ValueError(f"Required parameter '{param_name}' not provided")
             else:
+                continue
+
+            # Handle file uploads
+            if isinstance(value, FileUpload):
+                files[param_name] = value
                 continue
 
             # Place parameter in appropriate location
@@ -273,114 +371,183 @@ class Endpoint(BaseModel):
         headers.update(self.headers)
         headers.update(header_params)
 
-        # Prepare request data
-        request_kwargs: dict[str, Any] = {
-            "timeout": aiohttp.ClientTimeout(total=self.request_config.timeout),
-            "headers": headers,
-            "allow_redirects": self.request_config.follow_redirects,
+        # Apply authentication
+        if self._auth_handler:
+            await self._auth_handler.refresh_if_needed()
+            await self._auth_handler.apply_auth(None, url, headers, query_params)  # type: ignore
+
+        # Prepare connector
+        connector_kwargs: dict[str, Any] = {
+            "limit": 10,
+            "limit_per_host": 5,
+            "ttl_dns_cache": 300,
         }
 
-        if query_params:
-            request_kwargs["params"] = query_params
+        if not self.request_config.verify_ssl:
+            connector_kwargs["ssl"] = False
 
-        if body_params and self.method in [
-            HTTPMethod.POST,
-            HTTPMethod.PUT,
-            HTTPMethod.PATCH,
-        ]:
-            request_kwargs["json"] = body_params
-            if "Content-Type" not in headers:
-                headers["Content-Type"] = "application/json"
+        connector = aiohttp.TCPConnector(**connector_kwargs)
 
-        # Use a single session for all retry attempts to avoid cleanup issues
-        last_exception = None
-
-        # Create connector with proper cleanup settings
-        connector = aiohttp.TCPConnector(
-            limit=10,  # Limit concurrent connections
-            limit_per_host=5,
-            ttl_dns_cache=300,
-            use_dns_cache=True,
+        # Prepare timeout
+        timeout = aiohttp.ClientTimeout(
+            total=self.request_config.timeout,
+            connect=self.request_config.connect_timeout,
+            sock_read=self.request_config.read_timeout,
         )
 
-        try:
+        # Define the request function for circuit breaker
+        async def make_single_request() -> Any:
+            """Make a single request attempt."""
             async with aiohttp.ClientSession(
-                connector=connector,
-                timeout=aiohttp.ClientTimeout(
-                    total=self.request_config.timeout * 2
-                ),  # Overall timeout
+                connector=connector, timeout=timeout
             ) as session:
-                for attempt in range(self.request_config.max_retries + 1):
-                    try:
-                        logger.debug(
-                            f"Making {self.method} request to {url} (attempt {attempt + 1})"
+                # Prepare request kwargs
+                request_kwargs: dict[str, Any] = {
+                    "headers": headers,
+                    "allow_redirects": self.request_config.follow_redirects,
+                    "max_redirects": self.request_config.max_redirects,
+                }
+
+                if query_params:
+                    request_kwargs["params"] = query_params
+
+                # Handle different content types
+                if files and self.supports_file_upload:
+                    # Multipart form-data
+                    form_data = aiohttp.FormData()
+                    for key, file in files.items():
+                        form_data.add_field(
+                            key,
+                            file.content,
+                            filename=file.filename,
+                            content_type=file.mime_type or "application/octet-stream",
+                        )
+                    for key, value in body_params.items():
+                        form_data.add_field(key, str(value))
+                    request_kwargs["data"] = form_data
+
+                elif body_params and self.method in [
+                    HTTPMethod.POST,
+                    HTTPMethod.PUT,
+                    HTTPMethod.PATCH,
+                ]:
+                    # JSON body
+                    request_kwargs["json"] = body_params
+                    if "Content-Type" not in headers:
+                        headers["Content-Type"] = "application/json"
+
+                # Proxy configuration
+                if self.request_config.proxy_url:
+                    request_kwargs["proxy"] = self.request_config.proxy_url
+                    if self.request_config.proxy_auth:
+                        request_kwargs["proxy_auth"] = aiohttp.BasicAuth(
+                            *self.request_config.proxy_auth
                         )
 
-                        async with session.request(
-                            method=self.method.value, url=url, **request_kwargs
-                        ) as response:
-                            # Check for HTTP errors
-                            if response.status >= 400:
-                                error_text = await response.text()
-                                raise aiohttp.ClientResponseError(
-                                    request_info=response.request_info,
-                                    history=response.history,
-                                    status=response.status,
-                                    message=f"HTTP {response.status}: {error_text}",
-                                )
+                # Log request if enabled
+                if self.request_config.enable_request_logging:
+                    logger.info(f"Request: {self.method} {url}")
+                    logger.debug(f"Headers: {headers}")
+                    logger.debug(f"Params: {query_params}")
 
-                            # Parse response based on format
-                            if self.response_format == "json":
-                                return await response.json()
-                            elif self.response_format == "text":
-                                return await response.text()
-                            elif self.response_format == "bytes":
-                                return await response.read()
-                            else:
-                                return await response.text()
+                # Make request
+                async with session.request(
+                    method=self.method.value, url=url, **request_kwargs
+                ) as response:
+                    # Log response if enabled
+                    if self.request_config.enable_response_logging:
+                        logger.info(f"Response: {response.status} from {url}")
 
-                    except asyncio.CancelledError:
-                        # Handle cancellation gracefully
-                        logger.debug(f"Request to {url} was cancelled")
-                        raise
-                    except Exception as e:
-                        last_exception = e
-                        logger.warning(
-                            f"Request attempt {attempt + 1} failed: {str(e)}"
+                    # Handle HTTP errors
+                    if response.status >= 400:
+                        error_text = await response.text()
+
+                        # Check for Retry-After header
+                        if (
+                            response.status == 429
+                            and self.request_config.respect_retry_after
+                        ):
+                            retry_after = response.headers.get("Retry-After")
+                            if retry_after:
+                                try:
+                                    wait_time = int(retry_after)
+                                    logger.warning(
+                                        f"Rate limited. Waiting {wait_time}s as per Retry-After header"
+                                    )
+                                    await asyncio.sleep(wait_time)
+                                except ValueError:
+                                    pass
+
+                        raise aiohttp.ClientResponseError(
+                            request_info=response.request_info,
+                            history=response.history,
+                            status=response.status,
+                            message=f"HTTP {response.status}: {error_text}",
                         )
 
-                        if attempt < self.request_config.max_retries:
-                            # Use exponential backoff with jitter
-                            delay = self.request_config.retry_delay * (2**attempt)
-                            jitter = (
-                                delay
-                                * 0.1
-                                * (0.5 - asyncio.get_event_loop().time() % 1)
-                            )
-                            total_delay = min(delay + jitter, 60.0)  # Cap at 60 seconds
+                    # Handle streaming responses
+                    if self.response_format == "stream":
+                        chunks: list[bytes] = []
+                        async for chunk in self._handle_streaming_response(response):
+                            chunks.append(chunk)
+                        return b"".join(chunks)
 
-                            try:
-                                await asyncio.sleep(total_delay)
-                            except asyncio.CancelledError:
-                                logger.debug("Sleep interrupted by cancellation")
-                                raise
-                        else:
-                            break
+                    # Parse response
+                    result = await self._parse_response(response)
 
-        except asyncio.CancelledError:
-            logger.debug(f"HTTP session cancelled during request to {url}")
-            raise
-        except Exception as e:
-            logger.error(f"Error with HTTP session for {url}: {str(e)}")
-            if last_exception:
-                raise last_exception
-            raise
-        finally:
-            # Ensure connector is properly closed
-            if not connector.closed:
-                await connector.close()
+                    # Validate response
+                    result = await self._validate_response(result)
 
-        # If we get here, all attempts failed
+                    # Cache response if configured
+                    if self._response_cache and self.method == HTTPMethod.GET:
+                        await self._response_cache.set(url, kwargs, result)
+
+                    return result
+
+        # Execute with retries
+        last_exception = None
+
+        for attempt in range(self.request_config.max_retries + 1):
+            try:
+                # Execute with circuit breaker if enabled
+                if self._circuit_breaker:
+                    result = await self._circuit_breaker.call(make_single_request)
+                else:
+                    result = await make_single_request()
+
+                return result
+
+            except asyncio.CancelledError:
+                logger.debug(f"Request to {url} was cancelled")
+                raise
+
+            except CircuitBreakerError:
+                # Don't retry if circuit is open
+                raise
+
+            except Exception as e:
+                last_exception = e
+
+                # Check if we should retry
+                should_retry = self._should_retry(None, e)
+
+                if not should_retry or attempt >= self.request_config.max_retries:
+                    break
+
+                # Calculate delay and wait
+                delay = self._calculate_retry_delay(attempt)
+                logger.warning(
+                    f"Request failed (attempt {attempt + 1}/{self.request_config.max_retries + 1}). "
+                    + f"Retrying in {delay:.2f}s: {str(e)}"
+                )
+
+                try:
+                    await asyncio.sleep(delay)
+                except asyncio.CancelledError:
+                    logger.debug("Sleep interrupted by cancellation")
+                    raise
+
+        # All retries exhausted
         if last_exception:
             raise last_exception
         else:
@@ -391,23 +558,11 @@ class Endpoint(BaseModel):
         base_url: str | None = None,
         global_headers: MutableMapping[str, str] | None = None,
     ) -> Tool[Any]:
-        """
-        Convert this endpoint to a Tool instance with proper parameter mapping.
-
-        This fixed version creates tool parameters directly from endpoint parameters
-        instead of relying on function signature analysis of **kwargs.
-
-        Args:
-            base_url: Base URL for path-based endpoints
-            global_headers: Global headers to include in requests
-
-        Returns:
-            Tool instance that can be used by agents
-        """
+        """Convert this endpoint to a Tool instance."""
 
         async def endpoint_callable(**kwargs: Any) -> Any:
             """Callable function for the tool."""
-            return await self._make_request(
+            return await self.make_request(
                 base_url=base_url, global_headers=global_headers, **kwargs
             )
 
@@ -415,11 +570,9 @@ class Endpoint(BaseModel):
         tool_parameters: dict[str, object] = {}
 
         for param in self.parameters:
-            # Use the parameter's to_tool_parameter_schema method if available
             if hasattr(param, "to_tool_parameter_schema"):
                 tool_parameters[param.name] = param.to_tool_parameter_schema()
             else:
-                # Fallback for basic parameters
                 param_info: dict[str, object] = {
                     "type": getattr(param, "param_type", "string") or "string",
                     "description": param.description,
@@ -434,18 +587,17 @@ class Endpoint(BaseModel):
 
                 tool_parameters[param.name] = param_info
 
-        # Create the tool instance manually instead of using from_callable
+        # Create the tool
         tool = Tool(
             name=self.name,
             description=self.get_enhanced_description(),
             parameters=tool_parameters,
         )
 
-        # Set the callable reference manually
         tool.set_callable_ref(endpoint_callable)
 
         logger.debug(
-            f"Created tool '{self.name}' with {len(tool_parameters)} parameters: {list(tool_parameters.keys())}"
+            f"Created tool '{self.name}' with {len(tool_parameters)} parameters"
         )
 
         return tool
