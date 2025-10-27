@@ -90,6 +90,12 @@ class AgentRunOutput[T_StructuredOutput](BaseModel):
     In streaming mode, only available in the final chunk.
     """
 
+    generation_text: str = Field(default="")
+    """
+    The text response from the agent.
+    Returns empty string if execution is suspended or generation is None.
+    """
+
     is_suspended: bool = Field(default=False)
     """
     Whether the execution is suspended and waiting for external input.
