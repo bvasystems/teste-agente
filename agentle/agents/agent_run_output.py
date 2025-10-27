@@ -87,7 +87,8 @@ class AgentRunOutput[T_StructuredOutput](BaseModel):
     parsed: T_StructuredOutput
     """
     Structured data extracted from the agent's response.
-    In streaming mode, only available in the final chunk.
+    In streaming mode, contains incrementally parsed partial data in each chunk,
+    with complete data available in the final chunk.
     """
 
     generation_text: str = Field(default="")

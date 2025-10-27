@@ -1733,6 +1733,9 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                             parsed=generation_chunk.parsed
                             if hasattr(generation_chunk, "parsed")
                             else cast(T_Schema, None),
+                            generation_text=generation_chunk.text
+                            if generation_chunk
+                            else "",
                             is_streaming_chunk=True,
                             is_final_chunk=False,
                             performance_metrics=partial_metrics,
@@ -1837,6 +1840,9 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                             generation=final_generation,
                             context=context,
                             parsed=final_generation.parsed,
+                            generation_text=final_generation.text
+                            if final_generation
+                            else "",
                             is_streaming_chunk=False,
                             is_final_chunk=True,
                             performance_metrics=performance_metrics,
@@ -1953,6 +1959,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 generation=generation,
                 context=context,
                 parsed=generation.parsed,
+                generation_text=generation.text if generation else "",
                 performance_metrics=performance_metrics,
             )
 
@@ -2152,6 +2159,9 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                                     parsed=generation_chunk.parsed
                                     if hasattr(generation_chunk, "parsed")
                                     else cast(T_Schema, None),
+                                    generation_text=generation_chunk.text
+                                    if generation_chunk
+                                    else "",
                                     is_streaming_chunk=True,
                                     is_final_chunk=False,
                                     performance_metrics=partial_metrics,
@@ -2698,8 +2708,9 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                                 generation=None,
                                 context=context,
                                 parsed=cast(T_Schema, None),
+                                generation_text="",
                                 is_suspended=True,
-                                suspension_reason=suspension_error.reason,
+                                suspension_reason=suspension_reason,
                                 resumption_token=resumption_token,
                                 performance_metrics=performance_metrics,
                             )
@@ -3065,7 +3076,8 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     step_metrics=step_metrics,
                     average_generation_time_ms=generation_time_total
                     / max(
-                        1, len([s for s in step_metrics if s.step_type == "generation"])
+                        1,
+                        len([s for s in step_metrics if s.step_type == "generation"]),
                     ),
                     average_tool_execution_time_ms=tool_execution_time_total
                     / max(1, tool_calls_count),
@@ -3377,6 +3389,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         generation=None,
                         context=context,
                         parsed=cast(T_Schema, None),
+                        generation_text="",
                         is_suspended=True,
                         suspension_reason=suspension_error.reason,
                         resumption_token=resumption_token,
@@ -3802,7 +3815,9 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     return Context(
                         message_history=[
                             developer_message,
-                            UserMessage(parts=[TextPart(text=f"```json\n{text}\n```")]),
+                            UserMessage(
+                                parts=[TextPart(text=f"```json\n{text}\n```")],
+                            ),
                         ]
                     )
             except (ImportError, AttributeError):
@@ -3986,8 +4001,24 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 generation=None,
                 context=context,
                 parsed=cast(T_Schema, None),
-                is_suspended=False,
-                suspension_reason=denial_message,
+                generation_text="",
+                performance_metrics=PerformanceMetrics(
+                    total_execution_time_ms=0.0,
+                    input_processing_time_ms=0.0,
+                    static_knowledge_processing_time_ms=0.0,
+                    mcp_tools_preparation_time_ms=0.0,
+                    generation_time_ms=0.0,
+                    tool_execution_time_ms=0.0,
+                    final_response_processing_time_ms=0.0,
+                    iteration_count=0,
+                    tool_calls_count=0,
+                    total_tokens_processed=0,
+                    cache_hit_rate=0.0,
+                    average_generation_time_ms=0.0,
+                    average_tool_execution_time_ms=0.0,
+                    longest_step_duration_ms=0.0,
+                    shortest_step_duration_ms=0.0,
+                ),
             )
 
         try:
@@ -4010,7 +4041,24 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     generation=None,
                     context=context,
                     parsed=cast(T_Schema, None),
-                    is_suspended=False,
+                    generation_text="",
+                    performance_metrics=PerformanceMetrics(
+                        total_execution_time_ms=0.0,
+                        input_processing_time_ms=0.0,
+                        static_knowledge_processing_time_ms=0.0,
+                        mcp_tools_preparation_time_ms=0.0,
+                        generation_time_ms=0.0,
+                        tool_execution_time_ms=0.0,
+                        final_response_processing_time_ms=0.0,
+                        iteration_count=0,
+                        tool_calls_count=0,
+                        total_tokens_processed=0,
+                        cache_hit_rate=0.0,
+                        average_generation_time_ms=0.0,
+                        average_tool_execution_time_ms=0.0,
+                        longest_step_duration_ms=0.0,
+                        shortest_step_duration_ms=0.0,
+                    ),
                 )
 
             suspension_type = suspension_state.get("type", "unknown")
@@ -4050,8 +4098,24 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 generation=None,
                 context=context,
                 parsed=cast(T_Schema, None),
-                is_suspended=False,
-                suspension_reason=error_message,
+                generation_text="",
+                performance_metrics=PerformanceMetrics(
+                    total_execution_time_ms=0.0,
+                    input_processing_time_ms=0.0,
+                    static_knowledge_processing_time_ms=0.0,
+                    mcp_tools_preparation_time_ms=0.0,
+                    generation_time_ms=0.0,
+                    tool_execution_time_ms=0.0,
+                    final_response_processing_time_ms=0.0,
+                    iteration_count=0,
+                    tool_calls_count=0,
+                    total_tokens_processed=0,
+                    cache_hit_rate=0.0,
+                    average_generation_time_ms=0.0,
+                    average_tool_execution_time_ms=0.0,
+                    longest_step_duration_ms=0.0,
+                    shortest_step_duration_ms=0.0,
+                ),
             )
 
     async def _resume_from_tool_suspension(
@@ -4063,6 +4127,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         This handles the most common suspension scenario where a tool
         raised ToolSuspensionError and required approval.
         """
+        execution_start_time = time.perf_counter()
         _logger = Maybe(logger if self.debug else None)
 
         # Extract suspension state
@@ -4198,9 +4263,30 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 generation=None,
                 context=context,
                 parsed=cast(T_Schema, None),
+                generation_text="",
                 is_suspended=True,
                 suspension_reason=suspension_error.reason,
                 resumption_token=resumption_token,
+                performance_metrics=PerformanceMetrics(
+                    total_execution_time_ms=(time.perf_counter() - execution_start_time)
+                    * 1000
+                    if execution_start_time
+                    else 24,
+                    input_processing_time_ms=0.0,
+                    static_knowledge_processing_time_ms=0.0,
+                    mcp_tools_preparation_time_ms=0.0,
+                    generation_time_ms=0.0,
+                    tool_execution_time_ms=0.0,
+                    final_response_processing_time_ms=0.0,
+                    iteration_count=0,
+                    tool_calls_count=0,
+                    total_tokens_processed=0,
+                    cache_hit_rate=0.0,
+                    average_generation_time_ms=0.0,
+                    average_tool_execution_time_ms=0.0,
+                    longest_step_duration_ms=0.0,
+                    shortest_step_duration_ms=0.0,
+                ),
             )
         except Exception as e:
             # Tool execution failed
@@ -4232,8 +4318,24 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 generation=None,
                 context=context,
                 parsed=cast(T_Schema, None),
-                is_suspended=False,
-                suspension_reason=error_message,
+                generation_text="",
+                performance_metrics=PerformanceMetrics(
+                    total_execution_time_ms=0.0,
+                    input_processing_time_ms=0.0,
+                    static_knowledge_processing_time_ms=0.0,
+                    mcp_tools_preparation_time_ms=0.0,
+                    generation_time_ms=0.0,
+                    tool_execution_time_ms=0.0,
+                    final_response_processing_time_ms=0.0,
+                    iteration_count=0,
+                    tool_calls_count=0,
+                    total_tokens_processed=0,
+                    cache_hit_rate=0.0,
+                    average_generation_time_ms=0.0,
+                    average_tool_execution_time_ms=0.0,
+                    longest_step_duration_ms=0.0,
+                    shortest_step_duration_ms=0.0,
+                ),
             )
 
         # Complete the step and add to context
@@ -4319,6 +4421,26 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 generation=generation,
                 context=context,
                 parsed=generation.parsed,
+                generation_text=generation.text if generation else "",
+                performance_metrics=PerformanceMetrics(
+                    total_execution_time_ms=0.0,
+                    input_processing_time_ms=0.0,
+                    static_knowledge_processing_time_ms=0.0,
+                    mcp_tools_preparation_time_ms=0.0,
+                    generation_time_ms=0.0,
+                    tool_execution_time_ms=0.0,
+                    final_response_processing_time_ms=0.0,
+                    iteration_count=1,
+                    tool_calls_count=0,
+                    total_tokens_processed=generation.usage.total_tokens
+                    if generation
+                    else 0,
+                    cache_hit_rate=0.0,
+                    average_generation_time_ms=0.0,
+                    average_tool_execution_time_ms=0.0,
+                    longest_step_duration_ms=0.0,
+                    shortest_step_duration_ms=0.0,
+                ),
             )
 
         # Has tools, continue with tool execution loop
@@ -4349,6 +4471,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
         This method continues the standard tool execution loop from where
         the agent left off, handling iterations and tool calls.
         """
+        execution_start_time = time.perf_counter()
         _logger = Maybe(logger if self.debug else None)
         generation_provider = self.generation_provider
 
@@ -4473,6 +4596,26 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     generation=generation,
                     context=context,
                     parsed=generation.parsed,
+                    generation_text=generation.text if generation else "",
+                    performance_metrics=PerformanceMetrics(
+                        total_execution_time_ms=0.0,
+                        input_processing_time_ms=0.0,
+                        static_knowledge_processing_time_ms=0.0,
+                        mcp_tools_preparation_time_ms=0.0,
+                        generation_time_ms=0.0,
+                        tool_execution_time_ms=0.0,
+                        final_response_processing_time_ms=0.0,
+                        iteration_count=1,
+                        tool_calls_count=0,
+                        total_tokens_processed=generation.usage.total_tokens
+                        if generation
+                        else 0,
+                        cache_hit_rate=0.0,
+                        average_generation_time_ms=0.0,
+                        average_tool_execution_time_ms=0.0,
+                        longest_step_duration_ms=0.0,
+                        shortest_step_duration_ms=0.0,
+                    ),
                 )
 
             # Execute tools
@@ -4538,9 +4681,30 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         generation=None,
                         context=context,
                         parsed=cast(T_Schema, None),
+                        generation_text="",
                         is_suspended=True,
                         suspension_reason=suspension_error.reason,
                         resumption_token=resumption_token,
+                        performance_metrics=PerformanceMetrics(
+                            total_execution_time_ms=(
+                                time.perf_counter() - execution_start_time
+                            )
+                            * 1000,
+                            input_processing_time_ms=0.0,
+                            static_knowledge_processing_time_ms=0.0,
+                            mcp_tools_preparation_time_ms=0.0,
+                            generation_time_ms=0.0,
+                            tool_execution_time_ms=0.0,
+                            final_response_processing_time_ms=0.0,
+                            iteration_count=current_iteration,
+                            tool_calls_count=0,
+                            total_tokens_processed=0,
+                            cache_hit_rate=0.0,
+                            average_generation_time_ms=0.0,
+                            average_tool_execution_time_ms=0.0,
+                            longest_step_duration_ms=0.0,
+                            shortest_step_duration_ms=0.0,
+                        ),
                     )
 
             # Complete step and continue
@@ -4625,6 +4789,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
             generation=generation,
             context=context,
             parsed=parsed,
+            generation_text=generation.text if generation else "",
             performance_metrics=performance_metrics,
         )
 
