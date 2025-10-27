@@ -1,5 +1,5 @@
 # Changelog
 
-## v0.9.23
+## v0.9.24
 
-- fix(google_provider): wrongly setting "parsed" attribute on generation
+- fix(agent): populating "parsed" attribute in the "Agent" class.
