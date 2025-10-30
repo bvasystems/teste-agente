@@ -1,14 +1,17 @@
 # Changelog
 
-## v0.9.25
+## v0.9.26
 
-- feat(whatsapp): Add human-like delay calculator for WhatsApp bot
+- refactor(extractor): reorganize imports and add model_config attribute
 
-- Implement HumanDelayCalculator class for realistic message processing delays
-- Add methods to calculate read, typing, and send delays with configurable parameters
-- Support delay simulation with reading speed, typing speed, and jitter
-- Introduce comprehensive logging for delay calculation process
-- Create new module for human-like interaction timing simulation
-- Add initial test files for delay calculator and WhatsApp bot configuration
-- Update .gitignore to include .kiro file
+- Moved the import of run_sync to a more appropriate location
+- Introduced model_config attribute using ConfigDict for better configuration management
+
+refactor(whatsapp): streamline WhatsApp bot structure and introduce v2 components
+
+- Removed unnecessary context_manager field from WhatsAppBot class.
+- Updated AudioMessage class to improve type handling in convert_long_to_str method.
+- Added new v2 module with BotConfig, BatchProcessorManager, and message limit definitions for enhanced configuration and processing capabilities.
+- Introduced new files for in-memory batch processing and payload handling.
+- Established a new WhatsAppBot class in v2 for better organization and functionality.
 
