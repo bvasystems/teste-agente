@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 from pydantic import field_validator
 from rsb.models.base_model import BaseModel
@@ -42,15 +42,17 @@ class AudioMessage(BaseModel):
         mode="before",
     )
     @classmethod
-    def convert_long_to_str(cls, v: Any) -> str | None:
+    def convert_long_to_str(cls, v: float | None) -> str | None:
         """Converte objetos Long do protobuf para string."""
         if v is None:
             return None
+
         if isinstance(v, dict) and "low" in v:
-            low = v.get("low", 0)
-            high = v.get("high", 0)
+            low: int = cast(int, v.get("low", 0))
+            high: int = cast(int, v.get("high", 0))
             value = (high << 32) | low
             return str(value)
+
         return str(v)
 
     @field_validator(

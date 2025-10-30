@@ -141,8 +141,6 @@ class WhatsAppBot(BaseModel):
     file_storage_manager: FileStorageManager | None = Field(default=None)
     config: WhatsAppBotConfig = Field(default_factory=WhatsAppBotConfig)
 
-    # REMOVED: context_manager field - no longer needed
-
     _running: bool = PrivateAttr(default=False)
     _webhook_handlers: MutableSequence[Callable[..., Any]] = PrivateAttr(
         default_factory=list
