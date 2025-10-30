@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.9.26
+## v0.9.27
 
 - refactor(extractor): reorganize imports and add model_config attribute
 
