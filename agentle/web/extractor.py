@@ -1,11 +1,13 @@
-from rsb.coroutines.run_sync import run_sync
 from collections.abc import Sequence
 from textwrap import dedent
 
 from html_to_markdown import convert
 from playwright.async_api import Geolocation, ViewportSize
+from rsb.coroutines.run_sync import run_sync
 from rsb.models import Field
 from rsb.models.base_model import BaseModel
+from rsb.models.config_dict import ConfigDict
+
 from agentle.generations.models.generation.generation import Generation
 from agentle.generations.providers.base.generation_provider import GenerationProvider
 from agentle.prompts.models.prompt import Prompt
@@ -59,6 +61,8 @@ class Extractor(BaseModel):
     reasoning: Reasoning | None = Field(default=None)
     model: str | None = Field(default=None)
     max_output_tokens: int | None = Field(default=None)
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def extract[T: BaseModel](
         self,
