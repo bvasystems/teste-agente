@@ -178,25 +178,87 @@ class Extractor(BaseModel):
 
         html = await page.content()
 
-        # Process HTML based on preferences
-        if _preferences.remove_base_64_images:
-            import re
-
-            html = re.sub(
-                r'<img[^>]+src="data:image/[^"]+"[^>]*>',
-                "",
-                html,
-                flags=re.IGNORECASE,
-            )
-
-        # Filter HTML by tags if specified
-        if _preferences.include_tags or _preferences.exclude_tags:
+        # Process HTML based on preferences - consolidate all BeautifulSoup operations
+        if (
+            _preferences.remove_base_64_images
+            or _preferences.include_tags
+            or _preferences.exclude_tags
+            or _preferences.only_main_content
+        ):
             from bs4 import BeautifulSoup
 
             soup = BeautifulSoup(html, "html.parser")
 
+            # Remove base64 images first
+            if _preferences.remove_base_64_images:
+                import re
+
+                # Debug: Check what we have before processing
+                all_imgs = soup.find_all("img")
+                print(f"DEBUG: Found {len(all_imgs)} img tags total")
+                base64_count = 0
+                for img in all_imgs:
+                    src = img.attrs.get("src") if hasattr(img, "attrs") else None  # type: ignore[union-attr]
+                    if isinstance(src, str) and "data:image/" in src:
+                        base64_count += 1
+                        print(f"DEBUG: Found base64 img: {src[:100]}...")
+                print(f"DEBUG: {base64_count} images have base64 data")
+
+                # First, remove any anchor tags that contain img children with base64
+                # (must be done before removing img tags themselves)
+                removed_anchors = 0
+                for a_tag in soup.find_all("a"):
+                    imgs = a_tag.find_all("img")  # type: ignore[union-attr]
+                    for img in imgs:
+                        src = img.attrs.get("src") if hasattr(img, "attrs") else None  # type: ignore[union-attr]
+                        if isinstance(src, str) and src.startswith("data:image/"):
+                            # Remove the entire anchor tag if it contains base64 image
+                            a_tag.decompose()
+                            removed_anchors += 1
+                            break
+                print(
+                    f"DEBUG: Removed {removed_anchors} anchor tags with base64 images"
+                )
+
+                # Remove standalone img tags with base64 src
+                removed_imgs = 0
+                for img in soup.find_all("img"):
+                    src = img.attrs.get("src") if hasattr(img, "attrs") else None  # type: ignore[union-attr]
+                    if isinstance(src, str) and src.startswith("data:image/"):
+                        img.decompose()
+                        removed_imgs += 1
+                print(f"DEBUG: Removed {removed_imgs} standalone img tags")
+
+                # Remove any element with base64 in href (like anchor tags with image data)
+                for elem in soup.find_all(attrs={"href": True}):
+                    href = elem.attrs.get("href") if hasattr(elem, "attrs") else None  # type: ignore[union-attr]
+                    if isinstance(href, str) and href.startswith("data:image/"):
+                        elem.decompose()
+
+                # Remove any element with base64 in style attribute
+                for elem in soup.find_all(attrs={"style": True}):
+                    style = elem.attrs.get("style") if hasattr(elem, "attrs") else None  # type: ignore[union-attr]
+                    if isinstance(style, str) and "data:image/" in style:
+                        elem.decompose()
+
+                # Remove SVG tags (they often contain base64 or are converted to base64 by markdown)
+                for svg in soup.find_all("svg"):
+                    svg.decompose()
+
+                # Remove any anchor tags that contain SVG children
+                for a_tag in soup.find_all("a"):
+                    if a_tag.find("svg"):  # type: ignore[union-attr]
+                        a_tag.decompose()
+
+                # Final check: see if any base64 remains in the HTML string
+                html_str = str(soup)
+                remaining = len(re.findall(r'data:image/[^"\')\s]+', html_str))
+                print(
+                    f"DEBUG: After processing, {remaining} base64 data URIs remain in HTML"
+                )
+
+            # Extract main content if requested
             if _preferences.only_main_content:
-                # Try to find main content area
                 main_content = (
                     soup.find("main")
                     or soup.find("article")
@@ -204,19 +266,20 @@ class Extractor(BaseModel):
                     or soup.find("div", {"class": "content"})
                 )
                 if main_content:
-                    soup = BeautifulSoup(str(main_content), "html.parser")
+                    soup = main_content  # type: ignore[assignment]
 
+            # Exclude specific tags
             if _preferences.exclude_tags:
                 for tag in _preferences.exclude_tags:
-                    for element in soup.find_all(tag):
+                    for element in soup.find_all(tag):  # type: ignore[union-attr]
                         element.decompose()
 
+            # Include only specific tags
             if _preferences.include_tags:
-                # Keep only specified tags
                 new_soup = BeautifulSoup("", "html.parser")
                 for tag in _preferences.include_tags:
-                    for element in soup.find_all(tag):
-                        new_soup.append(element)
+                    for element in soup.find_all(tag):  # type: ignore[union-attr]
+                        new_soup.append(element)  # type: ignore[arg-type]
                 soup = new_soup
 
             html = str(soup)
@@ -315,7 +378,7 @@ async def test() -> None:
 
     extractor = Extractor(
         llm=Responder.openrouter(),
-        model="openai/gpt-5-nano",
+        model="google/gemini-2.5-flash",
     )
 
     # Example with custom extraction preferences
@@ -330,7 +393,7 @@ async def test() -> None:
     async with async_api.async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
 
-        result = extractor.extract(
+        result = await extractor.extract_async(
             browser=browser,
             urls=[site_uniube],
             output=PossiveisRedirecionamentos,
