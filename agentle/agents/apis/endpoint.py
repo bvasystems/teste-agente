@@ -359,7 +359,7 @@ class Endpoint(BaseModel):
             await self._auth_handler.refresh_if_needed()
             await self._auth_handler.apply_auth(None, url, headers, query_params)  # type: ignore
 
-        # Prepare connector
+        # Prepare connector kwargs (will be used to create fresh connector for each attempt)
         connector_kwargs: dict[str, Any] = {
             "limit": 10,
             "limit_per_host": 5,
@@ -368,8 +368,6 @@ class Endpoint(BaseModel):
 
         if not self.request_config.verify_ssl:
             connector_kwargs["ssl"] = False
-
-        connector = aiohttp.TCPConnector(**connector_kwargs)
 
         # Prepare timeout
         timeout = aiohttp.ClientTimeout(
@@ -381,6 +379,8 @@ class Endpoint(BaseModel):
         # Define the request function for circuit breaker
         async def make_single_request() -> Any:
             """Make a single request attempt."""
+            # Create a fresh connector for each request attempt to avoid "Session is closed" errors on retries
+            connector = aiohttp.TCPConnector(**connector_kwargs)
             async with aiohttp.ClientSession(
                 connector=connector, timeout=timeout
             ) as session:
@@ -569,11 +569,11 @@ class Endpoint(BaseModel):
 
                 if hasattr(param, "enum") and param.enum:
                     param_info["enum"] = list(param.enum)
-                
+
                 # Add constraints for number/primitive types
                 if hasattr(param, "parameter_schema") and param.parameter_schema:
                     from agentle.agents.apis.primitive_schema import PrimitiveSchema
-                    
+
                     schema = param.parameter_schema
                     # Only PrimitiveSchema has minimum, maximum, format
                     if isinstance(schema, PrimitiveSchema):
