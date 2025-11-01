@@ -33,6 +33,7 @@ from agentle.agents.whatsapp.models.whatsapp_document_message import (
 from agentle.agents.whatsapp.models.whatsapp_image_message import WhatsAppImageMessage
 from agentle.agents.whatsapp.models.whatsapp_media_message import WhatsAppMediaMessage
 from agentle.agents.whatsapp.models.whatsapp_message import WhatsAppMessage
+from agentle.agents.whatsapp.models.whatsapp_response_base import WhatsAppResponseBase
 from agentle.agents.whatsapp.models.whatsapp_session import WhatsAppSession
 from agentle.agents.whatsapp.models.whatsapp_text_message import WhatsAppTextMessage
 from agentle.agents.whatsapp.models.whatsapp_video_message import WhatsAppVideoMessage
@@ -128,14 +129,42 @@ class CallbackWithContext:
     context: dict[str, Any] = field(default_factory=dict)
 
 
-class WhatsAppBot(BaseModel):
+class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseModel):
     """
     WhatsApp bot that wraps an Agentle agent with enhanced message batching and spam protection.
 
-    Now uses the Agent's conversation store directly instead of managing contexts separately.
+    Now supports structured outputs through generic type parameter T_Schema.
+    The schema must extend WhatsAppResponseBase to ensure a 'response' field is always present.
+
+    Examples:
+    ```python
+        # Basic usage (no structured output)
+        agent = Agent(...)
+        bot = WhatsAppBot(agent=agent, provider=provider)
+
+        # With structured output
+        class MyResponse(WhatsAppResponseBase):
+            sentiment: Literal["happy", "sad", "neutral"]
+            urgency_level: int
+
+        agent = Agent[MyResponse](
+            response_schema=MyResponse,
+            instructions="Extract sentiment and urgency from the conversation..."
+        )
+        bot = WhatsAppBot[MyResponse](agent=agent, provider=provider)
+
+        # Access structured data in callbacks
+        async def my_callback(phone, chat_id, response, context):
+            if response and response.parsed:
+                print(f"Sentiment: {response.parsed.sentiment}")
+                print(f"Urgency: {response.parsed.urgency_level}")
+                # response.parsed.response is automatically sent to WhatsApp
+
+        bot.add_response_callback(my_callback)
+    ```
     """
 
-    agent: Agent[Any]
+    agent: Agent[T_Schema]
     provider: WhatsAppProvider
     tts_provider: TtsProvider | None = Field(default=None)
     file_storage_manager: FileStorageManager | None = Field(default=None)
@@ -1302,7 +1331,7 @@ class WhatsAppBot(BaseModel):
 
     async def _process_message_batch(
         self, phone_number: PhoneNumber, session: WhatsAppSession, processing_token: str
-    ) -> GeneratedAssistantMessage[Any] | None:
+    ) -> GeneratedAssistantMessage[T_Schema] | None:
         """Process a batch of messages for a user with enhanced timeout protection.
 
         This method processes multiple messages that were received in quick succession
@@ -1504,7 +1533,7 @@ class WhatsAppBot(BaseModel):
         message: WhatsAppMessage,
         session: WhatsAppSession,
         chat_id: ChatId | None = None,
-    ) -> GeneratedAssistantMessage[Any]:
+    ) -> GeneratedAssistantMessage[T_Schema]:
         """Process a single message immediately with quote message support."""
         logger.info(
             "[SINGLE_MESSAGE] ═══════════ SINGLE MESSAGE PROCESSING START ═══════════"
@@ -2207,7 +2236,7 @@ class WhatsAppBot(BaseModel):
     async def _send_response(
         self,
         to: PhoneNumber,
-        response: GeneratedAssistantMessage[Any] | str,
+        response: GeneratedAssistantMessage[T_Schema] | str,
         reply_to: str | None = None,
     ) -> None:
         """Send response message(s) to user with enhanced error handling and retry logic.
@@ -2255,12 +2284,24 @@ class WhatsAppBot(BaseModel):
             ...     reply_to="msg_123"
             ... )
         """
-        # Extract text from GeneratedAssistantMessage if needed
-        response_text = (
-            response.text
-            if isinstance(response, GeneratedAssistantMessage)
-            else response
-        )
+        response_text = ""
+        
+        if isinstance(response, GeneratedAssistantMessage):
+            # Check if we have structured output (parsed)
+            if response.parsed:
+                # Use the 'response' field from structured output
+                response_text = response.parsed.response
+                logger.debug(
+                    "[SEND_RESPONSE] Using structured output 'response' field "
+                    + f"(schema: {type(response.parsed).__name__})"
+                )
+            else:
+                # Fallback to text field
+                response_text = response.text
+                logger.debug("[SEND_RESPONSE] Using standard text response")
+        else:
+            # Direct string
+            response_text = response
 
         # Apply WhatsApp-specific markdown formatting
         response_text = self._format_whatsapp_markdown(response_text)
