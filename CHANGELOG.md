@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.27
+feat(whatsapp): Add structured response base model for WhatsApp bot
+
+- Create WhatsAppResponseBase model to standardize bot response structure
+- Enhance WhatsAppBot to support generic structured output schemas
+- Update _send_response method to handle structured response parsing
+- Add type hints and documentation for new response handling mechanism
+- Improve logging for structured response processing
+- Enable more flexible and type-safe bot response generation
+This change introduces a base model for WhatsApp bot responses that ensures a consistent response structure while allowing for extensible, type-safe output schemas.
+
 
 ## v0.9.26
 feat(api): Enhance API endpoint and function name generation
