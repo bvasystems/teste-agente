@@ -592,9 +592,11 @@ class Endpoint(BaseModel):
 
                 tool_parameters[param.name] = param_info
 
+        tool_name = "_".join(self.name.lower().split())
+
         # Create the tool
         tool = Tool(
-            name=self.name,
+            name=tool_name,
             description=self.get_enhanced_description(),
             parameters=tool_parameters,
         )
