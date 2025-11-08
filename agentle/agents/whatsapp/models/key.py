@@ -1,4 +1,4 @@
-from rsb.models.base_model import BaseModel
+from rsb.models import BaseModel, Field
 
 
 class Key(BaseModel):
@@ -11,6 +11,6 @@ class Key(BaseModel):
     """
 
     remoteJid: str
-    remoteJidAlt: str
+    remoteJidAlt: str = Field(default="")
     fromMe: bool
     id: str
