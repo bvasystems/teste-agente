@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING, Any, override
 from agentle.agents.conversations.conversation_store import ConversationStore
 from agentle.generations.models.messages.assistant_message import AssistantMessage
 from agentle.generations.models.messages.developer_message import DeveloperMessage
+from agentle.generations.models.messages.generated_assistant_message import (
+    GeneratedAssistantMessage,
+)
 from agentle.generations.models.messages.user_message import UserMessage
 
 if TYPE_CHECKING:
@@ -84,7 +87,11 @@ class PostgresConversationStore(ConversationStore):
             """)
 
     def _message_to_dict(
-        self, message: DeveloperMessage | UserMessage | AssistantMessage
+        self,
+        message: DeveloperMessage
+        | UserMessage
+        | AssistantMessage
+        | GeneratedAssistantMessage[Any],
     ) -> dict[str, Any]:
         """Convert a message object to a dictionary for JSON serialization."""
         message_dict = message.model_dump()
@@ -119,8 +126,13 @@ class PostgresConversationStore(ConversationStore):
             return UserMessage.model_validate(message_dict)
 
     @override
-    async def add_message_async(
-        self, chat_id: str, message: DeveloperMessage | UserMessage | AssistantMessage
+    async def add_message_async[T = Any](
+        self,
+        chat_id: str,
+        message: DeveloperMessage
+        | UserMessage
+        | AssistantMessage
+        | GeneratedAssistantMessage[T],
     ) -> None:
         """Add a message to the conversation."""
         async with self._pool.acquire() as conn:

@@ -1,14 +1,19 @@
 from collections.abc import MutableMapping, MutableSequence, Sequence
-from typing import override
+from typing import Any, override
+
 from agentle.agents.conversations.conversation_store import ConversationStore
 from agentle.generations.models.messages.assistant_message import AssistantMessage
 from agentle.generations.models.messages.developer_message import DeveloperMessage
+from agentle.generations.models.messages.generated_assistant_message import (
+    GeneratedAssistantMessage,
+)
 from agentle.generations.models.messages.user_message import UserMessage
 
 
 class LocalConversationStore(ConversationStore):
     __messages: MutableMapping[
-        str, MutableSequence[DeveloperMessage | UserMessage | AssistantMessage]
+        str,
+        MutableSequence[DeveloperMessage | UserMessage | AssistantMessage],
     ]
 
     def __init__(
@@ -20,8 +25,13 @@ class LocalConversationStore(ConversationStore):
         self.__messages = {}
 
     @override
-    async def add_message_async(
-        self, chat_id: str, message: DeveloperMessage | UserMessage | AssistantMessage
+    async def add_message_async[T = Any](
+        self,
+        chat_id: str,
+        message: DeveloperMessage
+        | UserMessage
+        | AssistantMessage
+        | GeneratedAssistantMessage[T],
     ) -> None:
         if chat_id not in self.__messages:
             self.__messages[chat_id] = []
@@ -40,6 +50,9 @@ class LocalConversationStore(ConversationStore):
                 else:
                     # Don't add message if limit reached and not overriding
                     return
+
+        if isinstance(message, GeneratedAssistantMessage):
+            message = message.to_assistant_message()
 
         self.__messages[chat_id].append(message)
 

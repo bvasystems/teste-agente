@@ -46,11 +46,14 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
-from typing import override
+from typing import Any, override
 
 from agentle.agents.conversations.conversation_store import ConversationStore
 from agentle.generations.models.messages.assistant_message import AssistantMessage
 from agentle.generations.models.messages.developer_message import DeveloperMessage
+from agentle.generations.models.messages.generated_assistant_message import (
+    GeneratedAssistantMessage,
+)
 from agentle.generations.models.messages.user_message import UserMessage
 
 
@@ -78,10 +81,23 @@ class CallbackConversationStore(ConversationStore):
         self,
         get_callback: Callable[
             [str],
-            Awaitable[Sequence[DeveloperMessage | UserMessage | AssistantMessage]],
+            Awaitable[
+                Sequence[
+                    DeveloperMessage
+                    | UserMessage
+                    | AssistantMessage
+                ]
+            ],
         ],
         add_callback: Callable[
-            [str, DeveloperMessage | UserMessage | AssistantMessage], Awaitable[None]
+            [
+                str,
+                DeveloperMessage
+                | UserMessage
+                | AssistantMessage
+                | GeneratedAssistantMessage[Any],
+            ],
+            Awaitable[None],
         ],
         clear_callback: Callable[[str], Awaitable[None]],
         message_limit: int | None = None,
@@ -146,8 +162,13 @@ class CallbackConversationStore(ConversationStore):
         return await self._get_callback(chat_id)
 
     @override
-    async def add_message_async(
-        self, chat_id: str, message: DeveloperMessage | UserMessage | AssistantMessage
+    async def add_message_async[T = Any](
+        self,
+        chat_id: str,
+        message: DeveloperMessage
+        | UserMessage
+        | AssistantMessage
+        | GeneratedAssistantMessage[T],
     ) -> None:
         """
         Add a message to the conversation using the user-provided add callback.

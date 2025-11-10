@@ -7,6 +7,9 @@ from typing import Any, override
 from agentle.agents.conversations.conversation_store import ConversationStore
 from agentle.generations.models.messages.assistant_message import AssistantMessage
 from agentle.generations.models.messages.developer_message import DeveloperMessage
+from agentle.generations.models.messages.generated_assistant_message import (
+    GeneratedAssistantMessage,
+)
 from agentle.generations.models.messages.user_message import UserMessage
 
 
@@ -87,8 +90,12 @@ class JSONFileConversationStore(ConversationStore):
         # For other non-serializable objects, convert to string
         return str(obj)
 
-    def _message_to_dict(
-        self, message: DeveloperMessage | UserMessage | AssistantMessage
+    def _message_to_dict[T](
+        self,
+        message: DeveloperMessage
+        | UserMessage
+        | AssistantMessage
+        | GeneratedAssistantMessage[T],
     ) -> dict[str, Any]:
         """Convert a message object to a dictionary for JSON serialization."""
         # Get the basic message dictionary
@@ -177,8 +184,13 @@ class JSONFileConversationStore(ConversationStore):
             return UserMessage.model_validate(message_data)
 
     @override
-    async def add_message_async(
-        self, chat_id: str, message: DeveloperMessage | UserMessage | AssistantMessage
+    async def add_message_async[T = Any](
+        self,
+        chat_id: str,
+        message: DeveloperMessage
+        | UserMessage
+        | AssistantMessage
+        | GeneratedAssistantMessage[T],
     ) -> None:
         """Add a message to the conversation."""
         messages_data = self._load_messages(chat_id)
