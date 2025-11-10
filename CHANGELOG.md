@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.9.30
+refactor(conversations): Update conversation store message type handling
+
+- Add support for GeneratedAssistantMessage in conversation store implementations
+- Update type hints to include generic type parameter for GeneratedAssistantMessage
+- Modify add_message_async method signatures across conversation store classes
+- Ensure consistent message type handling across different conversation store implementations
+- Improve type flexibility for message storage and retrieval
+
 ## v0.9.29
 refactor(whatsapp): Update Data and Key model field definitions
 
