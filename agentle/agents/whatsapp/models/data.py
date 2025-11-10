@@ -23,7 +23,7 @@ class Data(BaseModel):
 
     key: Key
     pushName: str
-    status: str
+    status: str | None = Field(default=None)
     message: Message | None = Field(default=None)
     messageType: str | None = Field(default=None)
     messageTimestamp: int | None = Field(default=None)

@@ -11,6 +11,6 @@ class Key(BaseModel):
     """
 
     remoteJid: str
-    remoteJidAlt: str = Field(default="")
+    remoteJidAlt: str | None = Field(default=None)
     fromMe: bool
-    id: str
+    id: str | None = Field(default=None)
