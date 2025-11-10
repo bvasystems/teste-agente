@@ -14,7 +14,7 @@ def number_param(
     format: str | None = None,
 ) -> EndpointParameter:
     """Create a number (float/decimal) parameter.
-    
+
     Args:
         name: Parameter name
         description: Parameter description
@@ -24,14 +24,14 @@ def number_param(
         default: Default value for the parameter
         location: Where the parameter should be placed in the request
         format: Format hint (e.g., 'float', 'double', 'decimal')
-        
+
     Returns:
         EndpointParameter configured for number values
-        
+
     Example:
         ```python
         from agentle.agents.apis.params.number_param import number_param
-        
+
         number_param(
             name="price",
             description="Product price",

@@ -32,7 +32,12 @@ class FirebaseConversationStore(ConversationStore):
 
     @override
     async def add_message_async[T = Any](
-        self, chat_id: str, message: DeveloperMessage | UserMessage | AssistantMessage | GeneratedAssistantMessage[T]
+        self,
+        chat_id: str,
+        message: DeveloperMessage
+        | UserMessage
+        | AssistantMessage
+        | GeneratedAssistantMessage[T],
     ) -> None:
         from google.cloud import firestore
 

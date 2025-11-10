@@ -2285,7 +2285,7 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
             ... )
         """
         response_text = ""
-        
+
         if isinstance(response, GeneratedAssistantMessage):
             # Check if we have structured output (parsed)
             if response.parsed:

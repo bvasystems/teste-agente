@@ -46,20 +46,20 @@ class ObjectSchema(BaseModel):
     ) -> ObjectSchema | ArraySchema | PrimitiveSchema:
         """
         Recursively convert a JSON Schema definition to Agentle schema types.
-        
+
         This method handles deeply nested objects, arrays, and primitives,
         making it easy to convert complex JSON Schema definitions.
-        
+
         Args:
             schema: JSON Schema definition (dict with 'type', 'properties', etc.)
-            
+
         Returns:
             Appropriate schema type (ObjectSchema, ArraySchema, or PrimitiveSchema)
-            
+
         Example:
             ```python
             from agentle.agents.apis.object_schema import ObjectSchema
-            
+
             json_schema = {
                 "type": "object",
                 "properties": {
@@ -79,7 +79,7 @@ class ObjectSchema(BaseModel):
                     }
                 }
             }
-            
+
             schema = ObjectSchema.from_json_schema(json_schema)
             ```
         """

@@ -81,13 +81,7 @@ class CallbackConversationStore(ConversationStore):
         self,
         get_callback: Callable[
             [str],
-            Awaitable[
-                Sequence[
-                    DeveloperMessage
-                    | UserMessage
-                    | AssistantMessage
-                ]
-            ],
+            Awaitable[Sequence[DeveloperMessage | UserMessage | AssistantMessage]],
         ],
         add_callback: Callable[
             [

@@ -4,7 +4,9 @@ from typing import Any
 
 from agentle.generations.models.messages.assistant_message import AssistantMessage
 from agentle.generations.models.messages.developer_message import DeveloperMessage
-from agentle.generations.models.messages.generated_assistant_message import GeneratedAssistantMessage
+from agentle.generations.models.messages.generated_assistant_message import (
+    GeneratedAssistantMessage,
+)
 from agentle.generations.models.messages.user_message import UserMessage
 
 
@@ -45,7 +47,12 @@ class ConversationStore(abc.ABC):
 
     @abc.abstractmethod
     async def add_message_async[T = Any](
-        self, chat_id: str, message: DeveloperMessage | UserMessage | AssistantMessage | GeneratedAssistantMessage[T]
+        self,
+        chat_id: str,
+        message: DeveloperMessage
+        | UserMessage
+        | AssistantMessage
+        | GeneratedAssistantMessage[T],
     ) -> None: ...
 
     @abc.abstractmethod

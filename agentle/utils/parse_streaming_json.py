@@ -101,12 +101,12 @@ def parse_streaming_json[T: BaseModel](potential_json: str | None, model: type[T
         in_string = False
         escape_next = False
         last_quote_pos = -1
-        
+
         for i, char in enumerate(json_str):
             if escape_next:
                 escape_next = False
                 continue
-            if char == '\\':
+            if char == "\\":
                 escape_next = True
                 continue
             if char == '"':
@@ -141,7 +141,7 @@ def parse_streaming_json[T: BaseModel](potential_json: str | None, model: type[T
         # Pattern: "key": "value..." - capture everything until the next unescaped quote or EOF
         string_pattern = r'["\']([\w]+)["\']:\s*["\']([^"\']*?)(?:["\']|$)'
         string_matches = re.findall(string_pattern, json_str, re.DOTALL)
-        
+
         # Also try to capture very long strings that span multiple lines
         # This catches incomplete strings during streaming
         long_string_pattern = r'["\']([\w_]+)["\']:\s*["\'](.+?)(?:["\'],?\s*["}]|$)'
@@ -149,12 +149,14 @@ def parse_streaming_json[T: BaseModel](potential_json: str | None, model: type[T
 
         for key, value in string_matches:
             data[key] = value
-        
+
         # Prefer long_matches for fields that might be truncated in string_matches
         for key, value in long_matches:
             # Only override if the long match has more content
             existing = data.get(key, "")
-            if key not in data or (isinstance(existing, str) and len(value) > len(existing)):
+            if key not in data or (
+                isinstance(existing, str) and len(value) > len(existing)
+            ):
                 data[key] = value
 
         # Extract string key-value pairs with unquoted keys
