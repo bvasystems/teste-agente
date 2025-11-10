@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.9.29
+refactor(whatsapp): Update Data and Key model field definitions
+
+- Modify `status` field in Data model to be optional (str | None)
+- Update `remoteJidAlt` in Key model to be optional (str | None)
+- Add default None to `id` field in Key model
+- Improve model flexibility by allowing None for certain fields
+
 ## v0.9.28
 making field optional in whatsappwebhookpayload
 
