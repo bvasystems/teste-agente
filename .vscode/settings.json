@@ -57,5 +57,5 @@
         }
     ],
     "python.linting.enabled": true,
-    "kiroAgent.configureMCP": "Disabled"
+    "kiroAgent.configureMCP": "Enabled"
 }
