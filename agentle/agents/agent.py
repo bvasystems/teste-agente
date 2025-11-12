@@ -1832,7 +1832,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                                 chat_id, current_user_message
                             )
                             await self.conversation_store.add_message_async(
-                                chat_id, final_generation.message.to_assistant_message()
+                                chat_id, final_generation.message
                             )
 
                         # Yield final chunk
@@ -1952,7 +1952,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                     chat_id, current_user_message
                 )
                 await self.conversation_store.add_message_async(
-                    chat_id, generation.message.to_assistant_message()
+                    chat_id, generation.message
                 )
 
             return AgentRunOutput(
@@ -2283,7 +2283,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                                     )
                                     await self.conversation_store.add_message_async(
                                         chat_id,
-                                        final_generation.message.to_assistant_message(),
+                                        final_generation.message,
                                     )
 
                                 # Yield final result
@@ -2389,7 +2389,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                             )
                             await self.conversation_store.add_message_async(
                                 chat_id,
-                                final_tool_generation.message.to_assistant_message(),
+                                final_tool_generation.message,
                             )
 
                         # Yield final result
@@ -3014,7 +3014,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                             chat_id, current_user_message
                         )
                         await self.conversation_store.add_message_async(
-                            chat_id, generation.message.to_assistant_message()
+                            chat_id, generation.message
                         )
 
                     return self._build_agent_run_output(
@@ -3097,7 +3097,7 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         chat_id, current_user_message
                     )
                     await self.conversation_store.add_message_async(
-                        chat_id, tool_call_generation.message.to_assistant_message()
+                        chat_id, tool_call_generation.message
                     )
 
                 return self._build_agent_run_output(
