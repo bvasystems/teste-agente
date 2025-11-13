@@ -2679,11 +2679,25 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
             return "mp3"  # default
 
     def _split_message_by_line_breaks(self, text: str) -> Sequence[str]:
-        """Split message by line breaks first, then by length if needed with enhanced validation."""
+        """Split message by line breaks first, then by length if needed with enhanced validation.
+
+        CRITICAL: This method must preserve line breaks within messages for proper WhatsApp formatting.
+        """
         if not text or not text.strip():
             return ["[Mensagem vazia]"]  # Portuguese: "Empty message"
 
         try:
+            # Check if entire text fits in one message - if so, return it as-is
+            if len(text) <= self.config.max_message_length:
+                logger.debug(
+                    f"[SPLIT_MESSAGE] Message fits in single message ({len(text)} chars), returning as-is"
+                )
+                return [text]
+
+            logger.info(
+                f"[SPLIT_MESSAGE] Message too long ({len(text)} chars), splitting into multiple messages"
+            )
+
             # First split by double line breaks (paragraphs)
             paragraphs = text.split("\n\n")
             messages: MutableSequence[str] = []
@@ -2692,38 +2706,54 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
                 if not paragraph.strip():
                     continue
 
+                # If paragraph fits, keep it intact with all line breaks
+                if len(paragraph) <= self.config.max_message_length:
+                    messages.append(paragraph)
+                    continue
+
+                # Paragraph is too long - need to split it
                 # Check if paragraph is a list (has list markers)
                 lines = paragraph.split("\n")
                 is_list_paragraph = self._is_list_content(lines)
 
                 if is_list_paragraph:
-                    # Group list items together instead of splitting each line
-                    # IMPORTANT: Keep line breaks intact for list formatting
+                    # Group list items together, preserving line breaks
                     grouped_list = self._group_list_items(lines)
                     messages.extend(grouped_list)
                 else:
-                    # For non-list paragraphs, keep the whole paragraph together if possible
-                    paragraph_text = paragraph.strip()
-                    if not paragraph_text:
-                        continue
+                    # For non-list paragraphs, try to keep lines together
+                    current_chunk = ""
+                    for line in lines:
+                        if not line.strip():
+                            # Preserve empty lines for spacing
+                            if current_chunk:
+                                current_chunk += "\n"
+                            continue
 
-                    # Check if paragraph fits within message length limits
-                    if len(paragraph_text) <= self.config.max_message_length:
-                        messages.append(paragraph_text)
-                    else:
-                        # Split by individual lines only if paragraph is too long
-                        for line in lines:
-                            line = line.strip()
-                            if not line:
-                                continue
+                        # Try adding this line to current chunk
+                        test_chunk = (
+                            current_chunk + ("\n" if current_chunk else "") + line
+                        )
 
-                            # Check if this line fits within message length limits
-                            if len(line) <= self.config.max_message_length:
-                                messages.append(line)
-                            else:
-                                # Split long lines by length
+                        if len(test_chunk) <= self.config.max_message_length:
+                            current_chunk = test_chunk
+                        else:
+                            # Current chunk is full, save it
+                            if current_chunk:
+                                messages.append(current_chunk)
+
+                            # Check if single line is too long
+                            if len(line) > self.config.max_message_length:
+                                # Split long line by length
                                 split_lines = self._split_long_line(line)
                                 messages.extend(split_lines)
+                                current_chunk = ""
+                            else:
+                                current_chunk = line
+
+                    # Add remaining chunk
+                    if current_chunk:
+                        messages.append(current_chunk)
 
             # Filter out empty messages and validate
             final_messages = []
