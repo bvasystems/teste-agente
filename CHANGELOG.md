@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.36
+feat(openrouter): Enhance message adapter for tool execution and multimodal support
+
+- Add support for converting tool execution results to OpenRouter messages
+- Improve handling of messages with mixed content types (text, tool suggestions, tool results)
+- Implement serialization methods for tool arguments and results
+- Refactor message conversion logic to handle complex message scenarios
+- Ensure proper separation and conversion of text, tool calls, and tool results
+- Add support for preserving reasoning in assistant messages
+
 ## v0.9.35
 refactor(whatsapp): Improve message splitting with enhanced line break preservation
 
