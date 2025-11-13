@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.33
+refactor(whatsapp): Improve message splitting and list handling for WhatsApp messages
+
+- Enhance markdown formatting preservation in message processing
+- Improve list detection and grouping logic to maintain formatting
+- Modify message splitting to better handle paragraphs and lists
+- Add more robust handling of line breaks and indentation
+- Reduce list detection threshold to capture more complex list formats
+- Prevent message fragmentation for list-based content
+- Add null check for remote JID to prevent potential errors
+
 ## v0.9.32
 
 - refactor(agents): Simplify message storage in conversation store
