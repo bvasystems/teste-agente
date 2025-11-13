@@ -71,6 +71,7 @@ from agentle.generations.providers.openrouter._types import (
     OpenRouterFileParserPlugin,
     OpenRouterModelsResponse,
     OpenRouterModel,
+    OpenRouterMessage,
 )
 from agentle.generations.providers.openrouter.error_handler import (
     parse_and_raise_openrouter_error,
@@ -1247,10 +1248,14 @@ class OpenRouterGenerationProvider(GenerationProvider):
                     ),
                 )
 
-        # Convert messages
-        openrouter_messages = [
-            self.message_adapter.adapt(message) for message in messages_list
-        ]
+        # Convert messages - adapter may return single message or list of messages
+        openrouter_messages: list[OpenRouterMessage] = []
+        for message in messages_list:
+            adapted = self.message_adapter.adapt(message)
+            if isinstance(adapted, list):
+                openrouter_messages.extend(adapted)
+            else:
+                openrouter_messages.append(adapted)
 
         # Convert tools if provided
         openrouter_tools = (
@@ -1404,10 +1409,14 @@ class OpenRouterGenerationProvider(GenerationProvider):
         """
         _generation_config = self._normalize_generation_config(generation_config)
 
-        # Convert messages
-        openrouter_messages = [
-            self.message_adapter.adapt(message) for message in messages
-        ]
+        # Convert messages - adapter may return single message or list of messages
+        openrouter_messages: list[OpenRouterMessage] = []
+        for message in messages:
+            adapted = self.message_adapter.adapt(message)
+            if isinstance(adapted, list):
+                openrouter_messages.extend(adapted)
+            else:
+                openrouter_messages.append(adapted)
 
         # Convert tools if provided
         openrouter_tools = (
