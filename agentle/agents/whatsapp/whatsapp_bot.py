@@ -2041,7 +2041,7 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
         This method converts:
         - Headers (# ## ###) to bold text with separators
         - Tables to formatted text
-        - Markdown lists to plain text lists
+        - Markdown lists to plain text lists (preserving line breaks)
         - Links to "text (url)" format
         - Images to descriptive text
         - Blockquotes to indented text
@@ -2111,7 +2111,7 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
                 i += 1
                 continue
 
-            # Process regular line
+            # Process regular line (preserve empty lines for spacing)
             processed_lines.append(line)
             i += 1
 
@@ -2119,7 +2119,7 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
         if table_lines:
             processed_lines.extend(self._format_table(table_lines))
 
-        # Rejoin lines
+        # Rejoin lines - CRITICAL: preserve all line breaks
         text = "\n".join(processed_lines)
 
         # Handle inline markdown elements
@@ -2698,22 +2698,32 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
 
                 if is_list_paragraph:
                     # Group list items together instead of splitting each line
+                    # IMPORTANT: Keep line breaks intact for list formatting
                     grouped_list = self._group_list_items(lines)
                     messages.extend(grouped_list)
                 else:
-                    # For non-list paragraphs, split by lines as before
-                    for line in lines:
-                        line = line.strip()
-                        if not line:
-                            continue
+                    # For non-list paragraphs, keep the whole paragraph together if possible
+                    paragraph_text = paragraph.strip()
+                    if not paragraph_text:
+                        continue
 
-                        # Check if this line fits within message length limits
-                        if len(line) <= self.config.max_message_length:
-                            messages.append(line)
-                        else:
-                            # Split long lines by length
-                            split_lines = self._split_long_line(line)
-                            messages.extend(split_lines)
+                    # Check if paragraph fits within message length limits
+                    if len(paragraph_text) <= self.config.max_message_length:
+                        messages.append(paragraph_text)
+                    else:
+                        # Split by individual lines only if paragraph is too long
+                        for line in lines:
+                            line = line.strip()
+                            if not line:
+                                continue
+
+                            # Check if this line fits within message length limits
+                            if len(line) <= self.config.max_message_length:
+                                messages.append(line)
+                            else:
+                                # Split long lines by length
+                                split_lines = self._split_long_line(line)
+                                messages.extend(split_lines)
 
             # Filter out empty messages and validate
             final_messages = []
@@ -2826,7 +2836,13 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
         return chunks
 
     def _is_list_content(self, lines: Sequence[str]) -> bool:
-        """Check if lines contain list markers (numbered or bullet points)."""
+        """Check if lines contain list markers (numbered or bullet points).
+
+        Detects various list formats including:
+        - Numbered lists: "1.", "2)", "1 -"
+        - Bullet points: "•", "*", "-", "→"
+        - Indented sub-items
+        """
         if not lines:
             return False
 
@@ -2844,13 +2860,20 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
             # Check for bullet points: "•", "*", "-", "→", etc.
             elif re.match(r"^[•\*\-→▪►]\s", stripped):
                 list_markers += 1
+            # Check for indented items (common in nested lists)
+            elif re.match(r"^\s+[•\*\-→▪►]\s", line):
+                list_markers += 1
 
-        # If more than 50% of non-empty lines are list items, consider it a list
+        # If more than 30% of non-empty lines are list items, consider it a list
+        # Lowered threshold to catch lists with headers/descriptions
         non_empty_lines = sum(1 for line in lines if line.strip())
-        return non_empty_lines > 0 and (list_markers / non_empty_lines) >= 0.5
+        return non_empty_lines > 0 and (list_markers / non_empty_lines) >= 0.3
 
     def _group_list_items(self, lines: Sequence[str]) -> Sequence[str]:
-        """Group list items together to avoid splitting each item into a separate message."""
+        """Group list items together to avoid splitting each item into a separate message.
+
+        CRITICAL: Preserves line breaks between list items for proper WhatsApp formatting.
+        """
         if not lines:
             return []
 
@@ -2859,8 +2882,15 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
         current_length = 0
 
         for line in lines:
-            line = line.strip()
+            # Don't strip the line completely - preserve leading spaces for indentation
+            # But remove trailing whitespace
+            line = line.rstrip()
+
+            # Skip completely empty lines but preserve them in the group for spacing
             if not line:
+                # Add empty line to group for spacing between items
+                if current_group:
+                    current_group.append("")
                 continue
 
             # Calculate potential length if we add this line
@@ -2870,6 +2900,7 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
 
             # If adding this line would exceed the limit, save current group and start new one
             if potential_length > self.config.max_message_length and current_group:
+                # Join with newlines to preserve line breaks
                 messages.append("\n".join(current_group))
                 current_group = [line]
                 current_length = len(line)
@@ -2879,6 +2910,7 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
 
         # Add remaining group
         if current_group:
+            # Join with newlines to preserve line breaks
             messages.append("\n".join(current_group))
 
         return messages
@@ -3369,7 +3401,7 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
 
             message = self._parse_evolution_message_from_data(
                 data,
-                from_number=payload.data.key.remoteJidAlt
+                from_number=payload.data.key.remoteJidAlt or ""
                 if "@lid" in payload.data.key.remoteJid
                 else payload.data.key.remoteJid,
             )
