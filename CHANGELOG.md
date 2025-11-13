@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.35
+refactor(whatsapp): Improve message splitting with enhanced line break preservation
+
+- Completely refactored `_split_message_by_line_breaks` method
+- Added more robust handling of paragraph and line breaks
+- Preserved line breaks and formatting for lists and paragraphs
+- Implemented smarter chunking of messages to maintain readability
+- Added checks to keep entire messages intact when possible
+- Improved handling of long lines and paragraphs
+- Enhanced message splitting logic to maintain original text structure
+
 ## v0.9.34
 fix(whatsapp): Preserve line breaks when splitting long messages
 
