@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.9.34
+fix(whatsapp): Preserve line breaks when splitting long messages
+
+- Modify message splitting logic to retain original line breaks
+- Remove `.strip()` calls to prevent unintended whitespace removal
+- Ensure long messages maintain their original formatting and structure
+- Prevents potential loss of formatting in multi-line WhatsApp messages
+
 ## v0.9.33
 refactor(whatsapp): Improve message splitting and list handling for WhatsApp messages
 

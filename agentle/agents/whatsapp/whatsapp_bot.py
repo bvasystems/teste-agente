@@ -2735,9 +2735,11 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
                         for i in range(0, len(msg), 65536):
                             chunk = msg[i : i + 65536]
                             if chunk.strip():
-                                final_messages.append(chunk.strip())
+                                # Don't strip - preserve line breaks
+                                final_messages.append(chunk)
                     else:
-                        final_messages.append(msg.strip())
+                        # Don't strip - preserve line breaks within the message
+                        final_messages.append(msg)
 
             # If no valid messages were created, return a placeholder
             if not final_messages:
