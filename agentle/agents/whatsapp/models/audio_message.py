@@ -21,9 +21,10 @@ class AudioMessage(BaseModel):
         mediaKeyTimestamp: Timestamp da chave de mídia
         streamingSidecar: Dados para streaming do áudio (opcional)
         waveform: Forma de onda do áudio em base64 (opcional)
+        base64_data: Dados do áudio em base64 (quando não há URL disponível)
     """
 
-    url: str
+    url: str | None = Field(default=None)
     mimetype: str | None = Field(default=None)
     fileSha256: str | dict[str, Any] | None = Field(default=None)
     fileLength: str | dict[str, Any] | None = Field(default=None)
@@ -35,6 +36,7 @@ class AudioMessage(BaseModel):
     mediaKeyTimestamp: str | dict[str, Any] | None = Field(default=None)
     streamingSidecar: str | dict[str, Any] | None = Field(default=None)
     waveform: str | dict[str, Any] | None = Field(default=None)
+    base64_data: str | None = Field(default=None)
 
     @field_validator(
         "fileLength",
@@ -68,6 +70,8 @@ class AudioMessage(BaseModel):
         """Converte objetos Buffer/Bytes do protobuf para string."""
         if v is None:
             return None
-        if isinstance(v, dict) and all(k.isdigit() for k in v.keys()):
-            return str(v)
-        return str(v) if not isinstance(v, str) else v
+        if isinstance(v, dict):
+            keys = [str(k) for k in v.keys()]  # pyright: ignore[reportUnknownArgumentType]
+            if all(k.isdigit() for k in keys):
+                return str(dict(v))  # pyright: ignore[reportUnknownArgumentType]
+        return str(v) if not isinstance(v, str) else v  # pyright: ignore[reportUnknownArgumentType]

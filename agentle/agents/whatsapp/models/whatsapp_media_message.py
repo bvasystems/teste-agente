@@ -9,3 +9,4 @@ class WhatsAppMediaMessage(WhatsAppMessage):
     media_size: int | None = None
     caption: str | None = None
     filename: str | None = None
+    base64_data: str | None = None  # Para quando a mídia vem em base64 ao invés de URL

@@ -46,11 +46,11 @@ class DocumentMessage(BaseModel):
         if v is None:
             return None
         if isinstance(v, dict) and "low" in v:
-            low = v.get("low", 0)
-            high = v.get("high", 0)
-            value = (high << 32) | low
+            low: int = int(v.get("low", 0))  # type: ignore[arg-type]
+            high: int = int(v.get("high", 0))  # type: ignore[arg-type]
+            value: int = (high << 32) | low
             return str(value)
-        return str(v)
+        return str(v)  # type: ignore[return-value]
 
     @field_validator(
         "fileSha256",
@@ -63,6 +63,8 @@ class DocumentMessage(BaseModel):
         """Converte objetos Buffer/Bytes do protobuf para string."""
         if v is None:
             return None
-        if isinstance(v, dict) and all(k.isdigit() for k in v.keys()):
-            return str(v)
-        return str(v) if not isinstance(v, str) else v
+        if isinstance(v, dict):
+            keys = list(v.keys())  # type: ignore[var-annotated]
+            if all(str(k).isdigit() for k in keys):  # type: ignore[arg-type]
+                return str(v)  # type: ignore[return-value]
+        return str(v) if not isinstance(v, str) else v  # type: ignore[return-value]
