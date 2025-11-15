@@ -6,7 +6,6 @@ from collections.abc import Callable
 from typing import Any
 
 from rsb.models.base_model import BaseModel
-from rsb.models.field import Field
 
 
 class RequestHook(BaseModel):
