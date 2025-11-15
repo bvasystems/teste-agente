@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.9.38
+fix(images): add base64 to image messages
+
 ## v0.9.37
 fix(whatsapp): Add base64 media handling to avoid unnecessary downloads
 
