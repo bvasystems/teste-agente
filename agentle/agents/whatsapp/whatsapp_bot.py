@@ -1654,6 +1654,9 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
                     "media_mime_type": message.media_mime_type,
                     "caption": message.caption,
                     "filename": getattr(message, "filename", None),
+                    "base64_data": getattr(
+                        message, "base64_data", None
+                    ),  # Include base64 if available
                 }
             )
 
@@ -1708,16 +1711,36 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
                 "WhatsAppVideoMessage",
             ]:
                 try:
-                    logger.debug(
-                        f"[BATCH_CONVERSION] Downloading media for message {msg_data['id']}"
-                    )
-                    media_data = await self.provider.download_media(msg_data["id"])
-                    parts.append(
-                        FilePart(data=media_data.data, mime_type=media_data.mime_type)
-                    )
-                    logger.debug(
-                        f"[BATCH_CONVERSION] Successfully downloaded media for {msg_data['id']}"
-                    )
+                    # CRITICAL FIX: Check if media has base64 data already (for audio messages)
+                    # This avoids unnecessary download attempts when media is already available
+                    base64_data = msg_data.get("base64_data")
+                    if base64_data:
+                        logger.info(
+                            f"[BATCH_CONVERSION] 🎵 Using base64 data directly for message {msg_data['id']} (no download needed)"
+                        )
+                        import base64
+
+                        media_bytes = base64.b64decode(base64_data)
+                        mime_type = msg_data.get(
+                            "media_mime_type", "application/octet-stream"
+                        )
+                        parts.append(FilePart(data=media_bytes, mime_type=mime_type))
+                        logger.debug(
+                            f"[BATCH_CONVERSION] Successfully decoded base64 media for {msg_data['id']} ({len(media_bytes)} bytes)"
+                        )
+                    else:
+                        logger.debug(
+                            f"[BATCH_CONVERSION] Downloading media for message {msg_data['id']}"
+                        )
+                        media_data = await self.provider.download_media(msg_data["id"])
+                        parts.append(
+                            FilePart(
+                                data=media_data.data, mime_type=media_data.mime_type
+                            )
+                        )
+                        logger.debug(
+                            f"[BATCH_CONVERSION] Successfully downloaded media for {msg_data['id']}"
+                        )
 
                     # Add caption if present
                     caption = msg_data.get("caption")
@@ -1830,16 +1853,32 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
         # Handle media messages
         elif isinstance(message, WhatsAppMediaMessage):
             try:
-                logger.debug(
-                    f"[SINGLE_CONVERSION] Downloading media for message {message.id}"
-                )
-                media_data = await self.provider.download_media(message.id)
-                parts.append(
-                    FilePart(data=media_data.data, mime_type=media_data.mime_type)
-                )
-                logger.debug(
-                    f"[SINGLE_CONVERSION] Successfully downloaded media for {message.id}"
-                )
+                # CRITICAL FIX: Check if media has base64 data already (for audio messages)
+                # This avoids unnecessary download attempts when media is already available
+                if message.base64_data:
+                    logger.info(
+                        f"[SINGLE_CONVERSION] 🎵 Using base64 data directly for message {message.id} (no download needed)"
+                    )
+                    import base64
+
+                    media_bytes = base64.b64decode(message.base64_data)
+                    parts.append(
+                        FilePart(data=media_bytes, mime_type=message.media_mime_type)
+                    )
+                    logger.debug(
+                        f"[SINGLE_CONVERSION] Successfully decoded base64 media for {message.id} ({len(media_bytes)} bytes)"
+                    )
+                else:
+                    logger.debug(
+                        f"[SINGLE_CONVERSION] Downloading media for message {message.id}"
+                    )
+                    media_data = await self.provider.download_media(message.id)
+                    parts.append(
+                        FilePart(data=media_data.data, mime_type=media_data.mime_type)
+                    )
+                    logger.debug(
+                        f"[SINGLE_CONVERSION] Successfully downloaded media for {message.id}"
+                    )
 
                 # Add caption if present
                 if message.caption:
@@ -3554,6 +3593,25 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
                 elif msg_content.audioMessage:
                     logger.debug("[PARSE_EVOLUTION] Found audio message")
                     audio_msg = msg_content.audioMessage
+
+                    # CRITICAL FIX: Check if audio comes with base64 data instead of URL
+                    # This happens when WhatsApp sends audio directly in the webhook
+                    audio_url = audio_msg.url if audio_msg else ""
+                    audio_base64 = msg_content.base64 if msg_content.base64 else None
+
+                    if not audio_url and audio_base64:
+                        logger.info(
+                            "[PARSE_EVOLUTION] 🎵 Audio message has base64 data but no URL - using base64"
+                        )
+                    elif audio_url:
+                        logger.debug(
+                            f"[PARSE_EVOLUTION] Audio message has URL: {audio_url[:50]}..."
+                        )
+                    else:
+                        logger.warning(
+                            "[PARSE_EVOLUTION] ⚠️ Audio message has neither URL nor base64 data"
+                        )
+
                     return WhatsAppAudioMessage(
                         id=message_id,
                         from_number=from_number,
@@ -3562,10 +3620,11 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
                         timestamp=datetime.fromtimestamp(
                             (data.messageTimestamp or 0) / 1000
                         ),
-                        media_url=audio_msg.url if audio_msg else "",
+                        media_url=audio_url or "",
                         media_mime_type=audio_msg.mimetype
                         if audio_msg and audio_msg.mimetype
                         else "audio/ogg",
+                        base64_data=audio_base64,  # Store base64 data if available
                     )
                 elif msg_content.videoMessage:
                     logger.debug("[PARSE_EVOLUTION] Found video message")
