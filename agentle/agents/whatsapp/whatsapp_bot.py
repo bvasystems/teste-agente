@@ -2218,8 +2218,8 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
         text = match.group(2).strip()
 
         if level == 1:
-            # H1: Bold text with double line separator
-            return f"\n*{text.upper()}*\n{'═' * min(len(text), 30)}"
+            # H1: Bold text with double line separator (preserve original case)
+            return f"\n*{text}*\n{'═' * min(len(text), 30)}"
         elif level == 2:
             # H2: Bold text with single line separator
             return f"\n*{text}*\n{'─' * min(len(text), 30)}"
