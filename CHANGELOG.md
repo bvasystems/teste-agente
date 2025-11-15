@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.37
+fix(whatsapp): Add base64 media handling to avoid unnecessary downloads
+
+- Include base64_data field in message dictionary conversion for media messages
+- Check for existing base64 data before attempting media downloads in batch conversion
+- Check for existing base64 data before attempting media downloads in single conversion
+- Add base64_data parameter to WhatsAppAudioMessage creation in Evolution parser
+- Add logging to indicate when base64 data is used vs. when downloads are needed
+- Prevents redundant download attempts when media is already available in webhook payload
+- Improves performance for audio messages that arrive with embedded base64 data
+
 ## v0.9.36
 feat(openrouter): Enhance message adapter for tool execution and multimodal support
 
