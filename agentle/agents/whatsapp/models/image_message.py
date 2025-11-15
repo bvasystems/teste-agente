@@ -28,7 +28,7 @@ class ImageMessage(BaseModel):
         midQualityFileSha256: Hash SHA256 da versão de qualidade média (opcional)
     """
 
-    url: str
+    url: str | None = Field(default=None)
     mimetype: str | None = Field(default=None)
     caption: str | None = Field(default=None)
     fileSha256: str | dict[str, Any] | None = Field(default=None)

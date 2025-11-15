@@ -3550,6 +3550,8 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
                 elif msg_content.imageMessage:
                     logger.debug("[PARSE_EVOLUTION] Found image message")
                     image_msg = msg_content.imageMessage
+                    audio_base64 = msg_content.base64 if msg_content.base64 else None
+
                     return WhatsAppImageMessage(
                         id=message_id,
                         from_number=from_number,
@@ -3558,13 +3560,14 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
                         timestamp=datetime.fromtimestamp(
                             (data.messageTimestamp or 0) / 1000
                         ),
-                        media_url=image_msg.url if image_msg else "",
+                        media_url=image_msg.url if image_msg.url else "",
                         media_mime_type=image_msg.mimetype
                         if image_msg and image_msg.mimetype
                         else "image/jpeg",
                         caption=image_msg.caption
                         if image_msg and image_msg.caption
                         else "",
+                        base64_data=audio_base64
                     )
 
                 # Handle document messages
