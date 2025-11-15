@@ -15,6 +15,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional, cast
 from dataclasses import dataclass, field
 
+import mistune
+
 from rsb.coroutines.run_sync import run_sync
 from rsb.models.base_model import BaseModel
 from rsb.models.config_dict import ConfigDict
@@ -2028,8 +2030,82 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
 
         return text
 
+    def _create_whatsapp_renderer(self) -> mistune.HTMLRenderer:
+        """Create a mistune renderer for WhatsApp formatting."""
+
+        class WhatsAppRenderer(mistune.HTMLRenderer):
+            """Custom renderer for WhatsApp markdown format."""
+
+            def heading(self, text: str, level: int, **attrs: Any) -> str:
+                """Render headings as bold text with separators."""
+                if level == 1:
+                    return f"\n*{text}*\n{'═' * min(len(text), 30)}\n"
+                elif level == 2:
+                    return f"\n*{text}*\n{'─' * min(len(text), 30)}\n"
+                else:
+                    return f"\n*{text}*\n"
+
+            def strong(self, text: str) -> str:
+                """Render bold as WhatsApp bold."""
+                return f"*{text}*"
+
+            def emphasis(self, text: str) -> str:
+                """Render italic as WhatsApp italic."""
+                return f"_{text}_"
+
+            def strikethrough(self, text: str) -> str:
+                """Render strikethrough as WhatsApp strikethrough."""
+                return f"~{text}~"
+
+            def codespan(self, text: str) -> str:
+                """Render inline code as WhatsApp monospace."""
+                return f"```{text}```"
+
+            def block_code(self, code: str, info: str | None = None) -> str:
+                """Render code blocks."""
+                return f"```{code}```\n"
+
+            def link(self, text: str, url: str, title: str | None = None) -> str:
+                """Render links as text (url)."""
+                return f"{text} ({url})"
+
+            def image(self, text: str, url: str, title: str | None = None) -> str:
+                """Render images as descriptive text."""
+                return f"[Imagem: {text}]" if text else "[Imagem]"
+
+            def block_quote(self, text: str) -> str:
+                """Render blockquotes with indentation."""
+                lines = text.strip().split("\n")
+                return "\n".join(f"  ┃ {line}" for line in lines) + "\n"
+
+            def list(self, text: str, ordered: bool, **attrs: Any) -> str:
+                """Render lists."""
+                return f"\n{text}"
+
+            def list_item(self, text: str, **attrs: Any) -> str:
+                """Render list items."""
+                return f"{text}\n"
+
+            def paragraph(self, text: str) -> str:
+                """Render paragraphs."""
+                return f"{text}\n\n"
+
+            def thematic_break(self) -> str:
+                """Render horizontal rules."""
+                return "─" * 30 + "\n"
+
+            def linebreak(self) -> str:
+                """Render line breaks."""
+                return "\n"
+
+            def text(self, text: str) -> str:
+                """Render plain text."""
+                return text
+
+        return WhatsAppRenderer()
+
     def _format_whatsapp_markdown(self, text: str) -> str:
-        """Convert standard markdown to WhatsApp-compatible formatting.
+        """Convert standard markdown to WhatsApp-compatible formatting using mistune.
 
         WhatsApp supports:
         - *bold* for bold text
@@ -2049,189 +2125,28 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
         if not text:
             return text
 
-        # Split text into lines for processing
-        lines = text.split("\n")
-        processed_lines: list[str] = []
-        in_code_block = False
-        in_table = False
-        table_lines: list[str] = []
-
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-
-            # Track code blocks (preserve them as-is)
-            if line.strip().startswith("```"):
-                in_code_block = not in_code_block
-                processed_lines.append(line)
-                i += 1
-                continue
-
-            # If we're in a code block, don't process the line
-            if in_code_block:
-                processed_lines.append(line)
-                i += 1
-                continue
-
-            # Detect table start (header line followed by separator line)
-            if i + 1 < len(lines) and self._is_table_separator(lines[i + 1]):
-                in_table = True
-                table_lines = [line]
-                i += 1
-                continue
-
-            # Continue collecting table rows
-            if in_table:
-                if self._is_table_row(line):
-                    table_lines.append(line)
-                    i += 1
-                    continue
-                else:
-                    # End of table, process it
-                    processed_lines.extend(self._format_table(table_lines))
-                    in_table = False
-                    table_lines = []
-                    # Don't increment i, process current line
-
-            # Process headers
-            if line.strip().startswith("#"):
-                processed_lines.append(self._format_header(line))
-                i += 1
-                continue
-
-            # Process blockquotes
-            if line.strip().startswith(">"):
-                processed_lines.append(self._format_blockquote(line))
-                i += 1
-                continue
-
-            # Process horizontal rules
-            if re.match(r"^[\s]*(-{3,}|\*{3,}|_{3,})[\s]*$", line):
-                processed_lines.append("─" * 30)
-                i += 1
-                continue
-
-            # Process regular line (preserve empty lines for spacing)
-            processed_lines.append(line)
-            i += 1
-
-        # If we ended while in a table, process it
-        if table_lines:
-            processed_lines.extend(self._format_table(table_lines))
-
-        # Rejoin lines - CRITICAL: preserve all line breaks
-        text = "\n".join(processed_lines)
-
-        # Handle inline markdown elements
-
-        # Handle images ![alt](url) -> [Image: alt]
-        text = re.sub(r"!\[([^\]]*)\]\([^\)]+\)", r"[Imagem: \1]", text)
-
-        # Handle links [text](url) -> text (url)
-        text = re.sub(r"\[([^\]]+)\]\(([^\)]+)\)", r"\1 (\2)", text)
-
-        # Handle **bold** -> *bold* (WhatsApp format)
-        # Use negative lookbehind and lookahead to avoid matching within code blocks
-        text = re.sub(r"(?<!`)\*\*([^*`]+)\*\*(?!`)", r"*\1*", text)
-
-        # Handle __italic__ -> _italic_
-        text = re.sub(r"(?<!`)__([^_`]+)__(?!`)", r"_\1_", text)
-
-        # Handle ~~strikethrough~~ -> ~strikethrough~
-        text = re.sub(r"(?<!`)~~([^~`]+)~~(?!`)", r"~\1~", text)
-
-        # Handle single backtick `code` -> ```code``` (WhatsApp monospace)
-        # But don't convert if already part of triple backticks
-        text = re.sub(r"(?<!`)(`(?!``)([^`]+)`)(?!`)", r"```\2```", text)
-
-        return text
-
-    def _is_table_separator(self, line: str) -> bool:
-        """Check if a line is a markdown table separator (e.g., |---|---|)."""
-        stripped = line.strip()
-        if not stripped.startswith("|") or not stripped.endswith("|"):
-            return False
-        # Remove outer pipes and split
-        content = stripped[1:-1]
-        cells = content.split("|")
-        # Check if all cells are just dashes, colons, and spaces
-        for cell in cells:
-            cell = cell.strip()
-            if cell and not re.match(r"^:?-+:?$", cell):
-                return False
-        return True
-
-    def _is_table_row(self, line: str) -> bool:
-        """Check if a line is a table row."""
-        stripped = line.strip()
-        return stripped.startswith("|") and stripped.endswith("|")
-
-    def _format_table(self, table_lines: list[str]) -> list[str]:
-        """Convert a markdown table to WhatsApp-friendly vertical list format.
-
-        Uses a consistent vertical format for all tables to ensure readability
-        on all screen sizes and prevent any horizontal overflow issues.
-        """
-        if not table_lines:
-            return []
-
-        # Parse table rows
-        rows: list[list[str]] = []
-        for line in table_lines:
-            if self._is_table_separator(line):
-                continue  # Skip separator line
-            # Remove outer pipes and split
-            stripped = line.strip()
-            if stripped.startswith("|"):
-                stripped = stripped[1:]
-            if stripped.endswith("|"):
-                stripped = stripped[:-1]
-            cells = [cell.strip() for cell in stripped.split("|")]
-            rows.append(cells)
-
-        if not rows:
-            return []
-
-        # Use vertical list format for all tables (mobile-friendly)
-        result: list[str] = []
-        result.append("")  # Empty line before table
-
-        headers = rows[0] if rows else []
-
-        for row_idx, row in enumerate(rows[1:], start=1):
-            result.append(f"*Item {row_idx}:*")
-            for header, value in zip(headers, row):
-                result.append(f"  • {header}: {value}")
-            if row_idx < len(rows) - 1:  # Add spacing between items
-                result.append("")
-
-        result.append("")  # Empty line after table
-        return result
-
-    def _format_header(self, line: str) -> str:
-        """Convert markdown header to bold text with decorations."""
-        match = re.match(r"^(#+)\s+(.+)$", line.strip())
-        if not match:
-            return line
-
-        level = len(match.group(1))
-        text = match.group(2).strip()
-
-        if level == 1:
-            # H1: Bold text with double line separator (preserve original case)
-            return f"\n*{text}*\n{'═' * min(len(text), 30)}"
-        elif level == 2:
-            # H2: Bold text with single line separator
-            return f"\n*{text}*\n{'─' * min(len(text), 30)}"
-        else:
-            # H3+: Just bold text
-            return f"\n*{text}*"
-
-    def _format_blockquote(self, line: str) -> str:
-        """Format blockquote by removing > and adding indentation."""
-        # Remove leading > and optional space
-        text = re.sub(r"^>\s?", "", line.strip())
-        return f"  ┃ {text}"
+        # Use mistune for markdown parsing
+        try:
+            renderer = self._create_whatsapp_renderer()
+            markdown = mistune.create_markdown(
+                renderer=renderer, plugins=["strikethrough", "table"]
+            )
+            result = markdown(text)
+            # Ensure result is a string
+            if isinstance(result, str):
+                # Clean up extra newlines
+                result = re.sub(r"\n{3,}", "\n\n", result)
+                return result.strip()
+            else:
+                logger.warning(
+                    f"[MARKDOWN] Mistune returned non-string result: {type(result)}"
+                )
+                return text
+        except Exception as e:
+            logger.warning(
+                f"[MARKDOWN] Mistune conversion failed, returning original text: {e}"
+            )
+            return text
 
     async def _send_response(
         self,
