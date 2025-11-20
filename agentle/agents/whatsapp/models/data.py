@@ -22,7 +22,7 @@ class Data(BaseModel):
     """
 
     key: Key
-    pushName: str
+    pushName: str | None = Field(default=None)
     status: str | None = Field(default=None)
     message: Message | None = Field(default=None)
     messageType: str | None = Field(default=None)
