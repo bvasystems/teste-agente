@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.9.39
+making pushname optional
+
 ## v0.9.38
 fix(images): add base64 to image messages
 
