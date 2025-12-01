@@ -1597,14 +1597,17 @@ class EvolutionAPIProvider(WhatsAppProvider):
         Normalize phone number to Evolution API format.
 
         Evolution API expects phone numbers in the format: countrycode+number@s.whatsapp.net
+        For Brazilian numbers, we now test with @lid format instead.
 
         Brazilian mobile format: 55 + DDD (2 digits) + 9 + 8 digits = 13 digits total
-        Example: 5534998137839@s.whatsapp.net
+        Example: 5534998137839@lid
         """
         original_phone = phone
 
-        # Remove @s.whatsapp.net suffix if present
+        # Remove @s.whatsapp.net or @lid suffix if present
         if "@s.whatsapp.net" in phone:
+            phone = phone.split("@")[0]
+        elif "@lid" in phone:
             phone = phone.split("@")[0]
 
         # Remove non-numeric characters
@@ -1657,9 +1660,15 @@ class EvolutionAPIProvider(WhatsAppProvider):
                     f"Phone number may be invalid - 5th digit is not '9': {phone}"
                 )
 
-        # Add @s.whatsapp.net suffix if not present
-        if not phone.endswith("@s.whatsapp.net"):
-            phone = phone + "@s.whatsapp.net"
+        # TESTING: Use @lid for Brazilian numbers (country code 55) instead of @s.whatsapp.net
+        if not phone.endswith("@lid") and not phone.endswith("@s.whatsapp.net"):
+            if phone.startswith("55"):
+                # Brazilian number - use @lid
+                phone = phone + "@lid"
+                logger.info(f"🧪 TESTING: Using @lid for Brazilian number: {phone}")
+            else:
+                # Non-Brazilian number - use @s.whatsapp.net
+                phone = phone + "@s.whatsapp.net"
 
         if original_phone != phone:
             logger.info(f"Phone number normalized: {original_phone} -> {phone}")
