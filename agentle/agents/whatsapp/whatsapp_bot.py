@@ -431,23 +431,117 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
                 f"[MESSAGE_HANDLER] Effective chat_id para conversação: {effective_chat_id}"
             )
 
-            # Check welcome message for first interaction
+            # Check welcome message/image for first interaction
             if (
                 await cast(
                     ConversationStore, self.agent.conversation_store
                 ).get_conversation_history_length(effective_chat_id)
                 == 0
-                and self.config.welcome_message
+                and (
+                    self.config.welcome_message
+                    or self.config.welcome_image_url
+                    or self.config.welcome_image_base64
+                )
             ):
                 logger.info(
-                    f"[WELCOME] Sending welcome message to {message.from_number}"
+                    f"[WELCOME] Sending welcome message/image to {message.from_number}"
                 )
-                formatted_welcome = self._format_whatsapp_markdown(
-                    self.config.welcome_message
+
+                # Determine if we're sending an image or text
+                has_welcome_image = (
+                    self.config.welcome_image_url or self.config.welcome_image_base64
                 )
-                await self.provider.send_text_message(
-                    message.from_number, formatted_welcome
-                )
+
+                if has_welcome_image:
+                    # Prepare caption from welcome_message if available
+                    caption = None
+                    if self.config.welcome_message:
+                        caption = self._format_whatsapp_markdown(
+                            self.config.welcome_message
+                        )
+
+                    # Handle welcome image via URL
+                    if self.config.welcome_image_url:
+                        logger.info(
+                            f"[WELCOME] Sending welcome image from URL to {message.from_number}"
+                        )
+                        await self.provider.send_media_message(
+                            to=message.from_number,
+                            media_url=self.config.welcome_image_url,
+                            media_type="image",
+                            caption=caption,
+                        )
+                    # Handle welcome image via base64
+                    elif self.config.welcome_image_base64:
+                        # Try to upload base64 to file storage if available
+                        image_url = None
+                        if self.file_storage_manager:
+                            try:
+                                import base64
+                                import time
+
+                                logger.info(
+                                    "[WELCOME] Uploading base64 welcome image to file storage"
+                                )
+
+                                # Decode base64 to bytes
+                                image_bytes = base64.b64decode(
+                                    self.config.welcome_image_base64
+                                )
+
+                                # Generate unique filename
+                                timestamp = int(time.time())
+                                filename = f"welcome_image_{timestamp}.jpg"
+
+                                # Upload to storage
+                                image_url = await self.file_storage_manager.upload_file(
+                                    file_data=image_bytes,
+                                    filename=filename,
+                                    mime_type="image/jpeg",
+                                )
+
+                                logger.info(
+                                    f"[WELCOME] Welcome image uploaded to storage: {image_url}"
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    f"[WELCOME] Failed to upload welcome image to storage: {e}"
+                                )
+                                image_url = None
+
+                        # Send image via URL if upload succeeded, otherwise send text fallback
+                        if image_url:
+                            logger.info(
+                                f"[WELCOME] Sending uploaded welcome image to {message.from_number}"
+                            )
+                            await self.provider.send_media_message(
+                                to=message.from_number,
+                                media_url=image_url,
+                                media_type="image",
+                                caption=caption,
+                            )
+                        else:
+                            # Fallback to text if base64 upload failed and no URL available
+                            logger.warning(
+                                "[WELCOME] Could not send welcome image (base64 upload failed and no URL), falling back to text"
+                            )
+                            if caption:
+                                await self.provider.send_text_message(
+                                    message.from_number, caption
+                                )
+                            else:
+                                logger.warning(
+                                    "[WELCOME] No caption available, skipping welcome message"
+                                )
+                else:
+                    # Send text-only welcome message (backward compatible)
+                    formatted_welcome = self._format_whatsapp_markdown(
+                        self.config.welcome_message
+                    )
+                    await self.provider.send_text_message(
+                        message.from_number, formatted_welcome
+                    )
+
                 session.message_count += 1
                 await self.provider.update_session(session)
 

@@ -98,7 +98,13 @@ class WhatsAppBotConfig(BaseModel):
         description="Default error message",
     )
     welcome_message: str | None = Field(
-        default=None, description="Message to send on first interaction"
+        default=None, description="Message to send on first interaction (or caption if welcome image is set)"
+    )
+    welcome_image_url: str | None = Field(
+        default=None, description="URL of welcome image to send on first interaction"
+    )
+    welcome_image_base64: str | None = Field(
+        default=None, description="Base64-encoded welcome image to send on first interaction (alternative to welcome_image_url)"
     )
 
     # === Message Batching (Simplified) ===
@@ -257,6 +263,8 @@ class WhatsAppBotConfig(BaseModel):
         max_split_messages: int | None = None,
         error_message: str | None = None,
         welcome_message: str | None = None,
+        welcome_image_url: str | None = None,
+        welcome_image_base64: str | None = None,
         # Message Batching
         enable_message_batching: bool | None = None,
         batch_delay_seconds: float | None = None,
@@ -366,6 +374,10 @@ class WhatsAppBotConfig(BaseModel):
             overrides["error_message"] = error_message
         if welcome_message is not None:
             overrides["welcome_message"] = welcome_message
+        if welcome_image_url is not None:
+            overrides["welcome_image_url"] = welcome_image_url
+        if welcome_image_base64 is not None:
+            overrides["welcome_image_base64"] = welcome_image_base64
 
         # Message Batching
         if enable_message_batching is not None:
