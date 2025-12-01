@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.9.40
+feat(whatsapp): support for welcome images
+
 ## v0.9.39
 making pushname optional
 
