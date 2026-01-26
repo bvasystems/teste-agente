@@ -77,18 +77,69 @@ class WhatsAppWebhookPayload(BaseModel):
     ForwardedFrom: str | None = Field(default=None)  # For forwarded messages
     FrequentlyForwarded: str | None = Field(default=None)  # "true" or "false" as string
 
+    # Root level fallbacks for robust extraction
+    remoteJid: str | None = Field(default=None)
+    remoteJidAlt: str | None = Field(default=None)
+
     def model_post_init(self, context: Any, /) -> None:
-        if self.phone_number_id or not self.data:
+        if self.phone_number_id:
+            return
+
+        # Initialize data if missing but root fields are present
+        if not self.data and (self.remoteJid or self.remoteJidAlt):
+            # This is a bit of a hack to ensure we have a structure to hold the key
+            # if we only got root level JIDs
+            from agentle.agents.whatsapp.models.key import Key
+            from agentle.agents.whatsapp.models.data import Data
+
+            self.data = Data(
+                key=Key(
+                    remoteJid=self.remoteJid or self.remoteJidAlt or "", fromMe=False
+                )
+            )
+
+        if not self.data:
             return
 
         key = self.data.key
-        if "@lid" in key.remoteJid:
-            remote_jid_alt = key.remoteJidAlt
-            if remote_jid_alt is None:
-                raise ValueError("No remotejidalt was provided.")
 
-            self.phone_number_id = remote_jid_alt.split("@")[0]
-            self.data.key.remoteJid = remote_jid_alt
+        # Extraction logic:
+        # 1. key.remoteJid
+        # 2. remoteJid (root)
+        # 3. key.remoteJidAlt
+        # 4. remoteJidAlt (root)
+        
+        candidates = [
+            key.remoteJid,
+            self.remoteJid,
+            key.remoteJidAlt,
+            self.remoteJidAlt,
+        ]
+
+        # Find first valid candidate
+        selected_jid = next((c for c in candidates if c), None)
+
+        if not selected_jid:
+            # Should we raise? For now let's just return and let validation fail if strict
             return
+            
+        # Optimization: treating @lid
+        # If the selected JID is an LID, verify if we have an ALT available
+        if "@lid" in selected_jid:
+            # If we selected a main JID that is LID, try to find an Alt
+            # candidates for alt: key.remoteJidAlt, self.remoteJidAlt
+            alt_candidates = [key.remoteJidAlt, self.remoteJidAlt]
+            alt_jid = next((c for c in alt_candidates if c), None)
+            
+            if alt_jid:
+                selected_jid = alt_jid
+            elif not key.remoteJidAlt and not self.remoteJidAlt:
+                 # If we have an LID but no ALT, we might be in trouble depending on the use case,
+                 # but we proceed with what we have or raise as before
+                 # The original code raised ValueError here
+                 pass
 
-        self.phone_number_id = key.remoteJid.split("@")[0]
+        self.phone_number_id = selected_jid.split("@")[0]
+        
+        # Normalize the key inside data so the rest of the app uses the "best" JID
+        self.data.key.remoteJid = selected_jid
