@@ -415,7 +415,7 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
                     f"[MESSAGE_HANDLER] Stored custom chat_id in session: {chat_id}"
                 )
 
-            # CRITICAL FIX: Store remoteJid for @lid numbers
+            # Store remoteJid for later use when sending messages
             if message.remote_jid:
                 session.context_data["remote_jid"] = message.remote_jid
                 logger.info(
@@ -3478,12 +3478,10 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
 
             logger.info("[MESSAGE_UPSERT] Parsing message from Evolution API data")
             # Parse message directly from data (which contains the message info)
-
+            # Use remoteJid directly - no special handling for @lid
             message = self._parse_evolution_message_from_data(
                 data,
-                from_number=payload.data.key.remoteJidAlt or ""
-                if "@lid" in payload.data.key.remoteJid
-                else payload.data.key.remoteJid,
+                from_number=payload.data.key.remoteJid,
             )
 
             if message:
@@ -3491,13 +3489,8 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
                     f"[MESSAGE_UPSERT] ✅ Parsed message: {message.id} from {message.from_number}"
                 )
 
-                # CRITICAL FIX: Store the actual remoteJid for @lid numbers
-                # This is needed to send messages back to the correct WhatsApp JID
-                if "@lid" in payload.data.key.remoteJid:
-                    logger.info(
-                        f"[MESSAGE_UPSERT] 🔑 Detected @lid number. Storing remoteJid: {payload.data.key.remoteJid} for phone: {message.from_number}"
-                    )
-                    message.remote_jid = payload.data.key.remoteJid
+                # Store the remoteJid for later use when sending messages back
+                message.remote_jid = payload.data.key.remoteJid
 
                 logger.info(
                     f"[MESSAGE_UPSERT] About to call handle_message with {len(self._response_callbacks)} callbacks"

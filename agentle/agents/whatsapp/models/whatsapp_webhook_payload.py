@@ -87,8 +87,6 @@ class WhatsAppWebhookPayload(BaseModel):
 
         # Initialize data if missing but root fields are present
         if not self.data and (self.remoteJid or self.remoteJidAlt):
-            # This is a bit of a hack to ensure we have a structure to hold the key
-            # if we only got root level JIDs
             from agentle.agents.whatsapp.models.key import Key
             from agentle.agents.whatsapp.models.data import Data
 
@@ -120,26 +118,9 @@ class WhatsAppWebhookPayload(BaseModel):
         selected_jid = next((c for c in candidates if c), None)
 
         if not selected_jid:
-            # Should we raise? For now let's just return and let validation fail if strict
             return
-            
-        # Optimization: treating @lid
-        # If the selected JID is an LID, verify if we have an ALT available
-        if "@lid" in selected_jid:
-            # If we selected a main JID that is LID, try to find an Alt
-            # candidates for alt: key.remoteJidAlt, self.remoteJidAlt
-            alt_candidates = [key.remoteJidAlt, self.remoteJidAlt]
-            alt_jid = next((c for c in alt_candidates if c), None)
-            
-            if alt_jid:
-                selected_jid = alt_jid
-            elif not key.remoteJidAlt and not self.remoteJidAlt:
-                 # If we have an LID but no ALT, we might be in trouble depending on the use case,
-                 # but we proceed with what we have or raise as before
-                 # The original code raised ValueError here
-                 pass
 
         self.phone_number_id = selected_jid.split("@")[0]
         
-        # Normalize the key inside data so the rest of the app uses the "best" JID
+        # Store the selected JID in data.key for downstream use
         self.data.key.remoteJid = selected_jid

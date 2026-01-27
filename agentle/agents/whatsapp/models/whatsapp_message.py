@@ -24,7 +24,7 @@ class WhatsAppMessage(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     remote_jid: str | None = Field(
         default=None,
-        description="Actual WhatsApp JID for sending messages (critical for @lid numbers)",
+        description="Actual WhatsApp JID for sending messages back to the contact",
     )
 
     @override

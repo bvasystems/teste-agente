@@ -752,8 +752,7 @@ class EvolutionAPIProvider(WhatsAppProvider):
             logger.debug(f"Message is quoting message ID: {quoted_message_id}")
 
         try:
-            # CRITICAL FIX: Check if there's a stored remoteJid for this contact
-            # This is essential for @lid numbers (Brazilian WhatsApp contacts)
+            # Check if there's a stored remoteJid for this contact
             session = await self.get_session(to)
             remote_jid = session.context_data.get("remote_jid") if session else None
 
@@ -1117,8 +1116,7 @@ class EvolutionAPIProvider(WhatsAppProvider):
         logger.debug(f"Sending typing indicator to {to} for {duration}s")
 
         try:
-            # CRITICAL FIX: Check if there's a stored remoteJid for this contact
-            # This is essential for @lid numbers (Brazilian WhatsApp contacts)
+            # Check if there's a stored remoteJid for this contact
             session = await self.get_session(to)
             remote_jid = session.context_data.get("remote_jid") if session else None
 
@@ -1179,8 +1177,7 @@ class EvolutionAPIProvider(WhatsAppProvider):
         logger.debug(f"Sending recording indicator to {to} for {duration}s")
 
         try:
-            # CRITICAL FIX: Check if there's a stored remoteJid for this contact
-            # This is essential for @lid numbers (Brazilian WhatsApp contacts)
+            # Check if there's a stored remoteJid for this contact
             session = await self.get_session(to)
             remote_jid = session.context_data.get("remote_jid") if session else None
 
@@ -1597,78 +1594,34 @@ class EvolutionAPIProvider(WhatsAppProvider):
         Normalize phone number to Evolution API format.
 
         Evolution API expects phone numbers in the format: countrycode+number@s.whatsapp.net
-        For Brazilian numbers, we now test with @lid format instead.
-
-        Brazilian mobile format: 55 + DDD (2 digits) + 9 + 8 digits = 13 digits total
-        Example: 5534998137839@lid
+        
+        This function:
+        - Removes any existing suffix (@s.whatsapp.net, @lid, etc.)
+        - Strips non-numeric characters
+        - Adds country code 55 if not present
+        - Appends @s.whatsapp.net suffix
+        
+        NOTE: This function does NOT modify the number itself (no '9' insertion).
+        The number is sent exactly as provided by the user/webhook.
         """
         original_phone = phone
 
-        # Remove @s.whatsapp.net or @lid suffix if present
-        if "@s.whatsapp.net" in phone:
-            phone = phone.split("@")[0]
-        elif "@lid" in phone:
+        # Remove any @ suffix if present
+        if "@" in phone:
             phone = phone.split("@")[0]
 
         # Remove non-numeric characters
         phone = "".join(c for c in phone if c.isdigit())
 
-        # Handle different input formats
+        # Add country code 55 if not present
         if not phone.startswith("55"):
-            # No country code - add it
-            if len(phone) == 11:
-                # Format: DDD (2) + 9 (1) + 8 digits = 11 digits
-                # Example: 34998137839 -> 5534998137839
-                phone = "55" + phone
-                logger.debug(
-                    f"Added country code 55 to phone: {original_phone} -> {phone}"
-                )
-            elif len(phone) == 10:
-                # Old format without the 9: DDD (2) + 8 digits = 10 digits
-                # Example: 3498137839 -> 5534998137839
-                # Insert '9' after area code (first 2 digits)
-                phone = "55" + phone[:2] + "9" + phone[2:]
-                logger.warning(
-                    f"Converted old format phone number: {original_phone} -> {phone}"
-                )
-            else:
-                # Unknown format, but add 55 anyway
-                phone = "55" + phone
-                logger.warning(
-                    f"Unknown phone format, added 55: {original_phone} -> {phone}"
-                )
+            phone = "55" + phone
+            logger.debug(
+                f"Added country code 55 to phone: {original_phone} -> {phone}"
+            )
 
-        # Validate Brazilian mobile format
-        if phone.startswith("55"):
-            # Should have 13 digits total: 55 + DDD (2) + 9 + 8 digits
-            if len(phone) == 12:
-                # Missing the '9' after area code
-                # Example: 553498137839 -> 5534998137839
-                # Insert '9' after 55 + DDD (after position 4)
-                phone = phone[:4] + "9" + phone[4:]
-                logger.warning(
-                    f"Fixed missing '9' in phone number: {original_phone} -> {phone}"
-                )
-            elif len(phone) != 13:
-                logger.error(
-                    f"Invalid Brazilian mobile number length: {phone} (expected 13 digits, got {len(phone)})"
-                )
-
-            # Validate that the 5th digit is '9' (mobile indicator)
-            if len(phone) >= 5 and phone[4] != "9":
-                logger.warning(
-                    f"Phone number may be invalid - 5th digit is not '9': {phone}"
-                )
-
-        # TESTING: Use @lid for Brazilian numbers (country code 55) instead of @s.whatsapp.net
-        if not phone.endswith("@lid") and not phone.endswith("@s.whatsapp.net"):
-            if phone.startswith("55"):
-                # Brazilian number - use @lid
-                phone = phone + "@lid"
-                logger.info(f"🧪 TESTING: Using @lid for Brazilian number: {phone}")
-            else:
-                # Non-Brazilian number - use @s.whatsapp.net
-                phone = phone + "@s.whatsapp.net"
+        # Always use @s.whatsapp.net for normal numbers
+        phone = phone + "@s.whatsapp.net"
 
         if original_phone != phone:
             logger.info(f"Phone number normalized: {original_phone} -> {phone}")
