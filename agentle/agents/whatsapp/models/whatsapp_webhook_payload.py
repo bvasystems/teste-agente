@@ -120,6 +120,15 @@ class WhatsAppWebhookPayload(BaseModel):
         if not selected_jid:
             return
 
+        # Handle @lid: Evolution API sometimes sends @lid in remoteJid,
+        # but provides the correct @s.whatsapp.net format in remoteJidAlt.
+        # In this case, prefer remoteJidAlt.
+        if "@lid" in selected_jid:
+            alt_candidates = [key.remoteJidAlt, self.remoteJidAlt]
+            alt_jid = next((c for c in alt_candidates if c), None)
+            if alt_jid:
+                selected_jid = alt_jid
+
         self.phone_number_id = selected_jid.split("@")[0]
         
         # Store the selected JID in data.key for downstream use

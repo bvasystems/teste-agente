@@ -3478,10 +3478,17 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
 
             logger.info("[MESSAGE_UPSERT] Parsing message from Evolution API data")
             # Parse message directly from data (which contains the message info)
-            # Use remoteJid directly - no special handling for @lid
+            # When remoteJid contains @lid, use remoteJidAlt which has the correct @s.whatsapp.net format
+            from_number = payload.data.key.remoteJid
+            if "@lid" in payload.data.key.remoteJid and payload.data.key.remoteJidAlt:
+                from_number = payload.data.key.remoteJidAlt
+                logger.info(
+                    f"[MESSAGE_UPSERT] 🔄 Using remoteJidAlt instead of @lid: {from_number}"
+                )
+
             message = self._parse_evolution_message_from_data(
                 data,
-                from_number=payload.data.key.remoteJid,
+                from_number=from_number,
             )
 
             if message:
@@ -3490,7 +3497,7 @@ class WhatsAppBot[T_Schema: WhatsAppResponseBase = WhatsAppResponseBase](BaseMod
                 )
 
                 # Store the remoteJid for later use when sending messages back
-                message.remote_jid = payload.data.key.remoteJid
+                message.remote_jid = from_number
 
                 logger.info(
                     f"[MESSAGE_UPSERT] About to call handle_message with {len(self._response_callbacks)} callbacks"
