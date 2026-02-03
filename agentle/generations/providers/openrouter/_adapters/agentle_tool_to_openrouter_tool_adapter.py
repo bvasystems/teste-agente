@@ -202,6 +202,9 @@ class AgentleToolToOpenRouterToolAdapter(Adapter[Tool, OpenRouterTool]):
             "array": "array",
             "dict": "object",
             "object": "object",
+            "none": "null",
+            "nonetype": "null",
+            "null": "null",
         }
 
         for param_name, param_info in agentle_params.items():
@@ -226,8 +229,23 @@ class AgentleToolToOpenRouterToolAdapter(Adapter[Tool, OpenRouterTool]):
                 prop_schema = self._expand_complex_type(type_annotation)
             else:
                 # Map the type to JSON Schema type
-                json_type = type_mapping.get(param_type_str.lower(), param_type_str)
-                prop_schema["type"] = json_type
+                if "|" in param_type_str:
+                    # Handle union types like "str | None"
+                    parts = [p.strip() for p in param_type_str.split("|")]
+                    json_types: list[str] = []
+                    
+                    for part in parts:
+                        mapped = type_mapping.get(part.lower(), part)
+                        if mapped not in json_types:
+                            json_types.append(mapped)
+                    
+                    if len(json_types) == 1:
+                        prop_schema["type"] = json_types[0]
+                    else:
+                        prop_schema["type"] = json_types
+                else:
+                    json_type = type_mapping.get(param_type_str.lower(), param_type_str)
+                    prop_schema["type"] = json_type
 
             # Copy over other attributes (excluding 'required' and 'type')
             for key, value in param_info.items():
