@@ -10,7 +10,7 @@ from __future__ import annotations
 import inspect
 import logging
 import typing
-from typing import Any, get_args, get_origin, override, cast
+from typing import Any, Union, get_args, get_origin, override, cast
 
 from rsb.adapters.adapter import Adapter
 
@@ -34,8 +34,51 @@ class AgentleToolToOpenRouterToolAdapter(Adapter[Tool, OpenRouterTool]):
 
     This adapter handles both flat parameter format (from Tool.from_callable)
     and JSON Schema format. It also handles complex types like BaseModel,
-    TypedDict, dataclasses, and Literal types.
+    TypedDict, dataclasses, Literal types, and Optional[Literal[...]].
     """
+
+    def _is_optional_type(self, type_annotation: Any) -> bool:
+        """
+        Check if a type annotation is an Optional type (Union[X, None]).
+
+        Args:
+            type_annotation: The type annotation to check.
+
+        Returns:
+            True if the type is Optional.
+        """
+        try:
+            origin = get_origin(type_annotation)
+            if origin is Union:
+                args = get_args(type_annotation)
+                # Optional[X] is Union[X, None]
+                return type(None) in args
+            return False
+        except Exception:
+            return False
+
+    def _extract_optional_inner_type(self, type_annotation: Any) -> Any | None:
+        """
+        Extract the inner type from an Optional type.
+
+        Args:
+            type_annotation: The Optional type annotation.
+
+        Returns:
+            The inner type (without None), or None if extraction fails.
+        """
+        try:
+            args = get_args(type_annotation)
+            # Filter out NoneType
+            non_none_args = [arg for arg in args if arg is not type(None)]
+            if len(non_none_args) == 1:
+                return non_none_args[0]
+            elif len(non_none_args) > 1:
+                # Union with more than 2 types (excluding None)
+                return Union[tuple(non_none_args)]  # type: ignore
+            return None
+        except Exception:
+            return None
 
     def _is_literal_type(self, type_annotation: Any) -> bool:
         """
@@ -192,8 +235,8 @@ class AgentleToolToOpenRouterToolAdapter(Adapter[Tool, OpenRouterTool]):
             'required': ['param1']
         }
 
-        This method also handles complex types like BaseModel, TypedDict, Literal, etc.
-        by expanding them to their full JSON schema representation.
+        This method also handles complex types like BaseModel, TypedDict, Literal,
+        Optional[Literal[...]], etc. by expanding them to their full JSON schema representation.
 
         Args:
             agentle_params: Parameters in Agentle's flat format or JSON Schema format.
@@ -248,12 +291,24 @@ class AgentleToolToOpenRouterToolAdapter(Adapter[Tool, OpenRouterTool]):
             # Create the property schema
             prop_schema: dict[str, Any] = {}
 
-            # Check if this is a Literal type
+            # Resolve the type annotation
             type_annotation = self._resolve_type_annotation(param_type_str, tool)
 
-            if type_annotation and self._is_literal_type(type_annotation):
+            # Check if this is an Optional type
+            is_optional = False
+            inner_type = type_annotation
+            
+            if type_annotation and self._is_optional_type(type_annotation):
+                is_optional = True
+                inner_type = self._extract_optional_inner_type(type_annotation)
+                logger.debug(
+                    f"Detected Optional type for parameter '{param_name}', inner type: {inner_type}"
+                )
+
+            # Now check the inner type (which might be the original type if not Optional)
+            if inner_type and self._is_literal_type(inner_type):
                 # Handle Literal types by extracting enum values
-                enum_values = self._extract_literal_values(type_annotation)
+                enum_values = self._extract_literal_values(inner_type)
                 if enum_values:
                     # Infer JSON type from first value
                     first_value = enum_values[0]
@@ -266,22 +321,45 @@ class AgentleToolToOpenRouterToolAdapter(Adapter[Tool, OpenRouterTool]):
                     else:
                         json_type = "string"
                     
-                    prop_schema = {
-                        "type": json_type,
-                        "enum": enum_values
-                    }
-                    logger.debug(
-                        f"Converted Literal type for parameter '{param_name}' to enum: {enum_values}"
-                    )
+                    if is_optional:
+                        # For Optional[Literal[...]], use anyOf with enum and null
+                        prop_schema = {
+                            "anyOf": [
+                                {"type": json_type, "enum": enum_values},
+                                {"type": "null"}
+                            ]
+                        }
+                        logger.debug(
+                            f"Converted Optional[Literal] type for parameter '{param_name}' to anyOf with enum: {enum_values}"
+                        )
+                    else:
+                        # Regular Literal
+                        prop_schema = {
+                            "type": json_type,
+                            "enum": enum_values
+                        }
+                        logger.debug(
+                            f"Converted Literal type for parameter '{param_name}' to enum: {enum_values}"
+                        )
                 else:
                     # Empty Literal (shouldn't happen, but handle gracefully)
                     prop_schema = {"type": "string"}
-            elif type_annotation and self._is_complex_type(type_annotation):
+            elif inner_type and self._is_complex_type(inner_type):
                 # Expand the complex type to its full JSON schema
                 logger.debug(
                     f"Expanding complex type for parameter '{param_name}': {param_type_str}"
                 )
-                prop_schema = self._expand_complex_type(type_annotation)
+                prop_schema = self._expand_complex_type(inner_type)
+                
+                # If it was Optional, add null to the type
+                if is_optional:
+                    if "type" in prop_schema:
+                        current_type = prop_schema["type"]
+                        if isinstance(current_type, list):
+                            if "null" not in current_type:
+                                prop_schema["type"] = current_type + ["null"]
+                        else:
+                            prop_schema["type"] = [current_type, "null"]
             else:
                 # Map the type to JSON Schema type
                 if "|" in param_type_str:
