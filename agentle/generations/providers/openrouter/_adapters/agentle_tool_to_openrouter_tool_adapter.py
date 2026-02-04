@@ -1,4 +1,3 @@
-# Adapter for Agentle tool to OpenRouter tool
 """
 Adapter for converting Agentle Tool definitions to OpenRouter tool format.
 
@@ -10,7 +9,8 @@ from __future__ import annotations
 
 import inspect
 import logging
-from typing import Any, override, cast
+import typing
+from typing import Any, get_args, get_origin, override, cast
 
 from rsb.adapters.adapter import Adapter
 
@@ -34,8 +34,38 @@ class AgentleToolToOpenRouterToolAdapter(Adapter[Tool, OpenRouterTool]):
 
     This adapter handles both flat parameter format (from Tool.from_callable)
     and JSON Schema format. It also handles complex types like BaseModel,
-    TypedDict, dataclasses, etc. by expanding them to their JSON schemas.
+    TypedDict, dataclasses, and Literal types.
     """
+
+    def _is_literal_type(self, type_annotation: Any) -> bool:
+        """
+        Check if a type annotation is a Literal type.
+
+        Args:
+            type_annotation: The type annotation to check.
+
+        Returns:
+            True if the type is a Literal type.
+        """
+        try:
+            return get_origin(type_annotation) is typing.Literal
+        except Exception:
+            return False
+
+    def _extract_literal_values(self, type_annotation: Any) -> list[Any]:
+        """
+        Extract values from a Literal type.
+
+        Args:
+            type_annotation: The Literal type annotation.
+
+        Returns:
+            List of literal values.
+        """
+        try:
+            return list(get_args(type_annotation))
+        except Exception:
+            return []
 
     def _is_complex_type(self, type_annotation: Any) -> bool:
         """
@@ -162,7 +192,7 @@ class AgentleToolToOpenRouterToolAdapter(Adapter[Tool, OpenRouterTool]):
             'required': ['param1']
         }
 
-        This method also handles complex types like BaseModel, TypedDict, etc.
+        This method also handles complex types like BaseModel, TypedDict, Literal, etc.
         by expanding them to their full JSON schema representation.
 
         Args:
@@ -218,10 +248,35 @@ class AgentleToolToOpenRouterToolAdapter(Adapter[Tool, OpenRouterTool]):
             # Create the property schema
             prop_schema: dict[str, Any] = {}
 
-            # Check if this is a complex type that needs expansion
+            # Check if this is a Literal type
             type_annotation = self._resolve_type_annotation(param_type_str, tool)
 
-            if type_annotation and self._is_complex_type(type_annotation):
+            if type_annotation and self._is_literal_type(type_annotation):
+                # Handle Literal types by extracting enum values
+                enum_values = self._extract_literal_values(type_annotation)
+                if enum_values:
+                    # Infer JSON type from first value
+                    first_value = enum_values[0]
+                    if isinstance(first_value, bool):
+                        json_type = "boolean"
+                    elif isinstance(first_value, int):
+                        json_type = "integer"
+                    elif isinstance(first_value, float):
+                        json_type = "number"
+                    else:
+                        json_type = "string"
+                    
+                    prop_schema = {
+                        "type": json_type,
+                        "enum": enum_values
+                    }
+                    logger.debug(
+                        f"Converted Literal type for parameter '{param_name}' to enum: {enum_values}"
+                    )
+                else:
+                    # Empty Literal (shouldn't happen, but handle gracefully)
+                    prop_schema = {"type": "string"}
+            elif type_annotation and self._is_complex_type(type_annotation):
                 # Expand the complex type to its full JSON schema
                 logger.debug(
                     f"Expanding complex type for parameter '{param_name}': {param_type_str}"
@@ -250,7 +305,7 @@ class AgentleToolToOpenRouterToolAdapter(Adapter[Tool, OpenRouterTool]):
             # Copy over other attributes (excluding 'required' and 'type')
             for key, value in param_info.items():
                 if key not in ("required", "type"):
-                    # Don't overwrite if already set by complex type expansion
+                    # Don't overwrite if already set by Literal or complex type expansion
                     if key not in prop_schema:
                         prop_schema[key] = value
 
