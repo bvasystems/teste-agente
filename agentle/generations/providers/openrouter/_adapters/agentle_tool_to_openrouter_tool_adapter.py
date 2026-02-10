@@ -205,7 +205,8 @@ class AgentleToolToOpenRouterToolAdapter(Adapter[Tool, OpenRouterTool]):
                     )
                     if (
                         annotation_str == type_str
-                        or param.annotation.__name__ == type_str.split(".")[-1]
+                        or getattr(param.annotation, "__name__", "")
+                        == type_str.split(".")[-1]
                     ):
                         return param.annotation
         except Exception as e:
