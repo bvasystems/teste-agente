@@ -97,6 +97,7 @@ from agentle.agents.suspension_manager import (
 )
 from agentle.agents.ui.streamlit import AgentToStreamlit
 from agentle.generations.collections.message_sequence import MessageSequence
+from agentle.generations.models.generation.choice import Choice
 from agentle.generations.models.generation.generation import Generation
 from agentle.generations.models.generation.trace_params import TraceParams
 from agentle.generations.models.message_parts.file import FilePart
@@ -106,6 +107,9 @@ from agentle.generations.models.message_parts.tool_execution_suggestion import (
 )
 from agentle.generations.models.messages.assistant_message import AssistantMessage
 from agentle.generations.models.messages.developer_message import DeveloperMessage
+from agentle.generations.models.messages.generated_assistant_message import (
+    GeneratedAssistantMessage,
+)
 from agentle.generations.models.messages.user_message import UserMessage
 from agentle.generations.providers.base.generation_provider import (
     GenerationProvider,
@@ -2759,6 +2763,119 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                         token_usage=final_tool_generation.usage,
                     )
 
+                    # Check for terminal tools
+                    should_terminate = False
+                    for tool_suggestion in final_tool_generation.tool_calls:
+                        tool = available_tools.get(tool_suggestion.tool_name)
+                        if tool:
+                            # Access the underlying callable if available
+                            callable_ref = tool.callable_ref
+                            if callable_ref and getattr(
+                                callable_ref, "_is_terminal", False
+                            ):
+                                should_terminate = True
+                                _logger.bind_optional(
+                                    lambda log: log.info(
+                                        "Terminal tool '%s' called, stopping execution",
+                                        tool.name,
+                                    )
+                                )
+
+                                # Check if we need to inject an assistant message
+                                message_param = getattr(
+                                    callable_ref, "_terminal_message_param", None
+                                )
+                                if message_param:
+                                    message_value = tool_suggestion.args.get(
+                                        message_param
+                                    )
+                                    if message_value:
+                                        # Inject assistant message
+                                        context.message_history.append(
+                                            AssistantMessage(
+                                                parts=[TextPart(text=str(message_value))]
+                                            )
+                                        )
+
+                    if should_terminate:
+                         # Calculate final metrics for successful termination
+                        total_execution_time = (
+                            time.perf_counter() - execution_start_time
+                        ) * 1000
+
+                        performance_metrics = PerformanceMetrics(
+                            total_execution_time_ms=total_execution_time,
+                            input_processing_time_ms=input_processing_time,
+                            static_knowledge_processing_time_ms=static_knowledge_time,
+                            mcp_tools_preparation_time_ms=mcp_tools_time,
+                            generation_time_ms=generation_time_total,
+                            tool_execution_time_ms=tool_execution_time_total,
+                            final_response_processing_time_ms=0.0,
+                            iteration_count=iteration_count,
+                            tool_calls_count=tool_calls_count,
+                            total_tokens_processed=total_tokens_processed,
+                            cache_hit_rate=(
+                                cache_hits / (cache_hits + cache_misses) * 100
+                            )
+                            if (cache_hits + cache_misses) > 0
+                            else 0.0,
+                            step_metrics=step_metrics,
+                            average_generation_time_ms=generation_time_total
+                            / max(
+                                1,
+                                len(
+                                    [
+                                        s
+                                        for s in step_metrics
+                                        if s.step_type == "generation"
+                                    ]
+                                ),
+                            ),
+                            average_tool_execution_time_ms=tool_execution_time_total
+                            / max(1, tool_calls_count),
+                            longest_step_duration_ms=max(
+                                [s.duration_ms for s in step_metrics], default=0.0
+                            ),
+                            shortest_step_duration_ms=min(
+                                [s.duration_ms for s in step_metrics], default=0.0
+                            ),
+                        )
+
+                        # Create a Generation object for the output
+                        # If the last message is an assistant message (injected), use it
+                        # Otherwise use the last generation (which was the tool call)
+                        final_generation_to_return = final_tool_generation
+
+                        if context.message_history and isinstance(
+                            context.message_history[-1], AssistantMessage
+                        ):
+                             # Create a fake generation from the injected message for consistency
+                             last_msg = context.message_history[-1]
+                             
+                             # We need to construct a Generation object. 
+                             # Since we don't have easy access to all constructors needed for a full Generation,
+                             # we'll reuse the last generation but update its choices/text.
+                             # This is a bit hacky but cleaner than constructing from scratch with missing data.
+                             final_generation_to_return = final_tool_generation.clone(
+                                 new_choices=[
+                                     Choice(
+                                         index=0,
+                                         message=GeneratedAssistantMessage(
+                                             parts=last_msg.parts,
+                                             parsed=None # We don't support parsed data from terminal injection yet
+                                         )
+                                     )
+                                 ]
+                             )
+
+                        context.complete_execution()
+                        yield self._build_agent_run_output(
+                            generation=cast(Generation[T_Schema], final_generation_to_return),
+                            context=context,
+                            performance_metrics=performance_metrics,
+                        )
+                        return
+
                 # If we reach here, we've exceeded max iterations
                 execution_summary = self._format_tool_call_summary(all_tool_results)
                 steps_summary = self._format_steps_summary(context.steps)
@@ -3440,6 +3557,107 @@ class Agent[T_Schema = WithoutStructuredOutput](BaseModel):
                 iteration=state.iteration + 1,
                 token_usage=tool_call_generation.usage,
             )
+
+            # Check for terminal tools
+            should_terminate = False
+            for tool_suggestion in tool_call_generation.tool_calls:
+                tool = available_tools.get(tool_suggestion.tool_name)
+                if tool:
+                    # Access the underlying callable if available
+                    callable_ref = tool.callable_ref
+                    if callable_ref and getattr(callable_ref, "_is_terminal", False):
+                        should_terminate = True
+                        _logger.bind_optional(
+                            lambda log: log.info(
+                                "Terminal tool '%s' called, stopping execution",
+                                tool.name,
+                            )
+                        )
+
+                        # Check if we need to inject an assistant message
+                        message_param = getattr(
+                            callable_ref, "_terminal_message_param", None
+                        )
+                        if message_param:
+                            message_value = tool_suggestion.args.get(message_param)
+                            if message_value:
+                                # Inject assistant message
+                                context.message_history.append(
+                                    AssistantMessage(
+                                        parts=[TextPart(text=str(message_value))]
+                                    )
+                                )
+
+            if should_terminate:
+                 # Calculate final metrics for successful termination
+                total_execution_time = (
+                    time.perf_counter() - execution_start_time
+                ) * 1000
+
+                performance_metrics = PerformanceMetrics(
+                    total_execution_time_ms=total_execution_time,
+                    input_processing_time_ms=input_processing_time,
+                    static_knowledge_processing_time_ms=static_knowledge_time,
+                    mcp_tools_preparation_time_ms=mcp_tools_time,
+                    generation_time_ms=generation_time_total,
+                    tool_execution_time_ms=tool_execution_time_total,
+                    final_response_processing_time_ms=0.0,
+                    iteration_count=iteration_count,
+                    tool_calls_count=tool_calls_count,
+                    total_tokens_processed=total_tokens_processed,
+                    cache_hit_rate=(
+                        cache_hits / (cache_hits + cache_misses) * 100
+                    )
+                    if (cache_hits + cache_misses) > 0
+                    else 0.0,
+                    step_metrics=step_metrics,
+                    average_generation_time_ms=generation_time_total
+                    / max(
+                        1,
+                        len(
+                            [
+                                s
+                                for s in step_metrics
+                                if s.step_type == "generation"
+                            ]
+                        ),
+                    ),
+                    average_tool_execution_time_ms=tool_execution_time_total
+                    / max(1, tool_calls_count),
+                    longest_step_duration_ms=max(
+                        [s.duration_ms for s in step_metrics], default=0.0
+                    ),
+                    shortest_step_duration_ms=min(
+                        [s.duration_ms for s in step_metrics], default=0.0
+                    ),
+                )
+
+                # Create a Generation object for the output
+                final_generation_to_return = tool_call_generation
+
+                if context.message_history and isinstance(
+                    context.message_history[-1], AssistantMessage
+                ):
+                     latest_msg = context.message_history[-1]
+                     # Create a fake generation from the injected message
+                     final_generation_to_return = tool_call_generation.clone(
+                         new_choices=[
+                             Choice(
+                                 index=0,
+                                 message=GeneratedAssistantMessage(
+                                     parts=latest_msg.parts,
+                                     parsed=None
+                                 )
+                             )
+                         ]
+                     )
+
+                context.complete_execution()
+                return self._build_agent_run_output(
+                    generation=cast(Generation[T_Schema], final_generation_to_return),
+                    context=context,
+                    performance_metrics=performance_metrics,
+                )
 
         # Generate detailed execution summary
         tool_call_summary = self._format_tool_call_summary(all_tool_results)

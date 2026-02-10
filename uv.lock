@@ -9,7 +9,7 @@ resolution-markers = [
 
 [[package]]
 name = "agentle"
-version = "0.9.42"
+version = "0.9.45"
 source = { editable = "." }
 dependencies = [
     { name = "aiocache" },
