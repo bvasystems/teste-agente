@@ -776,6 +776,29 @@ class EvolutionAPIProvider(WhatsAppProvider):
                 "POST", url, payload, expected_status=[200, 201]
             )
 
+            # Validate response structure - API can return 201 with error payload
+            if "key" not in response_data:
+                # Check if this is an error response disguised as success
+                error_msg = "Invalid response structure from Evolution API"
+                if "message" in response_data:
+                    error_msg = f"Evolution API error: {response_data['message']}"
+                elif "error" in response_data:
+                    error_msg = f"Evolution API error: {response_data['error']}"
+                
+                logger.error(
+                    f"API returned success status but error payload: {response_data}",
+                    extra={
+                        "to_number": to,
+                        "response_data": response_data,
+                    }
+                )
+                raise EvolutionAPIError(
+                    error_msg,
+                    response_data=response_data,
+                    request_url=url,
+                    is_retriable=False,
+                )
+
             message_id = response_data["key"]["id"]
             from_jid = response_data["key"]["remoteJid"]
 
@@ -890,6 +913,22 @@ class EvolutionAPIProvider(WhatsAppProvider):
                 "POST", url, payload, expected_status=[200, 201]
             )
 
+            # Validate response structure - API can return 201 with error payload
+            if "key" not in response_data:
+                error_msg = "Invalid response structure from Evolution API"
+                if "message" in response_data:
+                    error_msg = f"Evolution API error: {response_data['message']}"
+                elif "error" in response_data:
+                    error_msg = f"Evolution API error: {response_data['error']}"
+                
+                logger.error(
+                    f"API returned success status but error payload: {response_data}",
+                    extra={"to_number": to, "response_data": response_data}
+                )
+                raise EvolutionAPIError(
+                    error_msg, response_data=response_data, request_url=url, is_retriable=False
+                )
+
             message_id = response_data["key"]["id"]
             from_jid = response_data["key"]["remoteJid"]
 
@@ -987,6 +1026,22 @@ class EvolutionAPIProvider(WhatsAppProvider):
                 "POST", url, payload, expected_status=[200, 201]
             )
 
+            # Validate response structure - API can return 201 with error payload
+            if "key" not in response_data:
+                error_msg = "Invalid response structure from Evolution API"
+                if "message" in response_data:
+                    error_msg = f"Evolution API error: {response_data['message']}"
+                elif "error" in response_data:
+                    error_msg = f"Evolution API error: {response_data['error']}"
+                
+                logger.error(
+                    f"API returned success status but error payload: {response_data}",
+                    extra={"to_number": to, "response_data": response_data}
+                )
+                raise EvolutionAPIError(
+                    error_msg, response_data=response_data, request_url=url, is_retriable=False
+                )
+
             message_id = response_data["key"]["id"]
             from_jid = response_data["key"]["remoteJid"]
 
@@ -1065,6 +1120,22 @@ class EvolutionAPIProvider(WhatsAppProvider):
             response_data = await self._make_request_with_resilience(
                 "POST", url, payload, expected_status=[200, 201]
             )
+
+            # Validate response structure - API can return 201 with error payload
+            if "key" not in response_data:
+                error_msg = "Invalid response structure from Evolution API"
+                if "message" in response_data:
+                    error_msg = f"Evolution API error: {response_data['message']}"
+                elif "error" in response_data:
+                    error_msg = f"Evolution API error: {response_data['error']}"
+                
+                logger.error(
+                    f"API returned success status but error payload: {response_data}",
+                    extra={"to_number": to, "response_data": response_data}
+                )
+                raise EvolutionAPIError(
+                    error_msg, response_data=response_data, request_url=url, is_retriable=False
+                )
 
             message_id = response_data["key"]["id"]
             from_jid = response_data["key"]["remoteJid"]
