@@ -13,7 +13,7 @@ from agentle.agents.whatsapp.providers.evolution.evolution_api_provider import E
 from agentle.agents.whatsapp.whatsapp_bot import WhatsAppBot
 from agentle.sessions.in_memory_session_store import InMemorySessionStore
 from agentle.sessions.session_manager import SessionManager
-from calendario_vacinas_tool import calendarioVacinas
+from consultar_planilha_tool import consultarPlanilhaVacinas
 
 # Carrega variáveis de ambiente
 load_dotenv(override=True)
@@ -45,7 +45,7 @@ def criar_e_registrar_bot(
     agent = Agent(
         name=nome_agente,
         instructions=instructions,
-        tools=[calendarioVacinas],
+        tools=[consultarPlanilhaVacinas],
         conversation_store=JSONFileConversationStore(),
         generation_provider=OpenaiGenerationProvider(),
     )
