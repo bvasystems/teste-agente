@@ -25,17 +25,27 @@ PROMPT_FILE = os.path.join(os.path.dirname(__file__), "prompt.md")
 with open(PROMPT_FILE, "r", encoding="utf-8") as f:
     SOFIA_INSTRUCTIONS = f.read()
 
-def criar_bot(nome_agente: str, instancia_evolution: str, instructions: str, evolution_api_key: str) -> Application:
-    """Função utilitária para criar um bot e devolver a aplicação dele isolada."""
-    evolution_url = os.getenv("EVOLUTION_API_URL", "https://evolution.axobot.pro")
+from blacksheep import Application, FromJSON, Response, json
+from agentle.agents.whatsapp.models.whatsapp_webhook_payload import WhatsAppWebhookPayload
+from agentle.generations.providers.openai.openai import OpenaiGenerationProvider
 
-    from agentle.generations.providers.openai.openai import OpenaiGenerationProvider
+# APLICAÇÃO PRINCIPAL BASE
+main_app = Application()
+
+def criar_e_registrar_bot(
+    app: Application,
+    nome_agente: str, 
+    instancia_evolution: str, 
+    instructions: str, 
+    evolution_api_key: str,
+    webhook_route: str
+):
+    evolution_url = os.getenv("EVOLUTION_API_URL", "https://evolution.axobot.pro")
     
     agent = Agent(
         name=nome_agente,
         instructions=instructions,
-        tools=[calendarioVacinas], # Se as ferramentas forem diferentes, basta mudar aqui
-        # Cada agente manterá suas próprias conversas na estrutura local
+        tools=[calendarioVacinas],
         conversation_store=JSONFileConversationStore(),
         generation_provider=OpenaiGenerationProvider(),
     )
@@ -63,48 +73,45 @@ def criar_bot(nome_agente: str, instancia_evolution: str, instructions: str, evo
     whatsapp_bot = WhatsAppBot(agent=agent, provider=provider, config=bot_config)
     whatsapp_bot.start()
 
-    from blacksheep.server.routing import Router
-    
-    # O webhook padrão desse mini-app será "/webhook"
-    return whatsapp_bot.to_blacksheep_app(router=Router(), webhook_path="/webhook", show_error_details=True)
+    # Registrando a rota de forma exclusiva para o app pai, evitando conflito no gerador automático
+    @app.router.post(webhook_route)
+    async def webhook_handler(webhook_payload: FromJSON[WhatsAppWebhookPayload]) -> Response:
+        try:
+            payload_data: WhatsAppWebhookPayload = webhook_payload.value
+            await whatsapp_bot.handle_webhook(payload_data)
+            return json({"status": "success", "message": "Webhook processed"})
+        except Exception as e:
+            logging.error(f"Erro no webhook de {instancia_evolution}: {e}")
+            return json({"status": "error", "message": str(e)}, status=500)
 
-# ---------------------------------------------------------
-# APLICAÇÃO PRINCIPAL (ROTEADOR DE BOTS)
-# ---------------------------------------------------------
-main_app = Application()
-
-# Puxa as keys do .env ou usa uma default
 api_key_padrao = os.getenv("EVOLUTION_API_KEY", "6242b406242c15bbb180")
 
 # 1. Bot Comercial (Cliente 1 / Instância 1)
-bot_comercial = criar_bot(
+criar_e_registrar_bot(
+    app=main_app,
     nome_agente="SofIA Comercial", 
     instancia_evolution="BvaComercial",
     instructions=SOFIA_INSTRUCTIONS,
-    evolution_api_key=api_key_padrao
+    evolution_api_key=api_key_padrao,
+    webhook_route="/cliente1/webhook"
 )
-# Monta a rota: http://SEU_IP:8000/cliente1/webhook
-main_app.mount("/cliente1", bot_comercial)
 
 # 2. Bot Suporte (Cliente 2 / Instância 2)
-# Exemplo de um segundo cliente no mesmo servidor, usando outro prompt
-bot_suporte = criar_bot(
+criar_e_registrar_bot(
+    app=main_app,
     nome_agente="Assistente Suporte", 
-    instancia_evolution="ClienteSuporteNode", # o nome exato da instancia na Evolution
+    instancia_evolution="ClienteSuporteNode",
     instructions="Você é o suporte técnico do Cliente 2. Seja breve e objetivo.",
-    evolution_api_key=api_key_padrao # Aqui poderia ser a apikey específica dessa Evolution
+    evolution_api_key=api_key_padrao,
+    webhook_route="/cliente2/webhook"
 )
-# Monta a rota: http://SEU_IP:8000/cliente2/webhook
-main_app.mount("/cliente2", bot_suporte)
-
-# 3. Você pode criar quantos quiser e ir dando 'mount' aqui...
 
 port = int(os.getenv("PORT", "8000"))
 
 if __name__ == "__main__":
     logging.info(f"Starting Multi-Bot server on port {port}")
-    logging.info("Rotas ativas de Webhook:")
-    logging.info(f" - Comercial: http://localhost:{port}/cliente1/webhook")
-    logging.info(f" - Suporte:   http://localhost:{port}/cliente2/webhook")
+    logging.info("Rotas ativas de Webhook conectadas na Evolution:")
+    logging.info(f" - Comercial: http://SEU_DOMINIO_OU_IP:{port}/cliente1/webhook")
+    logging.info(f" - Suporte:   http://SEU_DOMINIO_OU_IP:{port}/cliente2/webhook")
     
     uvicorn.run(main_app, host="0.0.0.0", port=port)
