@@ -60,6 +60,7 @@ class AgentleMessageToOpenaiMessageAdapter(
 
         match message:
             case AssistantMessage():
+                from openai._types import NOT_GIVEN
                 _message = message.without_tool_calls()
                 return ChatCompletionAssistantMessageParam(
                     role="assistant",
@@ -72,7 +73,7 @@ class AgentleMessageToOpenaiMessageAdapter(
                     tool_calls=[
                         tool_execution_sugestion_to_openai_tool_param_adapter.adapt(t)
                         for t in message.tool_calls
-                    ],
+                    ] if message.tool_calls else NOT_GIVEN,
                 )
             case DeveloperMessage():
                 return ChatCompletionDeveloperMessageParam(
