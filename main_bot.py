@@ -63,8 +63,10 @@ def criar_bot(nome_agente: str, instancia_evolution: str, instructions: str, evo
     whatsapp_bot = WhatsAppBot(agent=agent, provider=provider, config=bot_config)
     whatsapp_bot.start()
 
+    from blacksheep.server.routing import Router
+    
     # O webhook padrão desse mini-app será "/webhook"
-    return whatsapp_bot.to_blacksheep_app(webhook_path="/webhook", show_error_details=True)
+    return whatsapp_bot.to_blacksheep_app(router=Router(), webhook_path="/webhook", show_error_details=True)
 
 # ---------------------------------------------------------
 # APLICAÇÃO PRINCIPAL (ROTEADOR DE BOTS)
