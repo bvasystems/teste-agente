@@ -145,14 +145,34 @@ class OpenaiGenerationProvider(GenerationProvider):
         input_message_adapter = AgentleMessageToOpenaiMessageAdapter()
         openai_tool_adapter = AgentleToolToOpenaiToolAdapter()
 
+        openai_messages = []
+        for message in messages:
+            if isinstance(message, UserMessage):
+                from agentle.generations.tools.tool_execution_result import ToolExecutionResult
+                tool_results = [p for p in message.parts if isinstance(p, ToolExecutionResult)]
+                other_parts = [p for p in message.parts if not isinstance(p, ToolExecutionResult)]
+                
+                for res in tool_results:
+                    # Provide the required format for a tool_call response
+                    openai_messages.append({
+                        "role": "tool",
+                        "tool_call_id": getattr(res.suggestion, "id", "unknown"),
+                        "content": str(res.result)
+                    })
+                
+                if other_parts:
+                    # Reconstruct temporary UserMessage retaining only real user parts
+                    temp_msg = UserMessage(parts=other_parts)
+                    openai_messages.append(input_message_adapter.adapt(temp_msg))
+            else:
+                openai_messages.append(input_message_adapter.adapt(message))
+
         try:
             async with asyncio.timeout(_generation_config.timeout_in_seconds):
                 chat_completion: ChatCompletion | ParsedChatCompletion[T] = (
                     await self._client.chat.completions.create(
                         model=self._resolve_model(model),
-                        messages=[
-                            input_message_adapter.adapt(message) for message in messages
-                        ],
+                        messages=openai_messages,
                         tools=[openai_tool_adapter.adapt(tool) for tool in tools]
                         if tools
                         else OPENAI_NOT_GIVEN,
@@ -160,9 +180,7 @@ class OpenaiGenerationProvider(GenerationProvider):
                     if not bool(response_schema)
                     else await self._client.chat.completions.parse(
                         model=self._resolve_model(model),
-                        messages=[
-                            input_message_adapter.adapt(message) for message in messages
-                        ],
+                        messages=openai_messages,
                         tools=[openai_tool_adapter.adapt(tool) for tool in tools]
                         if tools
                         else OPENAI_NOT_GIVEN,
