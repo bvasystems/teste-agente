@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  agentle-sofia:
+    image: agentle-sofia:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - EVOLUTION_API_URL=${EVOLUTION_API_URL:-https://evolution.axobot.pro}
+      - EVOLUTION_API_KEY=${EVOLUTION_API_KEY:-6242b406242c15bbb180}
+      - EVOLUTION_INSTANCE_NAME=${EVOLUTION_INSTANCE_NAME:-BvaComercial}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      # Volume para persistir as conversas caso o container reinicie
+      - agentle_data:/app/conversations_data
+
+volumes:
+  agentle_data:
