@@ -29,7 +29,7 @@ def criar_bot(nome_agente: str, instancia_evolution: str, instructions: str, evo
     """Função utilitária para criar um bot e devolver a aplicação dele isolada."""
     evolution_url = os.getenv("EVOLUTION_API_URL", "https://evolution.axobot.pro")
 
-    from agentle.generations.providers.openai.openai_generation_provider import OpenAIGenerationProvider
+    from agentle.generations.providers.openai.openai import OpenaiGenerationProvider
     
     agent = Agent(
         name=nome_agente,
@@ -37,7 +37,7 @@ def criar_bot(nome_agente: str, instancia_evolution: str, instructions: str, evo
         tools=[calendarioVacinas], # Se as ferramentas forem diferentes, basta mudar aqui
         # Cada agente manterá suas próprias conversas na estrutura local
         conversation_store=JSONFileConversationStore(),
-        generation_provider=OpenAIGenerationProvider(),
+        generation_provider=OpenaiGenerationProvider(),
     )
 
     session_manager = SessionManager[WhatsAppSession](
