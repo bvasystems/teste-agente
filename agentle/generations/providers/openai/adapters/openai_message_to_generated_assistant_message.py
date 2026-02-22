@@ -67,7 +67,13 @@ class OpenAIMessageToGeneratedAssistantMessageAdapter[T](
             for tool_call in tool_calls
         ]
 
+        parts = []
+        if openai_message.content is not None:
+            parts.append(TextPart(text=openai_message.content))
+        
+        parts.extend(tool_parts)
+
         return GeneratedAssistantMessage[T](
-            parts=[TextPart(text=openai_message.content)] + tool_parts,
-            parsed=cast(T, None),
+            parts=parts,
+            parsed= cast(T, None),
         )
