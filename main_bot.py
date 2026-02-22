@@ -66,7 +66,6 @@ def criar_e_registrar_bot(
     )
 
     bot_config = WhatsAppBotConfig.production(
-        welcome_message=f"Olá! Sou a IA da equipe {nome_agente}. Em que posso ajudar?", 
         quote_messages=False,
     )
 
