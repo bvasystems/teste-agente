@@ -87,7 +87,7 @@ class OpenaiGenerationProvider(GenerationProvider):
     @property
     @override
     def default_model(self) -> str:
-        return "gpt-4o"
+        return "gpt-4o-mini"
 
     @override
     async def stream_async[T = WithoutStructuredOutput](
