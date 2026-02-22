@@ -51,12 +51,13 @@ class OpenAIMessageToGeneratedAssistantMessageAdapter[T](
             )
 
         openai_message = _f
-        if openai_message.content is None:
-            raise ValueError("Contents of OpenAI message are none. Coudn't proceed.")
-
+        
         tool_calls: MutableSequence[ChatCompletionMessageToolCall] = (
             openai_message.tool_calls or []
         )
+        
+        if openai_message.content is None and not tool_calls:
+            raise ValueError("Contents and tool calls of OpenAI message are both None. Couldn't proceed.")
 
         tool_parts = [
             ToolExecutionSuggestion(
