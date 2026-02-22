@@ -61,6 +61,7 @@ class OpenAIMessageToGeneratedAssistantMessageAdapter[T](
 
         tool_parts = [
             ToolExecutionSuggestion(
+                id=tool_call.id,
                 tool_name=tool_call.function.name,
                 args=json.loads(tool_call.function.arguments or "{}"),
             )
